@@ -212,20 +212,22 @@
   mats <- .fect_build_matrices(df_use, args$outcome, args$group,
                                  args$time, args$treatment)
   t0 <- Sys.time()
-  use_cuda <- identical(args$backend, "cuda") &&
-              isTRUE(tryCatch(didgpu_has_cuda_support(),
-                               error = function(e) FALSE)) &&
-              .fect_cuda_svd_worthwhile(nrow(mats$Y), ncol(mats$Y))
-  # The fect_ife alternation uses cuSOLVER for the truncated-SVD
-  # step when use_cuda_svd = TRUE; the fe step still runs on the host
-  # in R (Phase 2 task #86 fuses both halves into one device-side
-  # alternation kernel). If the per-iter CUDA SVD ever fails,
-  # .fect_ife_fit silently switches back to svd() for the rest of the
-  # fit, so this path is safe even on a flaky GPU.
+  # fect_ife ALWAYS uses the R svd() for its rank-r truncated SVD step.
+  # Benchmarking (BENCHMARKS.md) showed the CUDA truncated-SVD path
+  # loses to R at EVERY size tested, including large panels above the
+  # mc size gate (2000x100: 0.09x; 8000x50: 0.26x). The reason: ife
+  # needs only the top r singular triplets, and R's svd(nu=r, nv=r)
+  # computes a cheap thin SVD, whereas the cuSOLVER kernel runs a full
+  # gesvdj then truncates -- wasteful, and dominated by per-iteration
+  # handle creation + H2D/D2H. Unlike mc (full SVD, GPU wins big at
+  # scale), ife has no GPU-favourable regime, so the CUDA path is left
+  # unwired here. The kernel + .fect_svd_truncated_cuda helper remain
+  # for direct use / testing, just not in the production ife loop.
+  use_cuda_svd <- FALSE
   fit <- .fect_ife_fit(mats$Y, mats$M, r = args$r %||% 2L,
                        tol = args$tol %||% 1e-5,
                        max_iter = args$max_iter %||% 500L,
-                       use_cuda_svd = use_cuda)
+                       use_cuda_svd = use_cuda_svd)
   res <- .fect_ife_compute_att(mats$Y, mats$M, fit, effects = args$effects)
   wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
@@ -248,7 +250,9 @@
     n_eff_placebos = integer(0),
     iter_seed      = as.integer(iter_seed),
     wall_seconds   = wall,
-    backend        = if (use_cuda) "cuda" else "r",
+    # ife always runs the SVD step on the host (see .fect_ife_one_iter
+    # comment): the CUDA truncated-SVD path loses at every size.
+    backend        = if (use_cuda_svd) "cuda" else "r",
     fect_method    = "ife",
     fect_iter      = fit$iter,
     fect_delta     = fit$delta,
