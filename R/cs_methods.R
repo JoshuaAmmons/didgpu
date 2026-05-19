@@ -265,35 +265,37 @@
   X_concat <- numeric(n_total * p)
   Y_concat <- numeric(n_total)
   W_concat <- numeric(n_total)
+  unit_id_per_row <- integer(n_total)
+  unit_to_idx <- stats::setNames(seq_along(all_units) - 1L,
+                                  as.character(all_units))
   for (c_idx in seq_len(n_cells)) {
     ce <- cells[[c_idx]]
     rows <- (offsets[c_idx] + 1L):offsets[c_idx + 1L]
     Y_concat[rows] <- ce$delta
     W_concat[rows] <- as.numeric(ce$D_mask)
-    # Row-major X: rows of cell c are [start*p : (start + n_c)*p).
+    unit_id_per_row[rows] <- unit_to_idx[as.character(ce$units)]
     base <- offsets[c_idx] * p
     if (any(has_X)) {
       Xm <- cbind(1.0, ce$X)         # intercept first
-      # R matrix is column-major; we need row-major into X_concat.
       for (r in seq_len(nrow(Xm))) {
         X_concat[(base + (r - 1L) * p + 1L):(base + r * p)] <- Xm[r, ]
       }
     } else {
-      # Just an intercept column: X_concat[base+1 .. base+n_c] = 1.
       X_concat[(base + 1L):(base + n_per_cell[c_idx])] <- 1.0
     }
   }
 
   result <- tryCatch(
     didgpu_cuda_cs_inner_batched_r(
-      X_concat       = X_concat,
-      X_offsets      = offsets,
-      Y_concat       = Y_concat,
-      W_concat       = W_concat,
-      p              = as.integer(p),
-      n_units        = length(all_units),
-      est_method     = method_int,
-      want_influence = TRUE),
+      X_concat        = X_concat,
+      X_offsets       = offsets,
+      Y_concat        = Y_concat,
+      W_concat        = W_concat,
+      unit_id_per_row = unit_id_per_row,
+      p               = as.integer(p),
+      n_units         = length(all_units),
+      est_method      = method_int,
+      want_influence  = TRUE),
     error = function(e) NULL)
 
   if (is.null(result)) return(NULL)

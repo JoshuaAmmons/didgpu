@@ -33,6 +33,13 @@ extern "C" int didgpu_cuda_cs_inner_batched(
     int n_cells, int p, int n_units,
     int est_method,
     double* out_att, double* out_influence);
+extern "C" int didgpu_cuda_cs_inner_or(
+    const double* X_concat, const int* X_offsets,
+    const double* Y_concat,
+    const double* W_concat,
+    int n_cells, int p,
+    double* out_att,
+    double* out_IF_per_row);
 extern "C" int didgpu_cuda_fect_svd_truncated(
     const double* d_M_rm,
     int m, int n, int r,
@@ -690,6 +697,7 @@ SEXP didgpu_cuda_cs_inner_batched_r(
     Rcpp::IntegerVector X_offsets,
     Rcpp::NumericVector Y_concat,
     Rcpp::NumericVector W_concat,
+    Rcpp::IntegerVector unit_id_per_row,
     int p, int n_units, int est_method,
     bool want_influence) {
 #ifdef HAS_CUDA
@@ -707,38 +715,47 @@ SEXP didgpu_cuda_cs_inner_batched_r(
   if (X_concat.size() != n_total * p)
     Rcpp::stop("X_concat length (%d) does not match n_total * p (%d * %d = %d)",
                (int)X_concat.size(), n_total, p, n_total * p);
+  if (unit_id_per_row.size() != n_total)
+    Rcpp::stop("unit_id_per_row length (%d) does not match n_total (%d)",
+               (int)unit_id_per_row.size(), n_total);
+
+  // Phase 2 #84: only OR is implemented in the kernel. IPW / DR fall
+  // back via the -3 return.
+  if (est_method != 0) return R_NilValue;
 
   std::vector<double> att(n_cells, NA_REAL);
-  std::vector<double> influence;
-  double* infl_ptr = nullptr;
+  std::vector<double> IF_per_row;
+  double* IF_ptr = nullptr;
   if (want_influence) {
-    influence.resize(static_cast<size_t>(n_units) * n_cells, 0.0);
-    infl_ptr = influence.data();
+    IF_per_row.assign(n_total, 0.0);
+    IF_ptr = IF_per_row.data();
   }
 
-  int rc = didgpu_cuda_cs_inner_batched(
+  int rc = didgpu_cuda_cs_inner_or(
       &X_concat[0], &X_offsets[0],
-      &Y_concat[0], &X_offsets[0],   // canonical layout: same offsets
-      &W_concat[0], &X_offsets[0],
-      n_cells, p, n_units,
-      est_method,
-      att.data(), infl_ptr);
+      &Y_concat[0],
+      &W_concat[0],
+      n_cells, p,
+      att.data(), IF_ptr);
 
-  if (rc != 0) {
-    // Caller falls back to the R per-cell loop.
-    return R_NilValue;
-  }
+  if (rc != 0) return R_NilValue;
 
   Rcpp::NumericVector att_out(att.begin(), att.end());
   Rcpp::List result;
   result["att"]    = att_out;
   result["status"] = 0;
   if (want_influence) {
+    // Scatter per-row IF into the (n_units x n_cells) layout. For
+    // each cell c with rows [X_offsets[c], X_offsets[c+1]), each row
+    // r maps to unit unit_id_per_row[r] (0-based). IF[unit, cell]
+    // is set to IF_per_row[r] for that row's unit.
     Rcpp::NumericMatrix IF(n_units, n_cells);
-    // row-major (unit-major) → R column-major matrix: copy element-wise.
-    for (int u = 0; u < n_units; ++u) {
-      for (int c = 0; c < n_cells; ++c) {
-        IF(u, c) = influence[static_cast<size_t>(u) * n_cells + c];
+    for (int c = 0; c < n_cells; ++c) {
+      const int row_start = X_offsets[c];
+      const int row_end   = X_offsets[c + 1];
+      for (int r = row_start; r < row_end; ++r) {
+        const int u = unit_id_per_row[r];
+        if (u >= 0 && u < n_units) IF(u, c) = IF_per_row[r];
       }
     }
     result["influence"] = IF;
@@ -748,8 +765,8 @@ SEXP didgpu_cuda_cs_inner_batched_r(
   return result;
 #else
   (void)X_concat; (void)X_offsets; (void)Y_concat; (void)W_concat;
+  (void)unit_id_per_row;
   (void)p; (void)n_units; (void)est_method; (void)want_influence;
-  // No CUDA at build time: caller falls back to R per-cell loop.
   return R_NilValue;
 #endif
 }
