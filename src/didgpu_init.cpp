@@ -49,6 +49,11 @@ extern "C" int didgpu_cuda_testmechs_bootstrap(
     int n, int K, int dy, int B,
     unsigned long seed,
     double* h_beta);
+extern "C" int didgpu_cuda_cluster_bootstrap(
+    const double* h_IF, int n_units, int n_dims,
+    const int* h_cluster_id, int n_clusters,
+    int B, unsigned long long seed,
+    double* h_out_estimates);
 #endif
 
 // [[Rcpp::export]]
@@ -290,6 +295,82 @@ Rcpp::NumericVector didgpu_run_saxpy(double a, Rcpp::NumericVector x, Rcpp::Nume
 #else
   (void)a; (void)x; (void)y;
   Rcpp::stop("didgpu was built without CUDA support. Reinstall after installing the NVIDIA CUDA Toolkit so nvcc is on PATH.");
+#endif
+}
+
+
+// Cluster bootstrap on per-unit influence functions.
+//
+// Computes, on the GPU, B bootstrap replicates of the influence-
+// function-weighted point estimate
+//
+//   out[b, d] = sum_i  w_{i, b} * IF[i, d]
+//
+// where w_{i, b} is the count of times unit i's cluster was sampled
+// in replicate b's draw of n_clusters clusters with replacement.
+//
+// This is the "delta-method shortcut" — orders of magnitude faster
+// than re-running the full estimator per replicate, with the same
+// asymptotic distribution (Hansen 2022, Ch.10).
+//
+// Inputs:
+//   IF         : R numeric matrix (n_units, n_dims), row-major from
+//                R's POV (R matrices are column-major, but we convert
+//                row-major on the way in to match the kernel ABI).
+//   cluster_id : R integer vector (n_units), 0-based cluster IDs in
+//                [0, n_clusters).
+//   n_clusters : number of distinct clusters (must equal
+//                max(cluster_id) + 1; caller enforces).
+//   B          : number of bootstrap replicates.
+//   seed       : RNG seed for cuRAND. Like .testmechs_bootstrap_cuda,
+//                the cuRAND stream differs from R's MT19937 so per-
+//                replicate output differs from a R-side cluster
+//                bootstrap, but the columnwise SDs converge to the
+//                same population SE.
+//
+// Returns NULL on any CUDA error. On success returns a B x n_dims
+// numeric matrix of bootstrap estimates.
+//
+// [[Rcpp::export]]
+SEXP didgpu_cuda_cluster_bootstrap_r(Rcpp::NumericMatrix IF,
+                                      Rcpp::IntegerVector cluster_id,
+                                      int n_clusters,
+                                      int B,
+                                      int seed) {
+#ifdef HAS_CUDA
+  const int n_units = IF.nrow();
+  const int n_dims  = IF.ncol();
+  if (cluster_id.size() != n_units)
+    Rcpp::stop("cluster_id length (%d) must equal nrow(IF) (%d)",
+               (int)cluster_id.size(), n_units);
+  if (n_clusters <= 0)
+    Rcpp::stop("n_clusters must be positive; got %d", n_clusters);
+  if (B <= 0) Rcpp::stop("B must be positive; got %d", B);
+
+  // Convert R column-major IF to row-major host buffer.
+  std::vector<double> IF_rm(static_cast<size_t>(n_units) * n_dims);
+  for (int i = 0; i < n_units; ++i)
+    for (int j = 0; j < n_dims; ++j)
+      IF_rm[static_cast<size_t>(i) * n_dims + j] = IF(i, j);
+
+  std::vector<double> out(static_cast<size_t>(B) * n_dims);
+
+  int rc = didgpu_cuda_cluster_bootstrap(
+      IF_rm.data(), n_units, n_dims,
+      &cluster_id[0], n_clusters,
+      B, static_cast<unsigned long long>(seed),
+      out.data());
+  if (rc != 0) return R_NilValue;
+
+  // Pack row-major host buffer back to a column-major R matrix.
+  Rcpp::NumericMatrix out_mat(B, n_dims);
+  for (int b = 0; b < B; ++b)
+    for (int d = 0; d < n_dims; ++d)
+      out_mat(b, d) = out[static_cast<size_t>(b) * n_dims + d];
+  return out_mat;
+#else
+  (void)IF; (void)cluster_id; (void)n_clusters; (void)B; (void)seed;
+  return R_NilValue;
 #endif
 }
 

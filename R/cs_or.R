@@ -244,6 +244,71 @@
 # once; each replicate is a single re-weighted sum.
 #' @keywords internal
 #' @noRd
+# GPU cluster-bootstrap fast path for the CS estimator. Returns
+# `att_gt` with `se` / `ci_low` / `ci_high` populated, OR NULL on any
+# failure (caller falls back to .cs_bootstrap_se).
+#
+# Uses the IF-shortcut: builds an (n_units, n_cells) influence matrix
+# from attr(att_gt, "IF_per_cell"), then calls the CUDA kernel to
+# compute B replicates of weight @ IF where weight[b, u] is the count
+# of times unit u was picked in replicate b's cluster draw.
+#
+# This is asymptotically equivalent to the per-rep refit cluster
+# bootstrap (.cs_bootstrap_se) by the standard delta-method argument
+# (Hansen 2022, Ch.10). Finite-sample SEs differ by O(1/sqrt(B)).
+#' @keywords internal
+#' @noRd
+.cs_cluster_bootstrap_cuda <- function(att_gt, args) {
+  B <- args$bootstrap_reps
+  if (B <= 0L) return(att_gt)
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) return(NULL)
+  IF_list <- attr(att_gt, "IF_per_cell")
+  units   <- attr(att_gt, "units")
+  if (is.null(IF_list) || is.null(units)) return(NULL)
+  n_unit  <- length(units)
+  n_cells <- nrow(att_gt)
+  if (length(IF_list) != n_cells) return(NULL)
+
+  # Build (n_units, n_cells) IF matrix: row u is "unit u's per-cell
+  # influence", with 0 for cells where unit u doesn't appear.
+  IF_mat <- matrix(0.0, nrow = n_unit, ncol = n_cells)
+  unit_to_row <- stats::setNames(seq_along(units), as.character(units))
+  for (c_idx in seq_along(IF_list)) {
+    cell <- IF_list[[c_idx]]
+    if (is.null(cell$IF) || length(cell$IF) == 0L) next
+    rows <- unit_to_row[as.character(cell$units)]
+    # The per-cell IF stored by .cs_inner_dispatch is divided by cell
+    # size for the multiplier bootstrap form; cluster bootstrap also
+    # needs that same scaling so the unit-weighted sum equals the cell
+    # ATT contribution.
+    IF_mat[rows, c_idx] <- cell$IF / length(cell$IF)
+  }
+
+  # For CS the "cluster" is the unit itself.
+  cluster_id <- as.integer(seq_along(units) - 1L)
+  result <- tryCatch(
+    didgpu_cuda_cluster_bootstrap_r(
+      IF         = IF_mat,
+      cluster_id = cluster_id,
+      n_clusters = n_unit,
+      B          = as.integer(B),
+      seed       = as.integer(args$seed %||% 1L)),
+    error = function(e) NULL)
+  if (is.null(result)) return(NULL)
+
+  # boot_mat[b, c] is the b-th replicate's bootstrap deviation for
+  # cell c (the IF-weighted sum, centered around the original att). SE
+  # is the cross-replicate SD per column.
+  ses <- apply(result, 2L, function(col) stats::sd(col, na.rm = TRUE))
+  att_gt$se <- as.numeric(ses)
+  z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
+  att_gt$ci_low  <- att_gt$att - z * att_gt$se
+  att_gt$ci_high <- att_gt$att + z * att_gt$se
+  att_gt
+}
+
+
 .cs_multiplier_bootstrap_se <- function(att_gt, args, verbose = TRUE) {
   B <- args$bootstrap_reps
   if (B <= 0L) return(att_gt)

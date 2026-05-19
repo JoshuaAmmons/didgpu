@@ -104,6 +104,21 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// didgpu_cuda_cluster_bootstrap_r
+SEXP didgpu_cuda_cluster_bootstrap_r(Rcpp::NumericMatrix IF, Rcpp::IntegerVector cluster_id, int n_clusters, int B, int seed);
+RcppExport SEXP _didgpu_didgpu_cuda_cluster_bootstrap_r(SEXP IFSEXP, SEXP cluster_idSEXP, SEXP n_clustersSEXP, SEXP BSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type IF(IFSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cluster_id(cluster_idSEXP);
+    Rcpp::traits::input_parameter< int >::type n_clusters(n_clustersSEXP);
+    Rcpp::traits::input_parameter< int >::type B(BSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(didgpu_cuda_cluster_bootstrap_r(IF, cluster_id, n_clusters, B, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 // didgpu_cuda_testmechs_bootstrap_r
 SEXP didgpu_cuda_testmechs_bootstrap_r(Rcpp::IntegerVector d, Rcpp::IntegerVector m, Rcpp::IntegerVector y, int B, int K, int dy, int seed);
 RcppExport SEXP _didgpu_didgpu_cuda_testmechs_bootstrap_r(SEXP dSEXP, SEXP mSEXP, SEXP ySEXP, SEXP BSEXP, SEXP KSEXP, SEXP dySEXP, SEXP seedSEXP) {
@@ -171,6 +186,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_didgpu_didgpu_cuda_did", (DL_FUNC) &_didgpu_didgpu_cuda_did, 13},
     {"_didgpu_didgpu_cuda_fect_fe_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_fe_r, 4},
     {"_didgpu_didgpu_run_saxpy", (DL_FUNC) &_didgpu_didgpu_run_saxpy, 3},
+    {"_didgpu_didgpu_cuda_cluster_bootstrap_r", (DL_FUNC) &_didgpu_didgpu_cuda_cluster_bootstrap_r, 5},
     {"_didgpu_didgpu_cuda_testmechs_bootstrap_r", (DL_FUNC) &_didgpu_didgpu_cuda_testmechs_bootstrap_r, 7},
     {"_didgpu_didgpu_cuda_fect_svd_truncated_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_svd_truncated_r, 2},
     {"_didgpu_didgpu_cuda_fect_svd_softthreshold_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_svd_softthreshold_r, 2},
