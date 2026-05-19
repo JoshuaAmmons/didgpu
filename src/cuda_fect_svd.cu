@@ -109,58 +109,73 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
 
   if (r <= 0 || r > std::min(m, n)) return -1;
 
+  // ----------------------------------------------------------------
+  // ALL local variables declared up front. Required because we use
+  // `goto fail` for error handling, and C++ forbids jumping past a
+  // variable that has a non-trivial initializer into a scope where
+  // it's expected to be initialized. Hoisting every declaration here
+  // (with explicit nullptr init) makes every goto target safe and
+  // also lets `fail:` free every potentially-allocated pointer.
+  // ----------------------------------------------------------------
   cudaError_t e;
   cusolverStatus_t st;
   cusolverDnHandle_t h = nullptr;
+  gesvdjInfo_t params = nullptr;
+  double* d_M_cm   = nullptr;
+  double* d_U      = nullptr;
+  double* d_V      = nullptr;
+  double* d_S      = nullptr;
+  double* d_work   = nullptr;
+  int*    d_info   = nullptr;
+  double* d_sqrt_S = nullptr;
+  double* d_L_cm   = nullptr;
+  double* d_F_temp = nullptr;
+  int lwork = 0;
+  int total = 0;
+
   st = cusolverDnCreate(&h);
   if (st != CUSOLVER_STATUS_SUCCESS) return -2;
 
   // cuSOLVER wants column-major; transpose input.
-  double* d_M_cm = nullptr;
   e = cudaMalloc((void**)&d_M_cm, sizeof(double) * m * n);
   if (e != cudaSuccess) { cusolverDnDestroy(h); return -3; }
-  const int total = m * n;
+  total = m * n;
   k_transpose_rm_to_cm<<<(total + 255) / 256, 256>>>(d_M_rm, d_M_cm, m, n);
   cudaDeviceSynchronize();
 
   // Allocate SVD outputs.
-  double *d_U = nullptr, *d_V = nullptr, *d_S = nullptr;
   e = cudaMalloc((void**)&d_U, sizeof(double) * m * m);
-  if (e != cudaSuccess) { cudaFree(d_M_cm); cusolverDnDestroy(h); return -4; }
+  if (e != cudaSuccess) goto fail;
   e = cudaMalloc((void**)&d_V, sizeof(double) * n * n);
-  if (e != cudaSuccess) { cudaFree(d_U); cudaFree(d_M_cm); cusolverDnDestroy(h); return -5; }
+  if (e != cudaSuccess) goto fail;
   e = cudaMalloc((void**)&d_S, sizeof(double) * std::min(m, n));
-  if (e != cudaSuccess) { cudaFree(d_V); cudaFree(d_U); cudaFree(d_M_cm); cusolverDnDestroy(h); return -6; }
+  if (e != cudaSuccess) goto fail;
 
   // Jacobi SVD parameters + workspace query.
-  gesvdjInfo_t params = nullptr;
   cusolverDnCreateGesvdjInfo(&params);
   cusolverDnXgesvdjSetTolerance(params, 1e-7);
   cusolverDnXgesvdjSetMaxSweeps(params, 100);
 
-  int lwork = 0;
   st = cusolverDnDgesvdj_bufferSize(
       h, CUSOLVER_EIG_MODE_VECTOR, /*econ=*/1,
       m, n, d_M_cm, m, d_S, d_U, m, d_V, n,
       &lwork, params);
   if (st != CUSOLVER_STATUS_SUCCESS) goto fail;
 
-  double* d_work = nullptr;
   e = cudaMalloc((void**)&d_work, sizeof(double) * lwork);
   if (e != cudaSuccess) goto fail;
-  int* d_info = nullptr;
   e = cudaMalloc((void**)&d_info, sizeof(int));
-  if (e != cudaSuccess) { cudaFree(d_work); goto fail; }
+  if (e != cudaSuccess) goto fail;
 
   st = cusolverDnDgesvdj(
       h, CUSOLVER_EIG_MODE_VECTOR, /*econ=*/1,
       m, n, d_M_cm, m, d_S, d_U, m, d_V, n,
       d_work, lwork, d_info, params);
-  cudaFree(d_work); cudaFree(d_info);
+  cudaFree(d_work); d_work = nullptr;
+  cudaFree(d_info); d_info = nullptr;
   if (st != CUSOLVER_STATUS_SUCCESS) goto fail;
 
   // Compute sqrt(D_r) on device via a small kernel (no host roundtrip).
-  double* d_sqrt_S = nullptr;
   cudaMalloc((void**)&d_sqrt_S, sizeof(double) * r);
   k_sqrt_first_r<<<(r + 31) / 32, 32>>>(d_S, d_sqrt_S, r);
   cudaDeviceSynchronize();
@@ -168,7 +183,6 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
   // L = U[:, 1..r] * diag(sqrt(D_r)). U is m x m column-major; we want
   // the first r columns scaled by sqrt(D_r). Use a column-wise scaling
   // kernel, then transpose to row-major into d_L_out_rm.
-  double* d_L_cm = nullptr;
   cudaMalloc((void**)&d_L_cm, sizeof(double) * m * r);
   k_scale_cols<<<(m * r + 255) / 256, 256>>>(d_U, d_sqrt_S, d_L_cm, m, r);
   cudaDeviceSynchronize();
@@ -179,7 +193,6 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
   // V[:, 1..r] (n x r) then transpose to (r x n), then scale ROWS by sqrt(D_r).
   // Equivalent: take V[:, 1..r] (n x r col-major), transpose to (r x n) row-
   // major, then scale rows.
-  double* d_F_temp = nullptr;
   cudaMalloc((void**)&d_F_temp, sizeof(double) * r * n);
   // V_cm[:, 1..r] is the leading n x r col-major; transposing gives r x n row-major.
   k_transpose_cm_to_rm<<<(n * r + 255) / 256, 256>>>(d_V, d_F_temp, n, r);
@@ -196,11 +209,16 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
   return 0;
 
 fail:
-  if (d_U) cudaFree(d_U);
-  if (d_V) cudaFree(d_V);
-  if (d_S) cudaFree(d_S);
-  if (d_M_cm) cudaFree(d_M_cm);
-  cusolverDnDestroyGesvdjInfo(params);
+  if (d_F_temp) cudaFree(d_F_temp);
+  if (d_L_cm)   cudaFree(d_L_cm);
+  if (d_sqrt_S) cudaFree(d_sqrt_S);
+  if (d_work)   cudaFree(d_work);
+  if (d_info)   cudaFree(d_info);
+  if (d_U)      cudaFree(d_U);
+  if (d_V)      cudaFree(d_V);
+  if (d_S)      cudaFree(d_S);
+  if (d_M_cm)   cudaFree(d_M_cm);
+  if (params)   cusolverDnDestroyGesvdjInfo(params);
   cusolverDnDestroy(h);
   return -10;
 }
@@ -231,7 +249,9 @@ extern "C" int didgpu_cuda_fect_svd_softthreshold(
     double lambda,
     double* d_Y_hat_rm,
     int* out_n_nonzero) {
-  cudaError_t e;
+  // TODO(phase4): wire cudaError_t checks on every cudaMalloc/cudaMemcpy
+  // call below. Currently this function silently ignores allocation
+  // failures — fine for the scaffold, not OK for production.
   cusolverStatus_t st;
   cublasHandle_t hb = nullptr;
   cusolverDnHandle_t hs = nullptr;

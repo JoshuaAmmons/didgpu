@@ -56,7 +56,14 @@ ifeq ($(HAVE_NVCC),yes)
   #   8.6 = Ampere desktop (RTX 30xx)
   #   8.9 = Ada Lovelace (RTX 4000 Ada, RTX 40xx — this dev box)
   #   9.0 = Hopper (H100)
+  # IMPORTANT: pass -DHAS_CUDA=1 to nvcc as well as to g++. Several .cu
+  # files (cuda_fect_fe, cuda_cs_inner, cuda_fect_svd,
+  # cuda_testmechs_bootstrap) wrap their entire body in #ifdef HAS_CUDA
+  # so they fall back to an empty TU on CPU-only builds. Without this
+  # flag, nvcc would happily compile them to ~7KB empty objects and the
+  # final .so would fail to load with "undefined symbol: didgpu_cuda_*".
   NVCC_FLAGS := -O2 -std=c++17 \
+                -DHAS_CUDA=1 \
                 -I../inst/include \
                 -Xcompiler "-O2 -fPIC" \
                 -gencode=arch=compute_75,code=sm_75 \
