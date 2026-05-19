@@ -7,10 +7,14 @@ what was deliberately skipped, and what should happen next.
 
 | Commit  | What |
 |---------|------|
-| `88fd2c2` | **fect CUDA size gate** — perf fix. Benchmark showed the per-iter cuSOLVER SVD was 100–300× *slower* than R for fect's small matrices; gated so `backend="cuda"` falls back to R `svd()` below a size threshold. fect is now ~1× (was 0.01×). |
-| `9407e7c` | **Equivalence test grid (#90)** — 142 assertions pinning every deterministic GPU path == R path within documented tolerance. |
+| `88fd2c2` | **fect CUDA size gate** — perf fix. Per-iter cuSOLVER SVD was 100–300× *slower* than R for fect's small matrices; gated so `backend="cuda"` falls back to R `svd()` below a size threshold. fect is now ~1× (was 0.01×). |
+| `9407e7c` | **Equivalence test grid (#90)** — pins every deterministic GPU path == R path within documented tolerance. |
 | `4a97d60` | **README + NEWS GPU docs (#91)** — coverage matrix, benchmark headline, accurate status. |
-| _(this commit)_ | **testmechs benchmark (#89)** — 4–18× speedup; rounds out the benchmark suite. |
+| `8b414fd` | **testmechs benchmark (#89)** — 4–18× speedup; rounds out the benchmark suite. First STATUS draft. |
+| `d828785` | **IPW/DR backend="cuda" safety contract** — +10 assertions: IPW/DR fall back to R bit-identically; cluster bootstrap SE finite/positive for all methods. |
+| `264cee9` | **fect at-scale characterization + ife hard-wired to R.** Large-panel benchmark: ife loses even at 8000×50 (0.26×) → ife never uses CUDA; mc wins 3.6–7.9× → keeps the gate. |
+| `f48b8c5` | **Bootstrap edge-case tests** — single cluster (exact `colSums(IF)`), n_dims=1, B=1, N(0,1) variance scaling, single cohort. |
+| `e8b2ea4` | **mc-at-scale correctness verified** — GPU mc fit agrees with R to **2.2e-10** on a 2500×80 panel, 3.71× faster. |
 
 Earlier in the day (same session, already pushed): Phase 0b (first
 end-to-end CUDA), Phase 1 wiring (#79–81), Phase 2 cluster bootstrap
@@ -22,15 +26,18 @@ part 1), and the CS benchmark.
 - **CS cluster bootstrap: 179–228×** ← the marquee win. B=200 went from
   ~25–50 s (R) to ~0.1 s (CUDA), via the influence-function shortcut.
 - **TestMechs bootstrap: 4–18×** (grows with B; 18× at B=1000).
+- **fect_mc at scale: 3.6–7.9×** (≥2000 units; verified correct to 2.2e-10).
 - CS multiplier bootstrap: 1.2–1.7× (R already IF-based).
 - CS OR point estimate: ~1× (bit-exact; small matrices, copy-bound).
-- fect: ~1× (size-gated to R svd; GPU SVD loses on small matrices).
+- fect_ife / small fect: ~1× (uses R; GPU has no favourable regime).
 
 ## Test status
 
-442 package tests + 142 equivalence-grid assertions, **0 failures, 0
+**611 CI assertions + 17 edge-case assertions, 0 failures, 0
 warnings**, 82 skipped (all `DIDmultiplegtDYN` not installed in WSL).
-Verified before every commit.
+Verified before every commit. Plus two `tools/` verification scripts
+(mc-at-scale correctness; large-panel benchmark) that are too slow
+for CI.
 
 ## What I deliberately did NOT do, and why
 
