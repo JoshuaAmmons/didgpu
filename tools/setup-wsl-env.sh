@@ -147,7 +147,11 @@ else
   green "R already present: $(R --version | head -1)"
 fi
 
-# Headers required by common R packages (Rcpp, curl, openssl, xml2).
+# Headers required by common R packages.
+#   libcurl4-openssl-dev, libssl-dev, libxml2-dev: Rcpp ecosystem (curl, httr, xml2)
+#   libfontconfig1-dev, libharfbuzz-dev, libfribidi-dev, libfreetype-dev: ragg / textshaping
+#   libpng-dev, libtiff5-dev, libjpeg-dev: image rendering for plots
+#   libuv1-dev: fs (transitively pkgload, testthat) — required by testthat
 sudo apt-get install -y --no-install-recommends \
   libcurl4-openssl-dev \
   libssl-dev \
@@ -158,7 +162,8 @@ sudo apt-get install -y --no-install-recommends \
   libfreetype-dev \
   libpng-dev \
   libtiff5-dev \
-  libjpeg-dev
+  libjpeg-dev \
+  libuv1-dev
 
 green "R-dev support libraries installed."
 
