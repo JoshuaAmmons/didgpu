@@ -1,0 +1,10 @@
+^\.Rbuildignore$
+^\.git$
+^\.github$
+^.*\.Rproj$
+^\.Rproj\.user$
+^reference_source$
+^inst/scripts$
+^cran-comments\.md$
+^\.Rcheck$
+^.*\.tar\.gz$

@@ -1,0 +1,81 @@
+# Makevars for Linux / macOS.
+#
+# Single-DLL build: all CUDA code compiles directly into libdidgpu.so via
+# nvcc + g++. The boundary between "Rcpp side" and "CUDA side" is still
+# logically present (see inst/include/didgpu_cuda_api.h), but on these
+# platforms we don't need a separate shared object to bridge two toolchains
+# — g++ understands both extern "C" CUDA-runtime calls and Rcpp.
+#
+# On Windows, the equivalent build path is more involved (two DLLs to
+# bridge Rtools/MinGW with nvcc/MSVC) — see src/Makevars.win and
+# tools/build-win-binary.ps1.
+#
+# Pin default goal: this Makevars is included before R's shlib.mk so the
+# first explicit target in this file would otherwise be chosen as default.
+.DEFAULT_GOAL := all
+
+# --- detect nvcc ------------------------------------------------------------
+# Priority: explicit CUDA_HOME > $CUDA_PATH env > standard install paths.
+CUDA_HOME ?= $(CUDA_PATH)
+ifeq ($(strip $(CUDA_HOME)),)
+  CUDA_HOME := $(firstword \
+                  $(wildcard /usr/local/cuda) \
+                  $(wildcard /opt/cuda) \
+                  $(wildcard /usr/local/cuda-13.2) \
+                  $(wildcard /usr/local/cuda-12.6) \
+                  $(wildcard /usr/local/cuda-12.5) \
+                  $(wildcard /usr/local/cuda-12.4))
+endif
+NVCC := $(if $(strip $(CUDA_HOME)),$(CUDA_HOME)/bin/nvcc,)
+HAVE_NVCC := $(if $(NVCC),$(shell test -x $(NVCC) && echo yes),)
+
+$(info Makevars: CUDA_HOME=$(CUDA_HOME))
+$(info Makevars: NVCC=$(NVCC))
+$(info Makevars: HAVE_NVCC=$(HAVE_NVCC))
+
+# --- baseline flags (CPU-only fallback) -------------------------------------
+PKG_CXXFLAGS = -I$(R_HOME)/include -I../inst/include
+PKG_LIBS     =
+
+ifeq ($(HAVE_NVCC),yes)
+  PKG_CXXFLAGS += -DHAS_CUDA=1 -I$(CUDA_HOME)/include
+  # cuRAND is in a separate lib on Linux too; cudart/cublas/cusolver are
+  # the always-needed core trio.
+  PKG_LIBS += -L$(CUDA_HOME)/lib64 -lcudart -lcublas -lcusolver -lcurand
+
+  CUDA_SOURCES := $(wildcard *.cu)
+  CUDA_OBJECTS := $(CUDA_SOURCES:.cu=.o)
+
+  # -fPIC is mandatory: nvcc-compiled .o files go into a shared library, so
+  # they must be position-independent. The host compiler nvcc invokes is g++
+  # (passed via -Xcompiler).
+  #
+  # Compute capabilities to target:
+  #   7.5 = Turing (RTX 20xx, T4)
+  #   8.0 = Ampere data center (A100)
+  #   8.6 = Ampere desktop (RTX 30xx)
+  #   8.9 = Ada Lovelace (RTX 4000 Ada, RTX 40xx — this dev box)
+  #   9.0 = Hopper (H100)
+  NVCC_FLAGS := -O2 -std=c++17 \
+                -I../inst/include \
+                -Xcompiler "-O2 -fPIC" \
+                -gencode=arch=compute_75,code=sm_75 \
+                -gencode=arch=compute_80,code=sm_80 \
+                -gencode=arch=compute_86,code=sm_86 \
+                -gencode=arch=compute_89,code=sm_89 \
+                -gencode=arch=compute_90,code=sm_90
+
+  %.o: %.cu
+	@echo "  [nvcc] $<"
+	$(NVCC) $(NVCC_FLAGS) -c $< -o $@
+else
+  CUDA_OBJECTS :=
+endif
+
+OBJECTS = $(patsubst %.cpp,%.o,$(wildcard *.cpp)) $(CUDA_OBJECTS)
+$(info Makevars: OBJECTS=$(OBJECTS))
+
+all: $(SHLIB)
+
+clean:
+	@rm -f *.o $(SHLIB)

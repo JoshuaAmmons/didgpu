@@ -1,0 +1,46 @@
+Package: didgpu
+Title: GPU-Accelerated, Checkpointed Difference-in-Differences Estimator
+Version: 0.1.0
+Authors@R:
+    person(given = "Joshua",
+           family = "Ammons",
+           role = c("aut", "cre", "cph"),
+           email = "jdammons89@gmail.com")
+Description:
+    A clean-room reimplementation of the heterogeneity-robust dynamic
+    difference-in-differences estimator of de Chaisemartin and
+    D'Haultfoeuille (2024) <doi:10.48550/arXiv.2007.04267>, designed
+    for long-running econometric work: per-cell checkpointing to disk,
+    resumable runs after crash or out-of-memory, parallel cluster
+    bootstrap, configurable backends (pure R, optional Rcpp and CUDA),
+    and bit-for-bit numerical equivalence with the reference
+    'DIDmultiplegtDYN' package across binary, multivalued, and
+    continuous treatments.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.1)
+Imports:
+    data.table,
+    jsonlite,
+    MASS,
+    Rcpp,
+    stats,
+    utils,
+    tools
+Suggests:
+    broom,
+    did,
+    DIDmultiplegtDYN,
+    DRDID,
+    HonestDiD,
+    quadprog,
+    testthat (>= 3.0.0)
+LinkingTo:
+    Rcpp,
+    RcppEigen
+SystemRequirements: GNU make; optional NVIDIA CUDA Toolkit (>= 12.0) with cuBLAS and cuSOLVER for the GPU backend
+Config/testthat/edition: 3

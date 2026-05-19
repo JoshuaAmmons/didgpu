@@ -1,0 +1,210 @@
+# Makevars.win for didgpu
+#
+# IMPORTANT: this Makevars is included BEFORE R's winshlib.mk, so the
+# first rule defined here would otherwise become make's default target.
+# Pin the default goal to `all` to keep R's SHLIB build flow intact.
+.DEFAULT_GOAL := all
+
+# Two-tier build:
+#   1) C++ sources (src/*.cpp) compiled by Rtools g++. Includes the
+#      Rcpp exports (didgpu_init.cpp, RcppExports.cpp), any cpu_*.cpp
+#      kernels, and the dispatcher to CUDA wrappers.
+#   2) CUDA sources (src/*.cu) compiled by nvcc, IF nvcc is on PATH or
+#      $CUDA_PATH is set. Otherwise the .cu files are silently
+#      skipped and the package builds without GPU support
+#      (didgpu_has_cuda_support() returns FALSE at runtime).
+#
+# Because Rtools g++ and MSVC cl (which nvcc invokes) differ in name
+# mangling for C++, every host function in a .cu file that needs to be
+# called from a .cpp file must be declared `extern "C"`. See
+# src/cuda_saxpy.cu and src/didgpu_init.cpp for the pattern.
+#
+# Note on paths with spaces:
+#   The standard Windows CUDA install path is "C:\Program Files\
+#   NVIDIA GPU Computing Toolkit\CUDA\vXX.X", which contains literal
+#   spaces. GNU Make splits tokens on whitespace, so we convert to the
+#   8.3 short-path form ("C:/PROGRA~1/NVIDIA~2/CUDA/vXX.X") via
+#   `cygpath -m -d`. nvcc and cl.exe both accept this form.
+
+# --- detect nvcc ---
+# Priority:
+#   1. Explicit $(CUDA_HOME)
+#   2. $(CUDA_PATH) env var (typically set by CUDA installer)
+#   3. User-local shadow tree at ~/cuda_local (workaround for partial
+#      Program Files installs missing nvvm/ — see docs/cuda-on-windows.md)
+#   4. Standard Program Files install (newest version found)
+CUDA_HOME ?= $(CUDA_PATH)
+ifeq ($(strip $(CUDA_HOME)),)
+  # Prefer ~/cuda_local if present (user-local shadow tree). It has no
+  # spaces in its path so no 8.3 conversion is needed.
+  ifneq ($(wildcard $(HOME)/cuda_local/bin/nvcc.exe),)
+    CUDA_HOME := $(HOME)/cuda_local
+  else ifneq ($(wildcard /c/Users/$(USERNAME)/cuda_local/bin/nvcc.exe),)
+    CUDA_HOME := /c/Users/$(USERNAME)/cuda_local
+  else
+    # Probe the standard Program Files install location. Pick the newest
+    # version found, then convert to 8.3 short-path so no spaces.
+    CUDA_HOME := $(shell ls -d "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"* 2>/dev/null \
+                         | sort -V | tail -n 1 \
+                         | xargs -I{} cygpath -m -d "{}" 2>/dev/null)
+  endif
+else
+  # If CUDA_HOME came in with spaces, also convert.
+  CUDA_HOME := $(shell cygpath -m -d "$(CUDA_HOME)" 2>/dev/null)
+endif
+NVCC := $(if $(strip $(CUDA_HOME)),$(CUDA_HOME)/bin/nvcc.exe,)
+HAVE_NVCC := $(if $(strip $(NVCC)),$(shell test -e "$(NVCC)" && echo yes),)
+
+# --- detect MSVC (cl.exe) ---
+# nvcc on Windows requires cl.exe (MSVC) as the host compiler. It also
+# needs MSVC's INCLUDE/LIB paths set up, which is what vcvars64.bat does.
+# We invoke nvcc via cmd /C with vcvars64.bat called first.
+# Try BuildTools first, then Community/Professional/Enterprise.
+VCVARS := $(shell ls "/c/Program Files (x86)/Microsoft Visual Studio/"*"/BuildTools/VC/Auxiliary/Build/vcvars64.bat" 2>/dev/null \
+                  | head -n 1 \
+                  | xargs -I{} cygpath -w "{}" 2>/dev/null)
+ifeq ($(strip $(VCVARS)),)
+  VCVARS := $(shell ls "/c/Program Files/Microsoft Visual Studio/"*/*"/VC/Auxiliary/Build/vcvars64.bat" 2>/dev/null \
+                    | head -n 1 \
+                    | xargs -I{} cygpath -w "{}" 2>/dev/null)
+endif
+HAVE_VCVARS := $(if $(strip $(VCVARS)),$(shell test -e "$(VCVARS)" && echo yes),)
+
+# Final gate: only enable CUDA build if BOTH nvcc and vcvars are present.
+ifneq ($(HAVE_NVCC),yes)
+  HAVE_CUDA_BUILD :=
+else ifneq ($(HAVE_VCVARS),yes)
+  HAVE_CUDA_BUILD :=
+else
+  HAVE_CUDA_BUILD := yes
+endif
+
+# Debug: dump what we detected.
+$(info Makevars.win: CUDA_HOME=$(CUDA_HOME))
+$(info Makevars.win: NVCC=$(NVCC))
+$(info Makevars.win: HAVE_NVCC=$(HAVE_NVCC))
+$(info Makevars.win: VCVARS=$(VCVARS))
+$(info Makevars.win: HAVE_VCVARS=$(HAVE_VCVARS))
+$(info Makevars.win: HAVE_CUDA_BUILD=$(HAVE_CUDA_BUILD))
+
+# --- baseline flags (CPU only) ---
+PKG_CXXFLAGS = -I"$(R_HOME)/include"
+PKG_LIBS     =
+
+ifeq ($(HAVE_CUDA_BUILD),yes)
+  # `-I./cuda_shim` first so the crt/ shim is found before the (partial)
+  # system CUDA include dir. Required because didgpu_init.cpp does
+  # `#include <cuda_runtime.h>` which itself does `#include "crt/host_config.h"`,
+  # and the Program Files install is missing the crt/ subdirectory.
+  PKG_CXXFLAGS += -DHAS_CUDA=1 -I./cuda_shim -I"$(CUDA_HOME)/include"
+  # Bundle the CUDA objects into a local static archive (libcudadidgpu.a)
+  # and pull it in via PKG_LIBS. This pattern works because R's
+  # auto-generated link command honours PKG_LIBS, but it doesn't know
+  # about extra .o files we'd otherwise have to inject into OBJECTS.
+  # NOTE on -L"$(CUDA_HOME)/lib_extra/x64": some CUDA libs ship as
+  # separate redistributables (libcurand in particular) and aren't part
+  # of the base toolkit lib/x64. Our shadow tree carries them under
+  # lib_extra/x64/. Harmless if the dir doesn't exist — ld -L just
+  # silently ignores missing search paths.
+  PKG_LIBS     += -L. -lcudadidgpu \
+                  -L"$(CUDA_HOME)/lib/x64" \
+                  -L"$(CUDA_HOME)/lib_extra/x64" \
+                  -lcudart -lcublas -lcusolver -lcurand
+
+  CUDA_SOURCES := $(wildcard *.cu)
+  CUDA_OBJECTS := $(CUDA_SOURCES:.cu=.o)
+  $(info Makevars.win: CUDA_SOURCES=$(CUDA_SOURCES))
+  $(info Makevars.win: CUDA_OBJECTS=$(CUDA_OBJECTS))
+
+  # Compute capabilities to target. CUDA 13.2 supports compute_75
+  # (Turing, RTX 20xx) through compute_120+. We target the common
+  # production archs:
+  #   7.5 = Turing (RTX 20xx, T4)
+  #   8.0 = Ampere data center (A100)
+  #   8.6 = Ampere desktop (RTX 30xx)
+  #   8.9 = Ada Lovelace (RTX 4000 Ada, RTX 40xx — this dev box)
+  #   9.0 = Hopper (H100)
+  # CUDA 13.2.1 on Windows ships host_config.h at <CUDA>/include/ but
+  # cuda_runtime.h #include's "crt/host_config.h" — there's no crt/
+  # subdir. We carry a shim in src/cuda_shim/crt/host_config.h that
+  # forwards to the real header; -I./cuda_shim puts it on the search
+  # path. Harmless on older CUDA where the directory exists (this -I
+  # would still be searched but our shim path won't shadow the real
+  # one because the real one wins).
+  # `-Xcompiler` flags use the comma-separated form (-Xcompiler=a,b) so the
+  # cmd /C nvcc_wrapper.bat invocation doesn't strip them — the quoted form
+  # `-Xcompiler "-O2"` becomes `-Xcompiler -O2` (broken) after %* passes
+  # through cmd. The comma form has no quotes to strip.
+  #
+  # /GS- disables MSVC stack-protector (avoids __security_cookie and
+  # __GSHandlerCheck symbols that MinGW ld can't find).
+  # /MT statically links MSVC's C runtime into the .o file, so we don't
+  # need msvcrt.dll at link time (avoids _Init_thread_* symbols that
+  # otherwise pull in vcruntime.lib).
+  NVCC_FLAGS := -O2 -std=c++17 \
+                -I./cuda_shim \
+                -Xcompiler=//MT,//GS- \
+                -gencode=arch=compute_75,code=sm_75 \
+                -gencode=arch=compute_80,code=sm_80 \
+                -gencode=arch=compute_86,code=sm_86 \
+                -gencode=arch=compute_89,code=sm_89 \
+                -gencode=arch=compute_90,code=sm_90
+else
+  CUDA_OBJECTS :=
+endif
+
+# OBJECTS is what R's build system links into the package DLL.
+# By default it picks up all *.cpp -> *.o; we explicitly add the CUDA
+# objects (if any) on top.
+OBJECTS = $(patsubst %.cpp,%.o,$(wildcard *.cpp)) $(CUDA_OBJECTS)
+$(info Makevars.win: OBJECTS=$(OBJECTS))
+
+ifeq ($(HAVE_CUDA_BUILD),yes)
+# Per-file rules for .cu -> .o via nvcc.
+#
+# nvcc on Windows requires MSVC cl.exe AND its INCLUDE/LIB environment
+# populated by vcvars64.bat. Doing this inline from a Make recipe runs
+# into nested-quote hell between bash, Make, and cmd. Instead we call
+# a small helper `nvcc_wrapper.bat` (in src/) that finds vcvars64.bat
+# itself and forwards all args to nvcc. From Make's perspective it's
+# just `cmd /C wrapper.bat <nvcc-path> <flags...>` with no nesting.
+NVCC_RUN = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
+
+cuda_didkernel.o: cuda_didkernel.cu
+	@echo "  [nvcc] $<"
+	$(NVCC_RUN)
+
+cuda_saxpy.o: cuda_saxpy.cu
+	@echo "  [nvcc] $<"
+	$(NVCC_RUN)
+
+cuda_fect_fe.o: cuda_fect_fe.cu
+	@echo "  [nvcc] $<"
+	$(NVCC_RUN)
+
+cuda_fect_svd.o: cuda_fect_svd.cu
+	@echo "  [nvcc] $<"
+	$(NVCC_RUN)
+
+cuda_testmechs_bootstrap.o: cuda_testmechs_bootstrap.cu
+	@echo "  [nvcc] $<"
+	$(NVCC_RUN)
+
+cuda_cs_inner.o: cuda_cs_inner.cu
+	@echo "  [nvcc] $<"
+	$(NVCC_RUN)
+
+# Bundle the CUDA objects into a static archive. R's auto-link picks
+# this up via -lcudadidgpu in PKG_LIBS.
+libcudadidgpu.a: $(CUDA_OBJECTS)
+	@echo "  [ar]   $@"
+	ar rcs $@ $(CUDA_OBJECTS)
+
+$(SHLIB): libcudadidgpu.a
+endif
+
+all: $(SHLIB)
+
+clean:
+	@rm -f *.o *.a $(SHLIB) crt/*.h
+	@rmdir crt 2>/dev/null || true

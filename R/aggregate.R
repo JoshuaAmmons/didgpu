@@ -1,0 +1,495 @@
+# ============================================================================
+# Aggregate committed cells into a result object.
+#
+# Cell 0 is the point estimate (no resampling). Cells 1..bootstrap_reps are
+# the bootstrap iters. The aggregator:
+#
+#   - Pulls the per-iter effects/placebos vectors into matrices.
+#   - SE per coefficient = sd across bootstrap iters.
+#   - CI per coefficient = point +/- z * SE  (normal approx).
+#   - Joint chi-square p-values for the effects vector and the placebos
+#     vector (using the bootstrap empirical covariance).
+#
+# Output structure mirrors DIDmultiplegtDYN where it can:
+#   $coef     : list(b = named numeric, vcov = matrix)
+#   $results  : list(N_Effects, N_Placebos, Effects, ATE, Placebos,
+#                    p_jointeffects, p_jointplacebo)
+#   $args     : the canonical args bundle
+#   $manifest : the cell manifest data.frame
+#
+# Differences from the reference's output:
+#   - Standard errors are bootstrap-derived (not the reference's
+#     analytical SE). With enough bootstrap reps this converges, but
+#     for small bootstrap_reps the SEs WILL differ from the reference.
+#     That is intentional: we are checkpointing the bootstrap, which
+#     means SEs come out of that bootstrap rather than out of analytic
+#     formulas. The Effects[, 1] column (the point estimate) IS expected
+#     to match the reference to floating-point precision under the
+#     'reference' backend.
+#   - Coefficient names are NOT padded with trailing spaces (the
+#     reference's "Effect_1    " naming is preserved as a tolerance in
+#     compat.R for downstream code that depends on it; the canonical
+#     name in didgpu is "Effect_1" with no padding).
+# ============================================================================
+
+
+#' @keywords internal
+#' @noRd
+.aggregate_to_result <- function(cells, args, panel_hash) {
+  if (length(cells) == 0L) {
+    stop("No cells available to aggregate. ",
+         "Either bootstrap_reps == 0 with no point estimate yet, or the ",
+         "checkpoint manifest is empty.")
+  }
+
+  # Pull cells in iter order. Convert names from "0","1",... to integers
+  # to be sure the point estimate ends up at the right position.
+  iters <- sort(as.integer(names(cells)))
+  cells <- cells[as.character(iters)]
+  has_point <- 0L %in% iters
+  if (!has_point) {
+    stop("Cannot aggregate: cell b=0 (point estimate) is missing from the ",
+         "checkpoint manifest.")
+  }
+  boot_iters <- setdiff(iters, 0L)
+
+  # Effects matrix : boot_iters x n_effects (point goes in $coef$b).
+  e0 <- cells[["0"]]$effects
+  n_e <- length(e0)
+  e_mat <- if (length(boot_iters) > 0L) {
+    m <- vapply(as.character(boot_iters),
+                function(i) cells[[i]]$effects,
+                numeric(n_e))
+    if (is.null(dim(m))) matrix(m, nrow = n_e, ncol = length(boot_iters))
+    else m
+  } else matrix(numeric(0), nrow = n_e, ncol = 0L)
+  e_mat <- t(e_mat)   # iter x effect
+
+  p0 <- cells[["0"]]$placebos
+  n_p <- length(p0)
+  p_mat <- if (length(boot_iters) > 0L && n_p > 0L) {
+    m <- vapply(as.character(boot_iters),
+                function(i) cells[[i]]$placebos,
+                numeric(n_p))
+    if (is.null(dim(m))) matrix(m, nrow = n_p, ncol = length(boot_iters))
+    else m
+  } else matrix(numeric(0), nrow = n_p, ncol = 0L)
+  p_mat <- t(p_mat)
+
+  ate_vec <- if (length(boot_iters) > 0L) {
+    vapply(as.character(boot_iters),
+           function(i) cells[[i]]$ate %||% NA_real_,
+           numeric(1))
+  } else numeric(0)
+
+  # SEs and CIs.
+  z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
+  e_se <- if (nrow(e_mat) >= 2L) apply(e_mat, 2L, stats::sd) else rep(NA_real_, n_e)
+  p_se <- if (nrow(p_mat) >= 2L) apply(p_mat, 2L, stats::sd) else rep(NA_real_, n_p)
+  ate_se <- if (length(ate_vec) >= 2L) stats::sd(ate_vec) else NA_real_
+
+  e_ci_lo <- e0 - z * e_se;  e_ci_hi <- e0 + z * e_se
+  p_ci_lo <- p0 - z * p_se;  p_ci_hi <- p0 + z * p_se
+  ate0 <- cells[["0"]]$ate %||% NA_real_
+  ate_ci_lo <- ate0 - z * ate_se
+  ate_ci_hi <- ate0 + z * ate_se
+
+  effect_names <- paste0("Effect_", seq_len(n_e))
+  placebo_names <- if (n_p > 0L) paste0("Placebo_", seq_len(n_p)) else character(0)
+
+  # Switcher counts come from cell b=0 (the point estimate). With our
+  # binary, no-weights backend N_gt is always 0/1 so the weighted and
+  # unweighted counts are identical, hence the four count columns hold
+  # the same value. If/when weights are added these will diverge.
+  n_switchers_e <- cells[["0"]]$n_inc_effects %||% rep(NA_integer_, n_e)
+  n_switchers_p <- cells[["0"]]$n_inc_placebos %||% rep(NA_integer_, n_p)
+  n_eff_e <- cells[["0"]]$n_eff_effects %||% rep(NA_integer_, n_e)
+  n_eff_p <- cells[["0"]]$n_eff_placebos %||% rep(NA_integer_, n_p)
+
+  # Effects matrix, shape (n_e x 8) matching DIDmultiplegtDYN.
+  Effects <- cbind(
+    Estimate = e0, SE = e_se, LB.CI = e_ci_lo, UB.CI = e_ci_hi,
+    N = n_eff_e, Switchers = n_switchers_e,
+    N.w = n_eff_e, Switchers.w = n_switchers_e
+  )
+  rownames(Effects) <- effect_names
+
+  Placebos <- cbind(
+    Estimate = p0, SE = p_se, LB.CI = p_ci_lo, UB.CI = p_ci_hi,
+    N = n_eff_p, Switchers = n_switchers_p,
+    N.w = n_eff_p, Switchers.w = n_switchers_p
+  )
+  if (n_p > 0L) rownames(Placebos) <- placebo_names
+
+  ate_n <- if (length(n_switchers_e) > 0L) sum(n_switchers_e, na.rm = TRUE) else NA_integer_
+  ATE <- matrix(c(ate0, ate_se, ate_ci_lo, ate_ci_hi,
+                  NA_integer_, ate_n, NA_integer_, ate_n),
+                nrow = 1L,
+                dimnames = list("ATE",
+                                c("Estimate", "SE", "LB.CI", "UB.CI",
+                                  "N", "Switchers", "N.w", "Switchers.w")))
+
+  # Joint chi-square p-values via the bootstrap empirical covariance.
+  p_joint_e <- .joint_pvalue(e0, e_mat)
+  p_joint_p <- if (n_p > 0L) .joint_pvalue(p0, p_mat) else NA_real_
+
+  # Coefficient vector + bootstrap vcov for the full b parameter
+  # (effects then placebos).
+  b <- c(e0, p0)
+  names(b) <- c(effect_names, placebo_names)
+  V <- if (nrow(e_mat) >= 2L) {
+    full <- if (n_p > 0L) cbind(e_mat, p_mat) else e_mat
+    stats::cov(full)
+  } else matrix(NA_real_, nrow = length(b), ncol = length(b))
+  dimnames(V) <- list(names(b), names(b))
+
+  # predict_het: carry the iter-0 cell's block (a data.frame) through
+  # into results$predict_het. If absent, omit the field.
+  het_block <- cells[["0"]]$predict_het
+
+  results_list <- list(
+    N_Effects      = as.integer(n_e),
+    N_Placebos     = as.integer(n_p),
+    Effects        = Effects,
+    ATE            = ATE,
+    Placebos       = Placebos,
+    p_jointeffects = p_joint_e,
+    p_jointplacebo = p_joint_p,
+    n_boot         = length(boot_iters)
+  )
+  if (!is.null(het_block)) results_list$predict_het <- het_block
+
+  list(
+    coef = list(b = b, vcov = V),
+    results = results_list,
+    args = c(args, list(panel_hash = panel_hash)),
+    cells_used = length(cells)
+  )
+}
+
+
+# Joint chi-square p-value: theta0' V^-1 theta0 ~ chi2(k) under H0:
+# theta = 0. V is the bootstrap covariance.
+.joint_pvalue <- function(theta0, boot_mat) {
+  if (nrow(boot_mat) < length(theta0) + 1L) return(NA_real_)
+  V <- stats::cov(boot_mat)
+  inv <- try(solve(V), silent = TRUE)
+  if (inherits(inv, "try-error")) {
+    inv <- MASS::ginv(V)
+  }
+  q <- as.numeric(t(theta0) %*% inv %*% theta0)
+  k <- length(theta0)
+  stats::pchisq(q, df = k, lower.tail = FALSE)
+}
+
+
+# -------- pretty-print helpers --------
+
+.sig_stars <- function(p) {
+  if (is.na(p)) return("")
+  if (p < 0.001) "***" else
+  if (p < 0.01)  "**"  else
+  if (p < 0.05)  "*"   else
+  if (p < 0.1)   "."   else ""
+}
+
+.print_coef_block <- function(m) {
+  est <- as.numeric(m[, "Estimate"])
+  se  <- as.numeric(m[, "SE"])
+  lo  <- as.numeric(m[, "LB.CI"])
+  hi  <- as.numeric(m[, "UB.CI"])
+  z   <- est / se
+  p   <- 2 * stats::pnorm(-abs(z))
+  stars <- vapply(p, .sig_stars, character(1))
+
+  df <- data.frame(
+    Estimate  = sprintf("%9.4f", est),
+    SE        = ifelse(is.na(se), "      NA", sprintf("%8.4f", se)),
+    z         = ifelse(is.na(z),  "     NA", sprintf("%7.2f", z)),
+    p         = ifelse(is.na(p),  "     NA", sprintf("%7.4f", p)),
+    `      CI` = ifelse(is.na(lo) | is.na(hi), "    [NA, NA]",
+                        sprintf("[%6.3f, %6.3f]", lo, hi)),
+    sig       = stars,
+    row.names = rownames(m),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  print(df, right = FALSE)
+}
+
+
+# -------- S3 methods --------
+
+#' Print method for didgpu_result
+#'
+#' @param x A `didgpu_result` object.
+#' @param ... Unused (for S3 method compatibility).
+#' @return The input invisibly.
+#' @export
+print.didgpu_result <- function(x, ...) {
+  cat("didgpu result\n")
+  cat(sprintf("  backend         : %s\n", x$args$backend %||% "n/a"))
+  cat(sprintf("  effects         : %d   placebos: %d\n",
+              x$results$N_Effects, x$results$N_Placebos))
+  cat(sprintf("  bootstrap reps  : %d (used %d cells)\n",
+              x$args$bootstrap_reps, x$cells_used))
+  if (!is.null(x$checkpoint_dir) && !is.na(x$checkpoint_dir)) {
+    cat(sprintf("  checkpoint_dir  : %s\n", x$checkpoint_dir))
+  }
+  cat("\nEffects:\n")
+  .print_coef_block(x$results$Effects)
+  if (x$results$N_Placebos > 0L) {
+    cat("\nPlacebos:\n")
+    .print_coef_block(x$results$Placebos)
+  }
+  if (!is.null(x$results$ATE) && !is.na(x$results$ATE[1, "Estimate"])) {
+    cat("\nATE (cumulative across event-times):\n")
+    .print_coef_block(x$results$ATE)
+  }
+  cat("\n---\n")
+  cat(sprintf("Joint test of effects:  chi2 p = %.4g %s\n",
+              x$results$p_jointeffects,
+              .sig_stars(x$results$p_jointeffects)))
+  if (x$results$N_Placebos > 0L) {
+    cat(sprintf("Joint test of placebos: chi2 p = %.4g %s\n",
+                x$results$p_jointplacebo,
+                .sig_stars(x$results$p_jointplacebo)))
+  }
+  cat("Signif: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1\n")
+  invisible(x)
+}
+
+#' Summary method for didgpu_result
+#'
+#' @param object A `didgpu_result` object.
+#' @param ... Unused (for S3 method compatibility).
+#' @return The input invisibly.
+#' @export
+summary.didgpu_result <- function(object, ...) {
+  print.didgpu_result(object, ...)
+}
+
+
+#' Coefficient extractor for didgpu_result
+#'
+#' Returns a named numeric vector of point estimates. Names are
+#' "Effect_1", ..., "Effect_n_effects" optionally followed by
+#' "Placebo_1", ..., "Placebo_n_placebos" and (if available) "ATE".
+#'
+#' @param object A `didgpu_result` object.
+#' @param which One of `"effects"`, `"placebos"`, `"ate"`, or `"all"`
+#'   (default). Controls which subset is returned.
+#' @param ... Unused.
+#' @return Named numeric vector.
+#' @export
+coef.didgpu_result <- function(object, which = "all", ...) {
+  which <- match.arg(which, c("all", "effects", "placebos", "ate"))
+  pieces <- list()
+  if (which %in% c("all", "effects")) {
+    e <- object$results$Effects
+    if (!is.null(e) && nrow(e) > 0L) {
+      v <- as.numeric(e[, "Estimate"])
+      names(v) <- rownames(e)
+      pieces$effects <- v
+    }
+  }
+  if (which %in% c("all", "placebos") && object$results$N_Placebos > 0L) {
+    p <- object$results$Placebos
+    if (!is.null(p) && nrow(p) > 0L) {
+      v <- as.numeric(p[, "Estimate"])
+      names(v) <- rownames(p)
+      pieces$placebos <- v
+    }
+  }
+  if (which %in% c("all", "ate") && !is.null(object$results$ATE)) {
+    a <- object$results$ATE
+    if (!is.na(a[1, "Estimate"])) {
+      v <- as.numeric(a[, "Estimate"])
+      names(v) <- "ATE"
+      pieces$ate <- v
+    }
+  }
+  v <- unlist(pieces, use.names = TRUE)
+  # Strip the leading list-name prefix ("effects.", "placebos.", "ate.")
+  # that unlist() injects when the parent list is named.
+  names(v) <- sub("^(effects|placebos|ate)\\.", "", names(v))
+  v
+}
+
+
+#' Confidence intervals for didgpu_result
+#'
+#' Returns the percentile-based CI matrix already computed during
+#' aggregation (from the bootstrap distribution). Re-computing at a
+#' different level requires a fresh run because the cell-level
+#' percentiles are not stored on disk.
+#'
+#' @param object A `didgpu_result` object.
+#' @param parm Optional character vector of coefficient names to subset.
+#' @param level Confidence level. Must match the level used at fit time;
+#'   otherwise a warning is issued and the stored CI is returned anyway.
+#' @param ... Unused.
+#' @return A 2-column matrix with the lower and upper bounds.
+#' @export
+confint.didgpu_result <- function(object, parm = NULL, level = NULL, ...) {
+  fit_level <- object$args$ci_level %||% 95
+  if (!is.null(level) && abs(level * 100 - fit_level) > 1e-9 &&
+      abs(level     - fit_level) > 1e-9) {
+    warning(sprintf("Stored CIs are at level %.1f%% (from the fit); ",
+                    fit_level),
+            "requested level=", level, " is ignored. Re-run didgpu() ",
+            "with ci_level = ", level, " to change.")
+  }
+  # Pick lower/upper-bound columns from the printed tables.
+  lo_hi_from <- function(m) {
+    if (is.null(m) || nrow(m) == 0L) return(NULL)
+    cn <- colnames(m)
+    lo <- grep("^LB", cn)[1L]; hi <- grep("^UB", cn)[1L]
+    out <- cbind(as.numeric(m[, lo]), as.numeric(m[, hi]))
+    rownames(out) <- rownames(m)
+    out
+  }
+  pieces <- list()
+  pieces$effects <- lo_hi_from(object$results$Effects)
+  if (object$results$N_Placebos > 0L) pieces$placebos <- lo_hi_from(object$results$Placebos)
+  if (!is.null(object$results$ATE) &&
+      !is.na(object$results$ATE[1, "Estimate"])) {
+    pieces$ate <- lo_hi_from(object$results$ATE)
+    if (!is.null(pieces$ate)) rownames(pieces$ate) <- "ATE"
+  }
+  pieces <- pieces[!vapply(pieces, is.null, logical(1))]
+  if (length(pieces) == 0L) return(matrix(numeric(0), nrow = 0L, ncol = 2L,
+                                           dimnames = list(NULL,
+                                                            c("LB", "UB"))))
+  out <- do.call(rbind, pieces)
+  colnames(out) <- c(sprintf("%g%% LB", fit_level),
+                     sprintf("%g%% UB", fit_level))
+  if (!is.null(parm)) {
+    miss <- setdiff(parm, rownames(out))
+    if (length(miss)) {
+      warning("parm not in result: ", paste(miss, collapse = ", "))
+    }
+    out <- out[intersect(parm, rownames(out)), , drop = FALSE]
+  }
+  out
+}
+
+
+#' Event-study plot of a didgpu result
+#'
+#' Plots estimates against event-time horizon: pre-treatment placebos
+#' at negative horizons, post-treatment effects at positive horizons,
+#' with the stored CIs as vertical error bars and a horizontal dashed
+#' line at 0 for reference. Uses base R graphics — no ggplot2
+#' dependency. Returns the input invisibly so calls can be chained.
+#'
+#' @param x A `didgpu_result` object.
+#' @param ... Extra graphical parameters passed to the underlying
+#'   `plot()` call (e.g. `main`, `xlab`, `ylab`, `col`, `pch`, `lwd`,
+#'   `xlim`, `ylim`).
+#' @param show_zero_line Logical. Draw a dashed line at y = 0
+#'   (default TRUE).
+#' @param show_zero_horizon Logical. Mark the boundary between placebo
+#'   and effect horizons with a vertical dashed line (default TRUE).
+#' @param ci Logical. Draw error bars at the stored CI level
+#'   (default TRUE; suppressed when bootstrap_reps = 0 because the
+#'   CIs are NA).
+#' @return The input invisibly.
+#' @export
+plot.didgpu_result <- function(x, ...,
+                                show_zero_line = TRUE,
+                                show_zero_horizon = TRUE,
+                                ci = TRUE) {
+  e  <- x$results$Effects
+  pl <- if (x$results$N_Placebos > 0L) x$results$Placebos else NULL
+  if ((is.null(e) || nrow(e) == 0L) && is.null(pl)) {
+    stop("Nothing to plot: result has no effects or placebos.")
+  }
+
+  # Build the (horizon, estimate, LB, UB) frame.
+  rows_eff <- if (!is.null(e) && nrow(e) > 0L) {
+    data.frame(h  = seq_len(nrow(e)),
+               y  = as.numeric(e[, "Estimate"]),
+               lb = as.numeric(e[, grep("^LB", colnames(e))[1L]]),
+               ub = as.numeric(e[, grep("^UB", colnames(e))[1L]]))
+  } else NULL
+  rows_pl <- if (!is.null(pl) && nrow(pl) > 0L) {
+    data.frame(h  = -seq_len(nrow(pl)),
+               y  = as.numeric(pl[, "Estimate"]),
+               lb = as.numeric(pl[, grep("^LB", colnames(pl))[1L]]),
+               ub = as.numeric(pl[, grep("^UB", colnames(pl))[1L]]))
+  } else NULL
+  df <- rbind(rows_pl, rows_eff)
+  df <- df[order(df$h), , drop = FALSE]
+
+  # Suppress CIs if no bootstrap was run.
+  if (isTRUE(ci) && (is.null(x$args$bootstrap_reps) ||
+                      x$args$bootstrap_reps == 0L)) ci <- FALSE
+
+  # Defaults for graphical params, overridable via ...
+  dots <- list(...)
+  if (is.null(dots$xlab)) dots$xlab <- "Event-time horizon"
+  if (is.null(dots$ylab)) dots$ylab <- "Estimate"
+  if (is.null(dots$main)) dots$main <- "didgpu event-study"
+  if (is.null(dots$pch))  dots$pch  <- 19L
+  if (is.null(dots$col))  dots$col  <- "black"
+  if (is.null(dots$xlim)) dots$xlim <- range(df$h) + c(-0.5, 0.5)
+  if (is.null(dots$ylim)) {
+    yvals <- if (isTRUE(ci)) c(df$y, df$lb, df$ub) else df$y
+    yvals <- yvals[is.finite(yvals)]
+    if (length(yvals) == 0L) yvals <- c(-1, 1)
+    pad <- 0.05 * diff(range(yvals))
+    if (pad == 0) pad <- 0.1 * max(1, abs(yvals[1L]))
+    dots$ylim <- range(yvals) + c(-pad, pad)
+  }
+
+  do.call(plot,
+          c(list(df$h, df$y, type = "p"), dots))
+
+  if (isTRUE(show_zero_line)) {
+    graphics::abline(h = 0, lty = 2L, col = "grey50")
+  }
+  if (isTRUE(show_zero_horizon)) {
+    graphics::abline(v = 0.5, lty = 2L, col = "grey50")
+  }
+  if (isTRUE(ci)) {
+    graphics::segments(df$h, df$lb, df$h, df$ub,
+                       col = dots$col, lwd = max(1L, dots$lwd %||% 1L))
+    # Endcaps.
+    w <- 0.1
+    graphics::segments(df$h - w, df$lb, df$h + w, df$lb,
+                       col = dots$col, lwd = max(1L, dots$lwd %||% 1L))
+    graphics::segments(df$h - w, df$ub, df$h + w, df$ub,
+                       col = dots$col, lwd = max(1L, dots$lwd %||% 1L))
+  }
+
+  invisible(x)
+}
+
+
+#' Variance-covariance matrix of estimates
+#'
+#' Returns the empirical covariance matrix of the bootstrap replicate
+#' distribution over `(Effects, Placebos)`, computed at fit time and
+#' stored on the result. When `bootstrap_reps = 0` (or only one rep),
+#' returns a square NA matrix because the covariance is undefined.
+#'
+#' The ordering matches `coef(object)`'s default (effects first, then
+#' placebos). The ATE row/column is NOT included — it is a linear
+#' combination of the per-event-time effects, so its variance can be
+#' recovered as `t(w) %*% vcov(object) %*% w` where `w` is the
+#' incidence-weighted vector.
+#'
+#' @param object A `didgpu_result` object.
+#' @param ... Unused.
+#' @return A square matrix.
+#' @export
+vcov.didgpu_result <- function(object, ...) {
+  V <- object$coef$vcov
+  if (is.null(V)) {
+    nm <- names(object$coef$b)
+    return(matrix(NA_real_, length(nm), length(nm),
+                  dimnames = list(nm, nm)))
+  }
+  V
+}
