@@ -40,10 +40,42 @@ Designed for long-running econometric work: per-cell checkpointing to disk, resu
 | `didgpu_by()` (subgroup-by-subgroup estimation) | ✅ done (wraps didgpu(); per-subgroup checkpoints) |
 | `didgpu_by_path()` (treatment-trajectory subgroup analysis) | ✅ done (mirrors reference's by_path argument) |
 | `n_workers=` (parallel bootstrap)         | ✅ done (bit-identical to sequential) |
-| CUDA backend                              | 🟡 scaffolded (kernel + Makevars ready; needs CUDA Toolkit installed) |
+| CUDA backend                              | ✅ live on Linux/WSL (built + verified end-to-end on an RTX 4000 Ada; see GPU acceleration below) |
 | Rcpp+Eigen CPU backend                    | 🟡 scaffolded (smoke .cpp compiles; real port TBD) |
 
 For the supported subset (binary, no controls), the r-backend's output matches the reference bit-for-bit on point estimates, SEs, ATE, and the four sample-size columns. See `tests/testthat/test-r-backend.R`, `test-bidirectional.R`, and `test-reference-parity.R` (100+ assertions, all green).
+
+## GPU acceleration
+
+The CUDA backend is built and verified end-to-end on Linux/WSL2 (NVIDIA
+RTX 4000 Ada, CUDA 12.6). Set `backend = "cuda"` on a supported call to
+use it; every GPU path falls back transparently to the R implementation
+when CUDA is unavailable **or when the GPU would be slower** (see the
+fect note below), so `backend = "cuda"` is always safe.
+
+### Where the GPU helps — and by how much
+
+| Path | GPU status | Speedup vs R | Notes |
+|------|-----------|--------------|-------|
+| `didgpu_cs()` **cluster bootstrap** | ✅ live | **179–228×** | Influence-function shortcut; the headline win. R re-runs the full estimator per replicate (~25–50 s for B=200); CUDA does one `(B × n_units) @ (n_units × n_cells)` product (~0.1 s). |
+| `didgpu_cs()` multiplier (wild) bootstrap | ✅ live | 1.2–1.7× | R is already IF-based; GPU win is bounded by the IF-matrix copy. |
+| `didgpu_cs(est_method = "OR")` point estimate | ✅ live | ~1× | Bit-exact vs R (1e-12 no-cov, 1e-6 with covariates). CS inner regressions are small, so H2D/D2H roughly cancels the compute win. |
+| TestMechs bootstrap | ✅ live | (cuRAND) | Nonparametric partial-density bootstrap on GPU; bootstrap moments match R within Monte-Carlo error. |
+| `didgpu_fect()` (fe / ife / mc) | 🔵 size-gated | ~1× (small panels) | GPU SVD only engages for very large balanced panels (`n_units ≥ 2000` and `n_units·n_periods ≥ 2e5`); below that it transparently uses R's LAPACK, which is far faster for small matrices. |
+| `didgpu_cs(est_method = "IPW" / "DR")` | ⚪ R fallback | — | Batched logistic-regression kernel not yet implemented; uses the R path. |
+
+Full numbers and methodology in [`BENCHMARKS.md`](BENCHMARKS.md).
+
+### The headline
+
+For an applied researcher running `didgpu_cs(bootstrap_reps = 1000,
+bootstrap_kind = "cluster")` on a typical panel, the CUDA path turns a
+~3–4 minute job into well under a second — fast enough that re-running
+after a spec tweak is interactive instead of a coffee break.
+
+Every CUDA path is pinned against its R counterpart in
+`tests/testthat/test-cuda-equivalence-grid.R` (142 assertions) so the
+GPU and CPU results stay in lock-step.
 
 ## Install
 
