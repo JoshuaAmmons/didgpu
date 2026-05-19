@@ -16,8 +16,11 @@ each with CUDA kernels for the hot paths.
 - `bootstrap_kind = c("cluster", "multiplier")` — cluster bootstrap on
   units, or multiplier wild bootstrap on per-unit influence functions
   (much faster for large B).
-- CUDA scaffold `src/cuda_cs_inner.cu` for batched per-(g, t) inner
-  regression via cuBLAS gemmStridedBatched + cuSOLVER potrsBatched.
+- CUDA: the OR per-(g, t) inner regression runs on the GPU
+  (`src/cuda_cs_inner.cu`, in-thread Cholesky per cell) with per-row
+  influence functions; cluster + multiplier bootstrap SEs run on the
+  GPU too. IPW / DR inner regressions still use the R path (batched
+  logistic-regression kernel is future work).
 - Cross-validated against the reference `did` package on simulated
   panels (max abs diff < 0.25 on event-study estimates).
 
@@ -32,7 +35,11 @@ each with CUDA kernels for the hot paths.
 - Nonparametric and Bayesian (Dirichlet) bootstrap of the partial-density
   vector beta.obs.
 - CUDA bootstrap kernel `src/cuda_testmechs_bootstrap.cu` (cuRAND
-  multinomial + atomic-add reduction; the main acceleration target).
+  multinomial; the main acceleration target). Live on Linux/WSL and
+  wired through `.testmechs_bootstrap_cuda`; the "nonparametric"
+  method runs on the GPU, "bayes" uses the R path. cuRAND vs R's
+  MT19937 differ per-replicate, so bootstrap moments match within
+  Monte-Carlo error rather than bit-for-bit.
 
 ## Leave-one-out robustness — `didgpu_loo()`
 
@@ -96,9 +103,18 @@ each with CUDA kernels for the hot paths.
   200 K rows.
 - `"reference"` — delegate to `DIDmultiplegtDYN::did_multiplegt_dyn`,
   used as the parity oracle.
-- `"cuda"` — scaffolded; 5-kernel chain and host launcher in `src/`;
-  compiles when `nvcc` is on `PATH` and CUDA headers are present.
-  Tests skip if not available.
+- `"cuda"` — **live on Linux/WSL2** (built + verified end-to-end on an
+  NVIDIA RTX 4000 Ada, CUDA 12.6). Live GPU paths: the CS cluster
+  bootstrap (**179–228× faster** than R via the influence-function
+  shortcut), the CS multiplier bootstrap, the CS OR point estimate
+  (bit-exact vs R), and the TestMechs nonparametric bootstrap. The
+  fect SVD path is size-gated — it only engages for very large
+  balanced panels, since cuSOLVER loses to CPU LAPACK on the small
+  matrices typical of fect. Every GPU path falls back transparently
+  to R when CUDA is unavailable or would be slower, so `backend =
+  "cuda"` is always safe. See `BENCHMARKS.md` and
+  `tests/testthat/test-cuda-equivalence-grid.R` (142 lock-step
+  assertions). Tests skip GPU paths when `nvcc` / a device is absent.
 - `"cpu"` — Rcpp+Eigen, scaffolded only.
 
 ## R interface
@@ -122,11 +138,16 @@ each with CUDA kernels for the hot paths.
   infrastructure. Results are returned as `didgpu_fect_result` (extends
   `didgpu_result`) so all the standard accessors (`coef`, `confint`,
   `vcov`, `plot`, `tidy`, `glance`) work the same way.
-- CUDA scaffolds for fect kernels live in `src/cuda_fect_fe.cu` and
+- CUDA kernels for fect live in `src/cuda_fect_fe.cu` and
   `src/cuda_fect_svd.cu` (the latter uses cuSOLVER's
-  `cusolverDnDgesvdj` for the SVD primitive shared by `ife` and `mc`).
-  Will compile and run on machines with the NVIDIA CUDA Toolkit
-  installed; the pure-R reference impl is used otherwise.
+  `cusolverDnDgesvdj` for the SVD primitive shared by `ife` and `mc`)
+  and are wired through R. **However**, they are size-gated: on the
+  small, tall-skinny matrices typical of fect panels the per-iteration
+  cuSOLVER SVD is 100–300× slower than R's LAPACK (cuSOLVER handle +
+  H2D/D2H overhead dwarfs the tiny SVD). `.fect_cuda_svd_worthwhile()`
+  only routes to the GPU for very large balanced panels
+  (`n_units ≥ 2000` and `n_units·n_periods ≥ 2e5`); below that
+  `backend = "cuda"` transparently uses R's `svd()`. See `BENCHMARKS.md`.
 
 ## Testing
 
