@@ -248,9 +248,12 @@
   t0 <- Sys.time()
   use_cuda <- identical(args$backend, "cuda") &&
               isTRUE(tryCatch(didgpu_has_cuda_support(),
-                               error = function(e) FALSE))
-  # CUDA path uses src/cuda_fect_mc.cu (cuSOLVER for SVD); untested
-  # locally without nvcc.
+                               error = function(e) FALSE)) &&
+              .fect_cuda_svd_worthwhile(nrow(mats$Y), ncol(mats$Y))
+  # CUDA path uses cuSOLVER for the soft-thresholded SVD. Gated behind
+  # .fect_cuda_svd_worthwhile: for small matrices the GPU SVD is far
+  # slower than R's LAPACK (see BENCHMARKS.md), so backend = "cuda"
+  # transparently falls back to svd() below the size threshold.
   # Lambda selection: if user passed one, use it directly. Otherwise,
   # cross-validate on iter 0 (the point estimate) and reuse that lambda
   # for all bootstrap iters — full CV per bootstrap iter would be

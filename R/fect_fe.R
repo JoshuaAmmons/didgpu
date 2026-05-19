@@ -178,10 +178,16 @@
   mats <- .fect_build_matrices(df_use, args$outcome, args$group,
                                  args$time, args$treatment)
   t0 <- Sys.time()
-  # Backend dispatch: CUDA if available + requested, else R.
+  # Backend dispatch: CUDA if available + requested AND the matrix is
+  # large enough to amortise GPU overhead. The fect_fe kernel does a
+  # per-iteration D2H copy for its convergence check, so it has the
+  # same small-matrix pathology as the SVD path (see BENCHMARKS.md);
+  # the size gate keeps backend = "cuda" from ever being slower than
+  # the R demeaning loop.
   use_cuda <- identical(args$backend, "cuda") &&
               isTRUE(tryCatch(didgpu_has_cuda_support(),
-                               error = function(e) FALSE))
+                               error = function(e) FALSE)) &&
+              .fect_cuda_svd_worthwhile(nrow(mats$Y), ncol(mats$Y))
   fit <- if (use_cuda) {
     cuda_res <- didgpu_cuda_fect_fe_r(mats$Y, mats$M,
                                         tol = args$tol %||% 1e-5,
