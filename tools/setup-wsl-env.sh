@@ -167,11 +167,11 @@ green "R-dev support libraries installed."
 # ----------------------------------------------------------------------------
 step "Installing R packages (Rcpp, RcppEigen, data.table, testthat, broom)"
 
-# Use a fast mirror and binary-where-possible.
-R_LIBS_USER=$(R --no-save -e 'cat(Sys.getenv("R_LIBS_USER"))' 2>/dev/null | tail -1)
-mkdir -p "$R_LIBS_USER" 2>/dev/null || true
-
-R --no-save <<'EOF' || { echo "R package install failed"; exit 1; }
+# Install into the system-wide site-library so any user (including root)
+# can load them. This requires sudo. The alternative is a per-user library,
+# which works but is fragile — you'd lose package access when running as
+# a different WSL user or via wsl -u root.
+sudo R --no-save <<'EOF' || { echo "R package install failed"; exit 1; }
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 needed <- c("Rcpp", "RcppEigen", "data.table", "testthat", "broom",
             "quadprog", "ggplot2")
