@@ -101,17 +101,50 @@ slower. Above the threshold — very large balanced panels — the GPU
 SVD path re-engages, but those panel sizes are rare in applied
 microeconometrics.
 
-### Why fect doesn't get a fused kernel
+### Above the size gate: ife still loses, mc wins big
 
-Tasks #86 (fused fect_ife alternation) and #87 (fect_mc CV inner
-loop) were originally planned as device-resident kernels to amortise
-the per-iteration overhead. The benchmark above ruled them out: even
-a perfectly fused loop has to run cuSOLVER's `gesvdj` on a
-hundreds-by-tens matrix, where the GPU has no arithmetic-intensity
-advantage over a tuned CPU LAPACK. The win would only materialise
-for panels far larger than the applied norm, and the size gate
-already routes those to the GPU. Engineering effort is better spent
-on the bootstrap kernels, where the GPU is 100–200× ahead.
+To check whether the GPU path has *any* favourable regime, we
+benchmarked large panels above the gate (`tools/bench-fect-large.R`):
+
+| method | n_units | n_periods | R median | CUDA median | Speedup |
+|--------|---------|-----------|----------|-------------|---------|
+| ife    |    2000 |       100 |   4.227s |   49.209s   | 0.09x   |
+| mc     |    2000 |       100 | 183.269s |   50.923s   | **3.60x** |
+| ife    |    4000 |        60 |   7.218s |   44.475s   | 0.16x   |
+| mc     |    4000 |        60 | 153.507s |   27.299s   | **5.62x** |
+| ife    |    8000 |        50 |  11.892s |   46.448s   | 0.26x   |
+| mc     |    8000 |        50 | 230.139s |   29.017s   | **7.93x** |
+
+This splits the two methods:
+
+- **fect_ife loses at every size**, including these large panels
+  (0.09–0.26×). ife needs only the top `r` singular triplets, and R's
+  `svd(nu = r, nv = r)` computes a cheap thin SVD; the cuSOLVER path
+  runs a full `gesvdj` then truncates — wasteful, and dominated by
+  per-iteration handle creation + H2D/D2H. **ife has no GPU-favourable
+  regime**, so its CUDA path is now hard-wired off (`use_cuda_svd =
+  FALSE` in `.fect_ife_one_iter`); it always uses R's thin SVD. The
+  kernel and `.fect_svd_truncated_cuda` helper remain for direct
+  use / testing.
+
+- **fect_mc wins big above the gate** (3.6–7.9×). mc needs a *full*
+  SVD each iteration for the nuclear-norm soft-threshold; that's
+  expensive on CPU (R takes 150–230 s on these panels) and the GPU's
+  dense-SVD throughput pays off. The `.fect_cuda_svd_worthwhile` gate
+  (`n_units ≥ 2000 AND n_units·n_periods ≥ 2e5`) routes exactly these
+  panels to the GPU and keeps the small ones on R.
+
+`method = "fe"` was not separately characterised at scale; it is fast
+in R (iterative demeaning, no SVD) and stays behind the same gate, so
+typical panels use R and only very large ones attempt the GPU.
+
+### Why #86 / #87 (fused fect kernels) were dropped
+
+Originally planned as device-resident kernels to amortise per-iter
+overhead. Ruled out by the data above: a fused loop can't help ife
+(no GPU regime at all), and mc already wins at scale through the
+existing per-iter kernel + size gate. Effort is better spent on the
+bootstrap kernels, where the GPU is 100–200× ahead.
 
 ## TestMechs nonparametric bootstrap
 
