@@ -162,10 +162,16 @@ didgpu_cs <- function(
   att_gt <- .cs_compute_att_gt(df, args, verbose = verbose)
   if (bootstrap_reps > 0L) {
     boot_kind <- args$bootstrap_kind %||% "cluster"
-    att_gt <- if (boot_kind == "multiplier") {
-      .cs_multiplier_bootstrap_se(att_gt, args, verbose = verbose)
+    if (boot_kind == "multiplier") {
+      att_gt <- .cs_multiplier_bootstrap_se(att_gt, args, verbose = verbose)
+    } else if (identical(args$backend, "cuda")) {
+      # GPU IF-shortcut cluster bootstrap. Falls back to the per-rep
+      # R recomputation if CUDA returns NULL.
+      att_gt_cuda <- .cs_cluster_bootstrap_cuda(att_gt, args)
+      att_gt <- if (!is.null(att_gt_cuda)) att_gt_cuda
+                else .cs_bootstrap_se(df, args, att_gt, verbose = verbose)
     } else {
-      .cs_bootstrap_se(df, args, att_gt, verbose = verbose)
+      att_gt <- .cs_bootstrap_se(df, args, att_gt, verbose = verbose)
     }
   }
   agg <- .cs_aggregate(att_gt, aggregation, args)
