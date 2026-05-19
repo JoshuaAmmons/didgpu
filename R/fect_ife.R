@@ -65,6 +65,36 @@
 }
 
 
+# Size gate for the fect CUDA SVD path.
+#
+# CRITICAL PERFORMANCE FINDING (see BENCHMARKS.md): for the small,
+# tall-skinny matrices typical of fect panels (n_units in the
+# hundreds, n_periods in the tens), the per-iteration cuSOLVER SVD is
+# 100-300x SLOWER than base R's LAPACK svd(). cuSOLVER handle
+# creation plus H2D/D2H transfer (~2-5 ms per call) dwarfs the SVD
+# itself, and fect_ife / fect_mc call the SVD once per alternation
+# iteration (dozens to hundreds of times).
+#
+# GPU SVD only starts to win when the matrix is large enough to
+# amortise that fixed overhead — empirically n_units in the
+# thousands AND a six-figure element count. Below that threshold we
+# silently use the R svd() even when backend = "cuda", so that
+# requesting the GPU backend NEVER makes fect slower than the CPU
+# path. This mirrors how a good BLAS auto-dispatches small GEMMs to
+# the CPU.
+#
+# The threshold is deliberately conservative: false negatives (using
+# the CPU when the GPU would have marginally won) cost little, but
+# false positives (using the GPU on a small matrix) cost 100x.
+#' @keywords internal
+#' @noRd
+.fect_cuda_svd_worthwhile <- function(n_units, n_periods) {
+  nu <- as.numeric(n_units)
+  np <- as.numeric(n_periods)
+  (nu >= 2000) && (nu * np >= 2e5)
+}
+
+
 # IFE fit: alternating fe-step + svd-step until convergence.
 # Returns alpha, xi, L (n_units x r), F (r x n_periods), iter, delta.
 #
@@ -184,7 +214,8 @@
   t0 <- Sys.time()
   use_cuda <- identical(args$backend, "cuda") &&
               isTRUE(tryCatch(didgpu_has_cuda_support(),
-                               error = function(e) FALSE))
+                               error = function(e) FALSE)) &&
+              .fect_cuda_svd_worthwhile(nrow(mats$Y), ncol(mats$Y))
   # The fect_ife alternation uses cuSOLVER for the truncated-SVD
   # step when use_cuda_svd = TRUE; the fe step still runs on the host
   # in R (Phase 2 task #86 fuses both halves into one device-side
