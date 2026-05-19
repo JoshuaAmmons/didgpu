@@ -26,6 +26,13 @@ extern "C" int didgpu_cuda_fect_fe(
     int n_units, int n_periods,
     double tol, int max_iter,
     int* out_iter, double* out_delta);
+extern "C" int didgpu_cuda_cs_inner_batched(
+    const double* X_concat, const int* X_offsets,
+    const double* Y_concat, const int* Y_offsets,
+    const double* W_concat, const int* W_offsets,
+    int n_cells, int p, int n_units,
+    int est_method,
+    double* out_att, double* out_influence);
 #endif
 
 // [[Rcpp::export]]
@@ -267,5 +274,109 @@ Rcpp::NumericVector didgpu_run_saxpy(double a, Rcpp::NumericVector x, Rcpp::Nume
 #else
   (void)a; (void)x; (void)y;
   Rcpp::stop("didgpu was built without CUDA support. Reinstall after installing the NVIDIA CUDA Toolkit so nvcc is on PATH.");
+#endif
+}
+
+
+// Batched per-(g, t) CS inner regression on the GPU.
+//
+// Inputs (constructed by R-side .cs_inner_batched_cuda):
+//   X_concat   : concatenated row-major design matrices for all cells.
+//                Length = sum_c (n_c * p). For cells without
+//                covariates pass a length-(sum_c * 1) intercept column
+//                and set p = 1.
+//   X_offsets  : length n_cells + 1; offsets[c] = starting row index
+//                of cell c in the row-stacked layout. offsets[n_cells]
+//                = total rows.
+//   Y_concat   : concatenated delta values (length sum_c n_c).
+//   W_concat   : concatenated treatment-indicator weights (D in
+//                {0, 1}). Length sum_c n_c.
+//   est_method : 0 = OR, 1 = IPW, 2 = DR
+//   n_units    : panel-level unique-unit count (sets the row dimension
+//                of out_influence when influence functions are requested).
+//   want_influence : if TRUE, allocate and fill an n_units x n_cells IF
+//                    matrix. If FALSE, that work is skipped (faster).
+//
+// Returns:
+//   NULL if the kernel reports a non-zero status code (caller is
+//   expected to fall back to the R per-cell loop). Otherwise a list
+//   with components:
+//     att        — numeric vector of length n_cells
+//     influence  — n_units x n_cells matrix, or NULL if !want_influence
+//     status     — 0 (success)
+//
+// This wrapper is the Phase-1 plumbing for task #79. The underlying
+// kernel currently returns -1 (Phase 2), so in practice this function
+// always returns NULL today and the R side runs the R fallback. Once
+// Phase 2 (#82-#85) fills the kernel, no R-side or Rcpp changes are
+// required — this seam stays stable.
+//
+// [[Rcpp::export]]
+SEXP didgpu_cuda_cs_inner_batched_r(
+    Rcpp::NumericVector X_concat,
+    Rcpp::IntegerVector X_offsets,
+    Rcpp::NumericVector Y_concat,
+    Rcpp::NumericVector W_concat,
+    int p, int n_units, int est_method,
+    bool want_influence) {
+#ifdef HAS_CUDA
+  const int n_cells = X_offsets.size() - 1;
+  if (n_cells <= 0) Rcpp::stop("X_offsets must have at least 2 elements");
+  if (p <= 0)       Rcpp::stop("p must be positive");
+
+  const int n_total = X_offsets[n_cells];
+  if (Y_concat.size() != n_total)
+    Rcpp::stop("Y_concat length (%d) does not match X_offsets last element (%d)",
+               (int)Y_concat.size(), n_total);
+  if (W_concat.size() != n_total)
+    Rcpp::stop("W_concat length (%d) does not match X_offsets last element (%d)",
+               (int)W_concat.size(), n_total);
+  if (X_concat.size() != n_total * p)
+    Rcpp::stop("X_concat length (%d) does not match n_total * p (%d * %d = %d)",
+               (int)X_concat.size(), n_total, p, n_total * p);
+
+  std::vector<double> att(n_cells, NA_REAL);
+  std::vector<double> influence;
+  double* infl_ptr = nullptr;
+  if (want_influence) {
+    influence.resize(static_cast<size_t>(n_units) * n_cells, 0.0);
+    infl_ptr = influence.data();
+  }
+
+  int rc = didgpu_cuda_cs_inner_batched(
+      &X_concat[0], &X_offsets[0],
+      &Y_concat[0], &X_offsets[0],   // canonical layout: same offsets
+      &W_concat[0], &X_offsets[0],
+      n_cells, p, n_units,
+      est_method,
+      att.data(), infl_ptr);
+
+  if (rc != 0) {
+    // Caller falls back to the R per-cell loop.
+    return R_NilValue;
+  }
+
+  Rcpp::NumericVector att_out(att.begin(), att.end());
+  Rcpp::List result;
+  result["att"]    = att_out;
+  result["status"] = 0;
+  if (want_influence) {
+    Rcpp::NumericMatrix IF(n_units, n_cells);
+    // row-major (unit-major) → R column-major matrix: copy element-wise.
+    for (int u = 0; u < n_units; ++u) {
+      for (int c = 0; c < n_cells; ++c) {
+        IF(u, c) = influence[static_cast<size_t>(u) * n_cells + c];
+      }
+    }
+    result["influence"] = IF;
+  } else {
+    result["influence"] = R_NilValue;
+  }
+  return result;
+#else
+  (void)X_concat; (void)X_offsets; (void)Y_concat; (void)W_concat;
+  (void)p; (void)n_units; (void)est_method; (void)want_influence;
+  // No CUDA at build time: caller falls back to R per-cell loop.
+  return R_NilValue;
 #endif
 }

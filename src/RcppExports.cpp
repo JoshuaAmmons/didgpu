@@ -104,6 +104,24 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// didgpu_cuda_cs_inner_batched_r
+SEXP didgpu_cuda_cs_inner_batched_r(Rcpp::NumericVector X_concat, Rcpp::IntegerVector X_offsets, Rcpp::NumericVector Y_concat, Rcpp::NumericVector W_concat, int p, int n_units, int est_method, bool want_influence);
+RcppExport SEXP _didgpu_didgpu_cuda_cs_inner_batched_r(SEXP X_concatSEXP, SEXP X_offsetsSEXP, SEXP Y_concatSEXP, SEXP W_concatSEXP, SEXP pSEXP, SEXP n_unitsSEXP, SEXP est_methodSEXP, SEXP want_influenceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type X_concat(X_concatSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type X_offsets(X_offsetsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type Y_concat(Y_concatSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type W_concat(W_concatSEXP);
+    Rcpp::traits::input_parameter< int >::type p(pSEXP);
+    Rcpp::traits::input_parameter< int >::type n_units(n_unitsSEXP);
+    Rcpp::traits::input_parameter< int >::type est_method(est_methodSEXP);
+    Rcpp::traits::input_parameter< bool >::type want_influence(want_influenceSEXP);
+    rcpp_result_gen = Rcpp::wrap(didgpu_cuda_cs_inner_batched_r(X_concat, X_offsets, Y_concat, W_concat, p, n_units, est_method, want_influence));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_didgpu_didgpu_cpp_core_one_event_time", (DL_FUNC) &_didgpu_didgpu_cpp_core_one_event_time, 13},
@@ -112,6 +130,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_didgpu_didgpu_cuda_did", (DL_FUNC) &_didgpu_didgpu_cuda_did, 13},
     {"_didgpu_didgpu_cuda_fect_fe_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_fe_r, 4},
     {"_didgpu_didgpu_run_saxpy", (DL_FUNC) &_didgpu_didgpu_run_saxpy, 3},
+    {"_didgpu_didgpu_cuda_cs_inner_batched_r", (DL_FUNC) &_didgpu_didgpu_cuda_cs_inner_batched_r, 8},
     {NULL, NULL, 0}
 };
 
