@@ -25,3 +25,7 @@ didgpu_run_saxpy <- function(a, x, y) {
     .Call(`_didgpu_didgpu_run_saxpy`, a, x, y)
 }
 
+didgpu_cuda_cs_inner_batched_r <- function(X_concat, X_offsets, Y_concat, W_concat, p, n_units, est_method, want_influence) {
+    .Call(`_didgpu_didgpu_cuda_cs_inner_batched_r`, X_concat, X_offsets, Y_concat, W_concat, p, n_units, est_method, want_influence)
+}
+

@@ -215,3 +215,89 @@
     stop("Unknown method: ", method)
   )
 }
+
+
+# ============================================================================
+# CUDA batched-inner: try to compute ALL cells in one GPU call.
+#
+# Phase-1 plumbing for task #79. The underlying kernel is scaffolded
+# (returns -1), so this function returns NULL today and the caller
+# falls back to the per-cell R loop. Once Phase 2 (#82-#85) fills the
+# kernel, this function returns the same shape as the per-cell loop
+# would have produced (an att vector + per-cell influence-function
+# vectors) and the orchestrator skips the loop.
+#
+# Inputs:
+#   cells      list of per-cell data; each element has $delta (numeric),
+#              $D_mask (logical), $X (matrix or NULL), $units (integer
+#              unit IDs in the order they appear in delta).
+#   method     "OR" / "IPW" / "DR"
+#   all_units  integer vector of all unit IDs in canonical order (the
+#              influence-function rows are indexed by position in this
+#              vector).
+#
+# Returns NULL if CUDA unavailable, the kernel returns nonzero, or any
+# error is thrown — the caller is responsible for falling back.
+#' @keywords internal
+#' @noRd
+.cs_inner_batched_cuda <- function(cells, method, all_units) {
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) return(NULL)
+  if (length(cells) == 0L) return(NULL)
+
+  method_int <- switch(method, "OR" = 0L, "IPW" = 1L, "DR" = 2L, NA_integer_)
+  if (is.na(method_int)) return(NULL)
+
+  # Marshal cells -> concatenated buffers. If any cell has no
+  # covariate matrix, fall back to a single intercept column. Mixed
+  # (some-with-X some-without) is rejected — the canonical CS layout
+  # uses a single design across all cells.
+  has_X <- vapply(cells, function(c) !is.null(c$X), logical(1))
+  if (any(has_X) && !all(has_X)) return(NULL)
+
+  p <- if (any(has_X)) ncol(cells[[1]]$X) + 1L else 1L  # +1 for intercept
+  n_cells <- length(cells)
+  n_per_cell <- vapply(cells, function(c) length(c$delta), integer(1))
+  offsets <- as.integer(c(0L, cumsum(n_per_cell)))
+  n_total <- offsets[n_cells + 1L]
+  if (n_total == 0L) return(NULL)
+
+  X_concat <- numeric(n_total * p)
+  Y_concat <- numeric(n_total)
+  W_concat <- numeric(n_total)
+  for (c_idx in seq_len(n_cells)) {
+    ce <- cells[[c_idx]]
+    rows <- (offsets[c_idx] + 1L):offsets[c_idx + 1L]
+    Y_concat[rows] <- ce$delta
+    W_concat[rows] <- as.numeric(ce$D_mask)
+    # Row-major X: rows of cell c are [start*p : (start + n_c)*p).
+    base <- offsets[c_idx] * p
+    if (any(has_X)) {
+      Xm <- cbind(1.0, ce$X)         # intercept first
+      # R matrix is column-major; we need row-major into X_concat.
+      for (r in seq_len(nrow(Xm))) {
+        X_concat[(base + (r - 1L) * p + 1L):(base + r * p)] <- Xm[r, ]
+      }
+    } else {
+      # Just an intercept column: X_concat[base+1 .. base+n_c] = 1.
+      X_concat[(base + 1L):(base + n_per_cell[c_idx])] <- 1.0
+    }
+  }
+
+  result <- tryCatch(
+    didgpu_cuda_cs_inner_batched_r(
+      X_concat       = X_concat,
+      X_offsets      = offsets,
+      Y_concat       = Y_concat,
+      W_concat       = W_concat,
+      p              = as.integer(p),
+      n_units        = length(all_units),
+      est_method     = method_int,
+      want_influence = TRUE),
+    error = function(e) NULL)
+
+  if (is.null(result)) return(NULL)
+  # Sanity-check return shape.
+  if (is.null(result$att) || length(result$att) != n_cells) return(NULL)
+  result
+}

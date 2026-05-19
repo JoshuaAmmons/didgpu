@@ -59,23 +59,32 @@
     rownames(X_mat) <- as.character(X_per_unit$G_XX)
   }
 
-  results <- list()
-  IF_list <- list()   # list of unit-level influence functions per cell
+  # ------------------------------------------------------------------
+  # Pass 1: enumerate every (g, t) cell and gather its inputs WITHOUT
+  # solving. The cell list is then handed to one of two solver paths:
+  #   (a) batched CUDA — single call across all cells (Phase 1 hook,
+  #       Phase 2 implementation),
+  #   (b) per-cell R   — current production path; also the fallback
+  #       when CUDA returns NULL.
+  # The cell metadata (g, t, units, n_treated, n_control) is the same
+  # either way, so the long-form data frame assembled below is solver-
+  # agnostic.
+  # ------------------------------------------------------------------
+  cell_meta <- list()
+  cell_data <- list()
   for (g in cohorts) {
     pre_t <- g - 1L
     if (pre_t < T_min) next
     Y_pre <- d[T_XX == pre_t, list(G_XX, Y_pre = Y_XX)]
     data.table::setkey(Y_pre, G_XX)
     for (t in T_min:T_max) {
-      # Skip the pre-period reference itself; it's mechanically 0.
-      if (t == pre_t) next
+      if (t == pre_t) next   # pre-period reference; mechanically 0
       Y_t <- d[T_XX == t, list(G_XX, Y_t = Y_XX)]
       data.table::setkey(Y_t, G_XX)
       merged <- merge(Y_pre, Y_t, by = "G_XX")
       merged[, delta_XX := Y_t - Y_pre]
       merged <- merged[!is.na(delta_XX)]
 
-      # Identify treated cohort and control units for this (g, t).
       treated_units <- unique(d$G_XX[d$F_g_XX == g])
       control_units <- .cs_control_units(d, units, F_g_per_unit,
                                             g, t, args$control_group)
@@ -91,26 +100,87 @@
         Xm <- NULL
       }
       n_total <- nrow(merged)
-      inner <- .cs_inner_dispatch(args$est_method, delta_v, D_mask,
-                                    Xm, n_total)
-      results[[length(results) + 1L]] <- data.frame(
-        g = as.integer(g),
-        t = as.integer(t),
-        event_time = as.integer(t - g),
-        att = as.numeric(inner$att),
-        se  = NA_real_,
-        n_treated = inner$n_treated,
-        n_control = inner$n_control,
-        stringsAsFactors = FALSE
-      )
-      # Store influence function indexed by unit ID for multiplier bootstrap.
-      IF_list[[length(IF_list) + 1L]] <- list(
-        g = g, t = t,
-        units = merged$G_XX,
-        IF = inner$IF
-      )
+
+      cell_meta[[length(cell_meta) + 1L]] <- list(
+        g = g, t = t, n_total = n_total,
+        n_treated = sum(D_mask), n_control = sum(!D_mask),
+        units = merged$G_XX)
+      cell_data[[length(cell_data) + 1L]] <- list(
+        delta = delta_v, D_mask = D_mask, X = Xm, n_total = n_total,
+        units = merged$G_XX)
     }
   }
+  n_cells <- length(cell_meta)
+  if (n_cells == 0L) {
+    out <- data.frame(g = integer(), t = integer(), event_time = integer(),
+                       att = numeric(), se = numeric(),
+                       n_treated = integer(), n_control = integer())
+    attr(out, "IF_per_cell") <- list()
+    attr(out, "F_g_per_unit") <- F_g_per_unit
+    attr(out, "units")        <- units
+    return(out)
+  }
+
+  # ------------------------------------------------------------------
+  # Pass 2: solve.
+  # ------------------------------------------------------------------
+  cuda_result <- NULL
+  if (identical(args$backend, "cuda")) {
+    cuda_result <- .cs_inner_batched_cuda(
+      cells     = cell_data,
+      method    = args$est_method,
+      all_units = units)
+  }
+
+  solver_atts <- numeric(n_cells)
+  IF_list <- vector("list", n_cells)
+  if (!is.null(cuda_result)) {
+    # CUDA succeeded. Pull per-cell ATT from the returned vector and
+    # per-cell influence vectors from the n_units x n_cells matrix.
+    # Each cell only uses a subset of units; we project the column of
+    # the IF matrix back onto each cell's unit list.
+    unit_to_row <- stats::setNames(seq_along(units), as.character(units))
+    for (c_idx in seq_len(n_cells)) {
+      solver_atts[c_idx] <- cuda_result$att[c_idx]
+      cell_units <- cell_meta[[c_idx]]$units
+      if (!is.null(cuda_result$influence)) {
+        rows <- unit_to_row[as.character(cell_units)]
+        IF_list[[c_idx]] <- list(
+          g = cell_meta[[c_idx]]$g, t = cell_meta[[c_idx]]$t,
+          units = cell_units,
+          IF    = as.numeric(cuda_result$influence[rows, c_idx]))
+      } else {
+        IF_list[[c_idx]] <- list(
+          g = cell_meta[[c_idx]]$g, t = cell_meta[[c_idx]]$t,
+          units = cell_units, IF = rep(NA_real_, length(cell_units)))
+      }
+    }
+  } else {
+    # R fallback: per-cell solve.
+    for (c_idx in seq_len(n_cells)) {
+      ce <- cell_data[[c_idx]]
+      inner <- .cs_inner_dispatch(args$est_method, ce$delta, ce$D_mask,
+                                    ce$X, ce$n_total)
+      solver_atts[c_idx] <- as.numeric(inner$att)
+      IF_list[[c_idx]] <- list(
+        g = cell_meta[[c_idx]]$g, t = cell_meta[[c_idx]]$t,
+        units = cell_meta[[c_idx]]$units, IF = inner$IF)
+    }
+  }
+
+  # ------------------------------------------------------------------
+  # Assemble long-form result.
+  # ------------------------------------------------------------------
+  results <- lapply(seq_len(n_cells), function(c_idx) {
+    m <- cell_meta[[c_idx]]
+    data.frame(
+      g = as.integer(m$g), t = as.integer(m$t),
+      event_time = as.integer(m$t - m$g),
+      att = solver_atts[c_idx], se = NA_real_,
+      n_treated = as.integer(m$n_treated),
+      n_control = as.integer(m$n_control),
+      stringsAsFactors = FALSE)
+  })
   out <- do.call(rbind, results)
   rownames(out) <- NULL
   attr(out, "IF_per_cell") <- IF_list
