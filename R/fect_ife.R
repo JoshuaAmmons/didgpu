@@ -41,11 +41,42 @@
 }
 
 
-# IFE fit: alternating fe-step + svd-step until convergence.
-# Returns alpha, xi, L (n_units x r), F (r x n_periods), iter, delta.
+# CUDA wrapper for the truncated-SVD step. Phase-1 wiring for task
+# #80: dispatches to the cuSOLVER kernel and returns the same shape
+# as .fect_svd_r (L, F). If CUDA is unavailable, the kernel returns
+# nonzero, or anything else goes wrong, returns NULL so the caller
+# falls back to .fect_svd_r.
 #' @keywords internal
 #' @noRd
-.fect_ife_fit <- function(Y, M, r = 2L, tol = 1e-5, max_iter = 500L) {
+.fect_svd_truncated_cuda <- function(M, r) {
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) return(NULL)
+  M0 <- M
+  M0[is.na(M0)] <- 0
+  result <- tryCatch(
+    didgpu_cuda_fect_svd_truncated_r(M = M0, r = as.integer(r)),
+    error = function(e) NULL)
+  if (is.null(result)) return(NULL)
+  if (is.null(result$L) || is.null(result$F)) return(NULL)
+  # Pad with NA for d (cuSOLVER doesn't return S separately in this
+  # kernel — the R fallback computes it from svd()). Phase 2 #86 will
+  # extend the kernel to also return s.
+  list(L = result$L, F = result$F, d = rep(NA_real_, r))
+}
+
+
+# IFE fit: alternating fe-step + svd-step until convergence.
+# Returns alpha, xi, L (n_units x r), F (r x n_periods), iter, delta.
+#
+# `use_cuda_svd`: when TRUE, every iteration's truncated SVD is
+# computed on the GPU via .fect_svd_truncated_cuda. If a single CUDA
+# call fails, the function silently falls back to .fect_svd_r for the
+# remainder of the fit (the alternation may have started — switching
+# back mid-loop is safe because both kernels produce the same shape).
+#' @keywords internal
+#' @noRd
+.fect_ife_fit <- function(Y, M, r = 2L, tol = 1e-5, max_iter = 500L,
+                          use_cuda_svd = FALSE) {
   n_units   <- nrow(Y)
   n_periods <- ncol(Y)
   Y_c <- Y
@@ -67,7 +98,14 @@
 
     # svd step on the residual after fe.
     R <- Y_c - alpha - matrix(xi, n_units, n_periods, byrow = TRUE)
-    svd_res <- .fect_svd_r(R, r)
+    svd_res <- if (use_cuda_svd) {
+      cuda_res <- .fect_svd_truncated_cuda(R, r)
+      if (is.null(cuda_res)) {
+        # CUDA failed once; stop trying for the rest of this fit.
+        use_cuda_svd <- FALSE
+        .fect_svd_r(R, r)
+      } else cuda_res
+    } else .fect_svd_r(R, r)
     L <- svd_res$L
     F <- svd_res$F
 
@@ -147,17 +185,16 @@
   use_cuda <- identical(args$backend, "cuda") &&
               isTRUE(tryCatch(didgpu_has_cuda_support(),
                                error = function(e) FALSE))
-  # CUDA path uses src/cuda_fect_ife.cu (cuSOLVER batched SVDJ);
-  # untested locally without nvcc, falls back to R svd() in that case.
-  fit <- if (use_cuda) {
-    .fect_ife_fit(mats$Y, mats$M, r = args$r %||% 2L,
-                   tol = args$tol %||% 1e-5,
-                   max_iter = args$max_iter %||% 500L)
-  } else {
-    .fect_ife_fit(mats$Y, mats$M, r = args$r %||% 2L,
-                   tol = args$tol %||% 1e-5,
-                   max_iter = args$max_iter %||% 500L)
-  }
+  # The fect_ife alternation uses cuSOLVER for the truncated-SVD
+  # step when use_cuda_svd = TRUE; the fe step still runs on the host
+  # in R (Phase 2 task #86 fuses both halves into one device-side
+  # alternation kernel). If the per-iter CUDA SVD ever fails,
+  # .fect_ife_fit silently switches back to svd() for the rest of the
+  # fit, so this path is safe even on a flaky GPU.
+  fit <- .fect_ife_fit(mats$Y, mats$M, r = args$r %||% 2L,
+                       tol = args$tol %||% 1e-5,
+                       max_iter = args$max_iter %||% 500L,
+                       use_cuda_svd = use_cuda)
   res <- .fect_ife_compute_att(mats$Y, mats$M, fit, effects = args$effects)
   wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 

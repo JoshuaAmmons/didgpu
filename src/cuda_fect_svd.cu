@@ -96,6 +96,35 @@ __global__ void k_scale_rows_rm(const double* __restrict__ in,
 }
 
 
+// Fused transpose+scale: build F = sqrt(D_r) * V_r^T directly from
+// the col-major V matrix output by cuSOLVER, without an intermediate
+// buffer.
+//
+// Inputs:
+//   V_cm   : (n x r) column-major (the first r columns of cuSOLVER's
+//            V output). ld = n.
+//   sqrt_S : length r vector of sqrt(singular values).
+// Output:
+//   F_rm   : (r x n) row-major. F_rm[a, b] = sqrt_S[a] * V_cm[b, a].
+//
+// Index identity: F_rm[a*n + b] in row-major is at the same linear
+// index as V_cm[b + a*n] in col-major (since both equal a*n + b).
+// So the kernel reads V_cm[idx] for idx in [0, r*n), interprets the
+// "row" coordinate of F as idx / n, multiplies by sqrt_S of that row,
+// and writes to F_rm[idx]. No actual data shuffle needed beyond the
+// element-wise multiplication.
+__global__ void k_build_F_from_Vcm(const double* __restrict__ V_cm,
+                                     const double* __restrict__ sqrt_S,
+                                     double*       __restrict__ F_rm,
+                                     int r, int n) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  const int total = r * n;
+  if (idx >= total) return;
+  const int a = idx / n;       // row of F == column of V_cm
+  F_rm[idx] = sqrt_S[a] * V_cm[idx];
+}
+
+
 // ---------------------------------------------------------------------------
 // Truncated rank-r SVD: input M (m x n, row-major), output L (m x r)
 // and F (r x n) such that L * F is a rank-r approximation of M.
@@ -129,7 +158,9 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
   int*    d_info   = nullptr;
   double* d_sqrt_S = nullptr;
   double* d_L_cm   = nullptr;
-  double* d_F_temp = nullptr;
+  // (formerly d_F_temp) — no longer needed; k_build_F_from_Vcm fuses
+  // the transpose-from-col-major and the per-row sqrt_S scaling into
+  // one element-wise pass over d_V.
   int lwork = 0;
   int total = 0;
 
@@ -189,18 +220,15 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
   // Transpose L_cm (m x r col-major) -> L_rm (m x r row-major).
   k_transpose_cm_to_rm<<<(m * r + 255) / 256, 256>>>(d_L_cm, d_L_out_rm, m, r);
 
-  // F = diag(sqrt(D_r)) * V[:, 1..r]^T. V is n x n column-major; we want
-  // V[:, 1..r] (n x r) then transpose to (r x n), then scale ROWS by sqrt(D_r).
-  // Equivalent: take V[:, 1..r] (n x r col-major), transpose to (r x n) row-
-  // major, then scale rows.
-  cudaMalloc((void**)&d_F_temp, sizeof(double) * r * n);
-  // V_cm[:, 1..r] is the leading n x r col-major; transposing gives r x n row-major.
-  k_transpose_cm_to_rm<<<(n * r + 255) / 256, 256>>>(d_V, d_F_temp, n, r);
-  // Now scale each row of d_F_temp (r x n row-major) by sqrt(D_r)[i].
-  k_scale_rows_rm<<<(r * n + 255) / 256, 256>>>(d_F_temp, d_sqrt_S,
-                                                  d_F_out_rm, r, n);
+  // F = diag(sqrt(D_r)) * V[:, 1..r]^T. V is n x n column-major; we
+  // want V[:, 1..r] (n x r) then transpose to (r x n), then scale
+  // ROWS by sqrt(D_r). Fused into a single kernel via the index
+  // identity F_rm[a*n + b] == V_cm[a*n + b] when V_cm is (n x r)
+  // col-major (so its element (b, a) lives at b + a*n = a*n + b).
+  k_build_F_from_Vcm<<<(r * n + 255) / 256, 256>>>(
+      d_V, d_sqrt_S, d_F_out_rm, r, n);
+  cudaDeviceSynchronize();
 
-  cudaFree(d_F_temp);
   cudaFree(d_L_cm);
   cudaFree(d_sqrt_S);
   cudaFree(d_U); cudaFree(d_V); cudaFree(d_S); cudaFree(d_M_cm);
@@ -209,7 +237,6 @@ extern "C" int didgpu_cuda_fect_svd_truncated(
   return 0;
 
 fail:
-  if (d_F_temp) cudaFree(d_F_temp);
   if (d_L_cm)   cudaFree(d_L_cm);
   if (d_sqrt_S) cudaFree(d_sqrt_S);
   if (d_work)   cudaFree(d_work);
