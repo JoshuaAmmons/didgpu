@@ -44,6 +44,11 @@ extern "C" int didgpu_cuda_fect_svd_softthreshold(
     double lambda,
     double* d_Y_hat_rm,
     int* out_n_nonzero);
+extern "C" int didgpu_cuda_testmechs_bootstrap(
+    const int* h_d, const int* h_m, const int* h_y,
+    int n, int K, int dy, int B,
+    unsigned long seed,
+    double* h_beta);
 #endif
 
 // [[Rcpp::export]]
@@ -285,6 +290,68 @@ Rcpp::NumericVector didgpu_run_saxpy(double a, Rcpp::NumericVector x, Rcpp::Nume
 #else
   (void)a; (void)x; (void)y;
   Rcpp::stop("didgpu was built without CUDA support. Reinstall after installing the NVIDIA CUDA Toolkit so nvcc is on PATH.");
+#endif
+}
+
+
+// TestMechs nonparametric bootstrap on the GPU.
+//
+// Inputs:
+//   d, m, y : integer-coded observation triples (each length n).
+//             d in {0, 1}, m in {1, .., K}, y in {1, .., dy}.
+//             1-based for m, y to match the R-side conventions.
+//   B       : number of bootstrap replicates.
+//   K, dy   : alphabet sizes (caller is responsible for setting these
+//             correctly; the kernel assumes they're right).
+//   seed    : RNG seed (used by cuRAND, NOT the same stream as R's
+//             Mersenne-Twister — outputs differ from .testmechs_
+//             bootstrap_r at the same seed, but both are valid bootstraps).
+//
+// Returns NULL on any CUDA error. On success returns a B x dim_beta
+// numeric matrix where dim_beta = 2 * K * dy (per-D block of K*dy
+// (m, y) cells, stacked [D=0, D=1]). Each per-D block sums to 1 within
+// a row.
+//
+// The "bayes" method has no GPU path yet (the kernel only does
+// nonparametric multinomial resampling); the R-side helper falls back
+// to .testmechs_bootstrap_r in that case.
+//
+// [[Rcpp::export]]
+SEXP didgpu_cuda_testmechs_bootstrap_r(
+    Rcpp::IntegerVector d,
+    Rcpp::IntegerVector m,
+    Rcpp::IntegerVector y,
+    int B, int K, int dy,
+    int seed) {
+#ifdef HAS_CUDA
+  const int n = d.size();
+  if (m.size() != n || y.size() != n)
+    Rcpp::stop("d, m, y must be the same length; got %d, %d, %d",
+               n, (int)m.size(), (int)y.size());
+  if (B  <= 0) Rcpp::stop("B must be positive; got %d", B);
+  if (K  <= 0) Rcpp::stop("K must be positive; got %d", K);
+  if (dy <= 0) Rcpp::stop("dy must be positive; got %d", dy);
+
+  const int dim_beta = 2 * K * dy;
+  std::vector<double> beta(static_cast<size_t>(B) * dim_beta, 0.0);
+
+  int rc = didgpu_cuda_testmechs_bootstrap(
+      &d[0], &m[0], &y[0],
+      n, K, dy, B,
+      static_cast<unsigned long>(seed),
+      beta.data());
+  if (rc != 0) return R_NilValue;
+
+  // Pack row-major host buffer (B x dim_beta) into a column-major R
+  // matrix of the same shape.
+  Rcpp::NumericMatrix out(B, dim_beta);
+  for (int b = 0; b < B; ++b)
+    for (int j = 0; j < dim_beta; ++j)
+      out(b, j) = beta[static_cast<size_t>(b) * dim_beta + j];
+  return out;
+#else
+  (void)d; (void)m; (void)y; (void)B; (void)K; (void)dy; (void)seed;
+  return R_NilValue;
 #endif
 }
 
