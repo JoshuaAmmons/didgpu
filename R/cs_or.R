@@ -321,6 +321,15 @@
   }
   n_unit <- length(units)
 
+  # GPU fast path: when backend == "cuda", try the multiplier-bootstrap
+  # kernel. It computes the (B, n_cells) bootstrap-deviation matrix in
+  # one launch (a (B x n_units) @ (n_units x n_cells) Rademacher-weighted
+  # product). Falls back to the R loop on any failure.
+  if (identical(args$backend, "cuda")) {
+    cuda_se <- .cs_multiplier_bootstrap_cuda(att_gt, args)
+    if (!is.null(cuda_se)) return(cuda_se)
+  }
+
   # Rademacher weights: +1 / -1 with equal probability. Mammen weights
   # (golden-ratio-based) are an alternative; both are second-order accurate.
   boot_mat <- matrix(NA_real_, nrow = B, ncol = nrow(att_gt))
@@ -337,6 +346,59 @@
     }
   }
   ses <- apply(boot_mat, 2L, function(col) stats::sd(col, na.rm = TRUE))
+  att_gt$se <- as.numeric(ses)
+  z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
+  att_gt$ci_low  <- att_gt$att - z * att_gt$se
+  att_gt$ci_high <- att_gt$att + z * att_gt$se
+  att_gt
+}
+
+
+# GPU multiplier (wild) bootstrap. Builds the (n_units, n_cells) IF
+# matrix from attr(att_gt, "IF_per_cell"), calls the CUDA kernel with
+# Rademacher weights, and reads back columnwise SDs.
+#
+# Mathematically identical to .cs_multiplier_bootstrap_se's R loop
+# (modulo RNG differences) when the per-cell IF stored by
+# .cs_inner_dispatch is already divided by the per-cell sample size
+# (.cs_inner_or et al. do this divide before storing). Per-replicate
+# deviations differ because cuRAND != MT19937; population SDs match
+# to within Monte-Carlo error.
+#
+# Returns NULL on any failure for caller fallback.
+#' @keywords internal
+#' @noRd
+.cs_multiplier_bootstrap_cuda <- function(att_gt, args) {
+  B <- args$bootstrap_reps
+  if (B <= 0L) return(NULL)
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) return(NULL)
+  IF_list <- attr(att_gt, "IF_per_cell")
+  units   <- attr(att_gt, "units")
+  if (is.null(IF_list) || is.null(units)) return(NULL)
+  n_unit  <- length(units)
+  n_cells <- nrow(att_gt)
+  if (length(IF_list) != n_cells) return(NULL)
+
+  IF_mat <- matrix(0.0, nrow = n_unit, ncol = n_cells)
+  unit_to_row <- stats::setNames(seq_along(units), as.character(units))
+  for (c_idx in seq_along(IF_list)) {
+    cell <- IF_list[[c_idx]]
+    if (is.null(cell$IF) || length(cell$IF) == 0L) next
+    rows <- unit_to_row[as.character(cell$units)]
+    IF_mat[rows, c_idx] <- cell$IF / length(cell$IF)
+  }
+
+  result <- tryCatch(
+    didgpu_cuda_multiplier_bootstrap_r(
+      IF        = IF_mat,
+      B         = as.integer(B),
+      mult_kind = 0L,            # Rademacher
+      seed      = as.integer(args$seed %||% 1L)),
+    error = function(e) NULL)
+  if (is.null(result)) return(NULL)
+
+  ses <- apply(result, 2L, function(col) stats::sd(col, na.rm = TRUE))
   att_gt$se <- as.numeric(ses)
   z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
   att_gt$ci_low  <- att_gt$att - z * att_gt$se
