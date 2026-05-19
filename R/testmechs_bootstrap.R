@@ -101,17 +101,44 @@
 }
 
 
-# CUDA bootstrap (stub for now; the .cu kernel lives in
-# src/cuda_testmechs_bootstrap.cu and is wired through an Rcpp helper).
-# For now this falls back to the R implementation; the wiring will be
-# completed in a follow-up session once the .cu file is fleshed out.
+# CUDA bootstrap: calls didgpu_cuda_testmechs_bootstrap_r (cuRAND-
+# based nonparametric multinomial resampling, B blocks of n picks).
+#
+# Important: the GPU kernel uses cuRAND; the R fallback uses base R's
+# Mersenne-Twister. They produce DIFFERENT random sequences at the
+# same seed, so the per-replicate matrices differ — but both are
+# valid bootstrap draws and their means / covariances converge to the
+# same population values for large B.
+#
+# The kernel only implements the "nonparametric" method; "bayes" goes
+# through the R fallback. Any CUDA failure also falls back silently.
 #' @keywords internal
 #' @noRd
 .testmechs_bootstrap_cuda <- function(d, m, y, B, method, seed) {
-  # TODO: call didgpu_cuda_testmechs_bootstrap_r when wired in.
-  # Until then, fall back to the R implementation.
-  message("[testmechs] CUDA bootstrap not yet wired; falling back to R.")
-  .testmechs_bootstrap_r(d, m, y, B, method, seed)
+  if (!identical(method, "nonparametric")) {
+    return(.testmechs_bootstrap_r(d, m, y, B, method, seed))
+  }
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) {
+    return(.testmechs_bootstrap_r(d, m, y, B, method, seed))
+  }
+  K  <- max(m, na.rm = TRUE)
+  dy <- max(y, na.rm = TRUE)
+  result <- tryCatch(
+    didgpu_cuda_testmechs_bootstrap_r(
+      d    = as.integer(d),
+      m    = as.integer(m),
+      y    = as.integer(y),
+      B    = as.integer(B),
+      K    = as.integer(K),
+      dy   = as.integer(dy),
+      seed = as.integer(seed)),
+    error = function(e) NULL)
+  if (is.null(result)) {
+    message("[testmechs] CUDA bootstrap returned NULL; falling back to R.")
+    return(.testmechs_bootstrap_r(d, m, y, B, method, seed))
+  }
+  result
 }
 
 
