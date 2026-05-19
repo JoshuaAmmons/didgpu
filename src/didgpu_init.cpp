@@ -33,6 +33,17 @@ extern "C" int didgpu_cuda_cs_inner_batched(
     int n_cells, int p, int n_units,
     int est_method,
     double* out_att, double* out_influence);
+extern "C" int didgpu_cuda_fect_svd_truncated(
+    const double* d_M_rm,
+    int m, int n, int r,
+    double* d_L_out_rm,
+    double* d_F_out_rm);
+extern "C" int didgpu_cuda_fect_svd_softthreshold(
+    const double* d_Y_complete_rm,
+    int m, int n,
+    double lambda,
+    double* d_Y_hat_rm,
+    int* out_n_nonzero);
 #endif
 
 // [[Rcpp::export]]
@@ -274,6 +285,156 @@ Rcpp::NumericVector didgpu_run_saxpy(double a, Rcpp::NumericVector x, Rcpp::Nume
 #else
   (void)a; (void)x; (void)y;
   Rcpp::stop("didgpu was built without CUDA support. Reinstall after installing the NVIDIA CUDA Toolkit so nvcc is on PATH.");
+#endif
+}
+
+
+// Rank-r truncated SVD on the GPU. Returns L (m x r) and F (r x n)
+// such that L * F is a rank-r approximation of M (m x n). This is the
+// LR decomposition the alternating fect_ife loop consumes directly.
+//
+// Inputs:
+//   M : R numeric matrix (m x n). NaN cells are passed through to the
+//       kernel; the caller (fect_ife) is responsible for any masking.
+//   r : truncation rank, 1 <= r <= min(m, n).
+//
+// Returns NULL if CUDA reports any error (caller falls back to
+// .fect_svd_r). On success returns list(L, F, status = 0).
+//
+// [[Rcpp::export]]
+SEXP didgpu_cuda_fect_svd_truncated_r(Rcpp::NumericMatrix M, int r) {
+#ifdef HAS_CUDA
+  const int m = M.nrow();
+  const int n = M.ncol();
+  if (r <= 0 || r > std::min(m, n)) {
+    Rcpp::stop("r must satisfy 1 <= r <= min(m, n); got r=%d, m=%d, n=%d",
+               r, m, n);
+  }
+
+  // R matrices are column-major; the kernel wants row-major.
+  std::vector<double> M_rm(static_cast<size_t>(m) * n);
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < n; ++j)
+      M_rm[static_cast<size_t>(i) * n + j] = M(i, j);
+
+  double *d_M = nullptr, *d_L = nullptr, *d_F = nullptr;
+  cudaError_t e;
+  auto cleanup_and_return_null = [&]() -> SEXP {
+    if (d_M) cudaFree(d_M);
+    if (d_L) cudaFree(d_L);
+    if (d_F) cudaFree(d_F);
+    return R_NilValue;
+  };
+
+  e = cudaMalloc((void**)&d_M, sizeof(double) * m * n);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+  e = cudaMalloc((void**)&d_L, sizeof(double) * m * r);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+  e = cudaMalloc((void**)&d_F, sizeof(double) * r * n);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+
+  e = cudaMemcpy(d_M, M_rm.data(), sizeof(double) * m * n,
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+
+  int rc = didgpu_cuda_fect_svd_truncated(d_M, m, n, r, d_L, d_F);
+  if (rc != 0) return cleanup_and_return_null();
+
+  std::vector<double> L_rm(static_cast<size_t>(m) * r);
+  std::vector<double> F_rm(static_cast<size_t>(r) * n);
+  cudaMemcpy(L_rm.data(), d_L, sizeof(double) * m * r,
+              cudaMemcpyDeviceToHost);
+  cudaMemcpy(F_rm.data(), d_F, sizeof(double) * r * n,
+              cudaMemcpyDeviceToHost);
+  cudaFree(d_M); cudaFree(d_L); cudaFree(d_F);
+
+  // Convert row-major host -> column-major R matrices.
+  Rcpp::NumericMatrix L(m, r), F(r, n);
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < r; ++j)
+      L(i, j) = L_rm[static_cast<size_t>(i) * r + j];
+  for (int i = 0; i < r; ++i)
+    for (int j = 0; j < n; ++j)
+      F(i, j) = F_rm[static_cast<size_t>(i) * n + j];
+
+  Rcpp::List result;
+  result["L"]      = L;
+  result["F"]      = F;
+  result["status"] = 0;
+  return result;
+#else
+  (void)M; (void)r;
+  return R_NilValue;
+#endif
+}
+
+
+// Soft-thresholded SVD reconstruction on the GPU. Computes
+//   Y_hat = U %*% diag(max(s - lambda, 0)) %*% V^T
+// where (U, s, V) come from svd(Y_complete). Used by fect_mc's per-
+// iteration update.
+//
+// Inputs:
+//   Y_complete : R numeric matrix (m x n), the matrix being
+//                completed. Caller is responsible for filling treated
+//                cells with their current estimate before the call.
+//   lambda     : soft-threshold parameter (>= 0).
+//
+// Returns NULL on CUDA error. On success returns list(Y_hat, n_nonzero,
+// status = 0).
+//
+// [[Rcpp::export]]
+SEXP didgpu_cuda_fect_svd_softthreshold_r(Rcpp::NumericMatrix Y_complete,
+                                            double lambda) {
+#ifdef HAS_CUDA
+  const int m = Y_complete.nrow();
+  const int n = Y_complete.ncol();
+  if (lambda < 0.0) Rcpp::stop("lambda must be non-negative; got %f", lambda);
+
+  std::vector<double> Y_rm(static_cast<size_t>(m) * n);
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < n; ++j)
+      Y_rm[static_cast<size_t>(i) * n + j] = Y_complete(i, j);
+
+  double *d_Y = nullptr, *d_Yhat = nullptr;
+  cudaError_t e;
+  auto cleanup_and_return_null = [&]() -> SEXP {
+    if (d_Y)    cudaFree(d_Y);
+    if (d_Yhat) cudaFree(d_Yhat);
+    return R_NilValue;
+  };
+
+  e = cudaMalloc((void**)&d_Y,    sizeof(double) * m * n);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+  e = cudaMalloc((void**)&d_Yhat, sizeof(double) * m * n);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+  e = cudaMemcpy(d_Y, Y_rm.data(), sizeof(double) * m * n,
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) return cleanup_and_return_null();
+
+  int n_nonzero = 0;
+  int rc = didgpu_cuda_fect_svd_softthreshold(d_Y, m, n, lambda,
+                                                d_Yhat, &n_nonzero);
+  if (rc != 0) return cleanup_and_return_null();
+
+  std::vector<double> Yhat_rm(static_cast<size_t>(m) * n);
+  cudaMemcpy(Yhat_rm.data(), d_Yhat, sizeof(double) * m * n,
+              cudaMemcpyDeviceToHost);
+  cudaFree(d_Y); cudaFree(d_Yhat);
+
+  Rcpp::NumericMatrix Y_hat(m, n);
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < n; ++j)
+      Y_hat(i, j) = Yhat_rm[static_cast<size_t>(i) * n + j];
+
+  Rcpp::List result;
+  result["Y_hat"]     = Y_hat;
+  result["n_nonzero"] = n_nonzero;
+  result["status"]    = 0;
+  return result;
+#else
+  (void)Y_complete; (void)lambda;
+  return R_NilValue;
 #endif
 }
 

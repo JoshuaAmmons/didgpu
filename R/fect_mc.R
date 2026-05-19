@@ -108,10 +108,35 @@
 }
 
 
-# MC fit: iterative soft-thresholded SVD.
+# CUDA wrapper for one soft-thresholded-SVD step. Phase-1 wiring for
+# task #80: returns Y_hat (m x n) and the count of non-zero singular
+# values, or NULL if anything goes wrong.
 #' @keywords internal
 #' @noRd
-.fect_mc_fit <- function(Y, M, lambda = NULL, tol = 1e-5, max_iter = 500L) {
+.fect_svd_softthreshold_cuda <- function(Y_complete, lambda) {
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) return(NULL)
+  result <- tryCatch(
+    didgpu_cuda_fect_svd_softthreshold_r(Y_complete = Y_complete,
+                                           lambda = lambda),
+    error = function(e) NULL)
+  if (is.null(result)) return(NULL)
+  if (is.null(result$Y_hat)) return(NULL)
+  list(Y_hat = result$Y_hat,
+       n_nonzero = as.integer(result$n_nonzero %||% NA_integer_))
+}
+
+
+# MC fit: iterative soft-thresholded SVD.
+#
+# `use_cuda_svd`: when TRUE, every iteration's soft-thresholded SVD
+# step runs on the GPU via .fect_svd_softthreshold_cuda. If any CUDA
+# call fails, the function silently switches back to host svd() for
+# the rest of the fit.
+#' @keywords internal
+#' @noRd
+.fect_mc_fit <- function(Y, M, lambda = NULL, tol = 1e-5, max_iter = 500L,
+                          use_cuda_svd = FALSE) {
   n_units   <- nrow(Y)
   n_periods <- ncol(Y)
   if (is.null(lambda)) lambda <- .fect_mc_default_lambda(Y, M)
@@ -123,20 +148,33 @@
 
   Y_hat <- matrix(0, n_units, n_periods)
   prev_Y_hat <- Y_hat
+  n_nz <- 0L
 
   for (iter in seq_len(max_iter)) {
-    s <- svd(Y_complete)
-    D_st <- .soft_threshold(s$d, lambda)
-    # Y_hat = U * diag(D_st) * V^T, only using non-zero singular values
-    # for efficiency.
-    nz <- D_st > 0
-    if (any(nz)) {
-      Y_hat <- s$u[, nz, drop = FALSE] %*%
-               diag(D_st[nz], sum(nz), sum(nz)) %*%
-               t(s$v[, nz, drop = FALSE])
-    } else {
-      Y_hat <- matrix(0, n_units, n_periods)
+    Y_hat_new <- NULL
+    if (use_cuda_svd) {
+      cuda_res <- .fect_svd_softthreshold_cuda(Y_complete, lambda)
+      if (!is.null(cuda_res)) {
+        Y_hat_new <- cuda_res$Y_hat
+        n_nz <- cuda_res$n_nonzero
+      } else {
+        use_cuda_svd <- FALSE   # disable for remainder of fit
+      }
     }
+    if (is.null(Y_hat_new)) {
+      s <- svd(Y_complete)
+      D_st <- .soft_threshold(s$d, lambda)
+      nz <- D_st > 0
+      n_nz <- sum(nz)
+      if (any(nz)) {
+        Y_hat_new <- s$u[, nz, drop = FALSE] %*%
+                     diag(D_st[nz], sum(nz), sum(nz)) %*%
+                     t(s$v[, nz, drop = FALSE])
+      } else {
+        Y_hat_new <- matrix(0, n_units, n_periods)
+      }
+    }
+    Y_hat <- Y_hat_new
     # Update Y_complete: replace treated cells with current estimate.
     Y_complete[M == 1L] <- Y_hat[M == 1L]
     delta <- max(abs(Y_hat - prev_Y_hat))
@@ -146,7 +184,7 @@
 
   list(Y_hat = Y_hat, lambda = lambda,
        iter = iter, delta = delta,
-       n_nonzero_singular = sum(D_st > 0))
+       n_nonzero_singular = as.integer(n_nz))
 }
 
 
@@ -240,7 +278,8 @@
   fit <- .fect_mc_fit(mats$Y, mats$M,
                         lambda = lambda,
                         tol = args$tol %||% 1e-5,
-                        max_iter = args$max_iter %||% 500L)
+                        max_iter = args$max_iter %||% 500L,
+                        use_cuda_svd = use_cuda)
   res <- .fect_mc_compute_att(mats$Y, mats$M, fit, effects = args$effects)
   wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 

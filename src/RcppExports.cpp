@@ -104,6 +104,30 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// didgpu_cuda_fect_svd_truncated_r
+SEXP didgpu_cuda_fect_svd_truncated_r(Rcpp::NumericMatrix M, int r);
+RcppExport SEXP _didgpu_didgpu_cuda_fect_svd_truncated_r(SEXP MSEXP, SEXP rSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type M(MSEXP);
+    Rcpp::traits::input_parameter< int >::type r(rSEXP);
+    rcpp_result_gen = Rcpp::wrap(didgpu_cuda_fect_svd_truncated_r(M, r));
+    return rcpp_result_gen;
+END_RCPP
+}
+// didgpu_cuda_fect_svd_softthreshold_r
+SEXP didgpu_cuda_fect_svd_softthreshold_r(Rcpp::NumericMatrix Y_complete, double lambda);
+RcppExport SEXP _didgpu_didgpu_cuda_fect_svd_softthreshold_r(SEXP Y_completeSEXP, SEXP lambdaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type Y_complete(Y_completeSEXP);
+    Rcpp::traits::input_parameter< double >::type lambda(lambdaSEXP);
+    rcpp_result_gen = Rcpp::wrap(didgpu_cuda_fect_svd_softthreshold_r(Y_complete, lambda));
+    return rcpp_result_gen;
+END_RCPP
+}
 // didgpu_cuda_cs_inner_batched_r
 SEXP didgpu_cuda_cs_inner_batched_r(Rcpp::NumericVector X_concat, Rcpp::IntegerVector X_offsets, Rcpp::NumericVector Y_concat, Rcpp::NumericVector W_concat, int p, int n_units, int est_method, bool want_influence);
 RcppExport SEXP _didgpu_didgpu_cuda_cs_inner_batched_r(SEXP X_concatSEXP, SEXP X_offsetsSEXP, SEXP Y_concatSEXP, SEXP W_concatSEXP, SEXP pSEXP, SEXP n_unitsSEXP, SEXP est_methodSEXP, SEXP want_influenceSEXP) {
@@ -130,6 +154,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_didgpu_didgpu_cuda_did", (DL_FUNC) &_didgpu_didgpu_cuda_did, 13},
     {"_didgpu_didgpu_cuda_fect_fe_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_fe_r, 4},
     {"_didgpu_didgpu_run_saxpy", (DL_FUNC) &_didgpu_didgpu_run_saxpy, 3},
+    {"_didgpu_didgpu_cuda_fect_svd_truncated_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_svd_truncated_r, 2},
+    {"_didgpu_didgpu_cuda_fect_svd_softthreshold_r", (DL_FUNC) &_didgpu_didgpu_cuda_fect_svd_softthreshold_r, 2},
     {"_didgpu_didgpu_cuda_cs_inner_batched_r", (DL_FUNC) &_didgpu_didgpu_cuda_cs_inner_batched_r, 8},
     {NULL, NULL, 0}
 };
