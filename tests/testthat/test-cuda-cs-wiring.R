@@ -35,33 +35,71 @@ test_that(".cs_inner_batched_cuda returns NULL while kernel is scaffolded", {
                               error = function(e) FALSE)),
               "CUDA support not compiled into this build")
   cells <- list(
-    list(delta = c(1.0, 2.0, -0.5), D_mask = c(TRUE, FALSE, FALSE),
-         X = NULL, n_total = 3L, units = c(1L, 2L, 3L)),
+    # Cell 1: 2 treated, 2 control. Y_t = (1.0, 3.0), Y_c = (2.0, 0.0).
+    list(delta = c(1.0, 3.0, 2.0, 0.0), D_mask = c(TRUE, TRUE, FALSE, FALSE),
+         X = NULL, n_total = 4L, units = c(1L, 2L, 3L, 4L)),
+    # Cell 2: 1 treated, 1 control.
     list(delta = c(0.7, 1.3),       D_mask = c(TRUE, FALSE),
          X = NULL, n_total = 2L, units = c(1L, 2L))
   )
   result <- didgpu:::.cs_inner_batched_cuda(
-    cells = cells, method = "OR", all_units = c(1L, 2L, 3L))
-  # Kernel currently returns -1 -> Rcpp wrapper returns NULL ->
-  # R-side helper returns NULL. Phase 2 will flip this to a list.
-  expect_null(result)
+    cells = cells, method = "OR", all_units = c(1L, 2L, 3L, 4L))
+  # Phase 2 #84: OR kernel now returns real ATTs (was NULL before).
+  # Cell 1: mean_Yt = 2.0, mean_Yc = 1.0, ATT = 1.0.
+  #   IF[unit 1] (treated row 0, Y=1.0) = Y - mean_Yt = 1.0 - 2.0 = -1.0
+  #   IF[unit 2] (treated row 1, Y=3.0) = 3.0 - 2.0 =  1.0
+  #   IF[units 3, 4] (control)          = 0.0
+  # Cell 2: ATT = 0.7 - 1.3 = -0.6; one treated with Y = mean_Yt = 0.7
+  #   so IF = 0 for everyone.
+  expect_false(is.null(result))
+  expect_equal(result$att, c(1.0, -0.6), tolerance = 1e-12)
+  expect_equal(dim(result$influence), c(4L, 2L))
+  expect_equal(result$influence[1, 1], -1.0, tolerance = 1e-12)
+  expect_equal(result$influence[2, 1],  1.0, tolerance = 1e-12)
+  expect_equal(result$influence[3, 1],  0.0)
+  expect_equal(result$influence[4, 1],  0.0)
 })
 
-test_that("Rcpp wrapper didgpu_cuda_cs_inner_batched_r exists and accepts inputs", {
+test_that("Rcpp wrapper didgpu_cuda_cs_inner_batched_r computes ATT and IF for OR", {
   skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
                               error = function(e) FALSE)),
               "CUDA support not compiled into this build")
-  # Smoke: a 2-cell, 1-covariate (just intercept) layout. Kernel
-  # currently returns -1 so the Rcpp wrapper returns NULL.
-  # The wrapper is an internal symbol — access via didgpu:::.
+  # 2 cells, intercept-only design (p = 1). Cell 0: rows 0..2 with
+  # treated row 0; Cell 1: rows 3..4 with treated row 3.
   result <- didgpu:::didgpu_cuda_cs_inner_batched_r(
-    X_concat       = rep(1.0, 5),     # n_total = 5, p = 1 -> length 5
-    X_offsets      = c(0L, 3L, 5L),   # cells: [0,3), [3,5)
-    Y_concat       = c(1, 2, -0.5, 0.7, 1.3),
-    W_concat       = c(1, 0, 0, 1, 0),
-    p              = 1L,
-    n_units        = 3L,
-    est_method     = 0L,
-    want_influence = TRUE)
-  expect_null(result)
+    X_concat        = rep(1.0, 5),     # p = 1 intercept column
+    X_offsets       = c(0L, 3L, 5L),   # cells: [0,3), [3,5)
+    Y_concat        = c(2.0, 1.0, -1.0, 5.0, 2.0),
+    W_concat        = c(1, 0, 0, 1, 0),
+    unit_id_per_row = c(0L, 1L, 2L, 0L, 2L),
+    p               = 1L,
+    n_units         = 3L,
+    est_method      = 0L,
+    want_influence  = TRUE)
+  expect_false(is.null(result))
+  expect_named(result, c("att", "status", "influence"), ignore.order = TRUE)
+  # Cell 0: ATT = mean(Y_t) - mean(Y_c) = 2.0 - mean(1, -1) = 2.0 - 0 = 2.0.
+  # Cell 1: ATT = 5.0 - 2.0 = 3.0.
+  expect_equal(result$att, c(2.0, 3.0), tolerance = 1e-10)
+  expect_equal(dim(result$influence), c(3L, 2L))
+})
+
+test_that("Rcpp wrapper returns NULL for IPW / DR (not yet implemented)", {
+  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
+                              error = function(e) FALSE)),
+              "CUDA support not compiled into this build")
+  result_ipw <- didgpu:::didgpu_cuda_cs_inner_batched_r(
+    X_concat        = rep(1.0, 5), X_offsets = c(0L, 3L, 5L),
+    Y_concat        = c(1, 2, -0.5, 0.7, 1.3),
+    W_concat        = c(1, 0, 0, 1, 0),
+    unit_id_per_row = c(0L, 1L, 2L, 0L, 2L),
+    p = 1L, n_units = 3L, est_method = 1L, want_influence = TRUE)
+  expect_null(result_ipw)
+  result_dr <- didgpu:::didgpu_cuda_cs_inner_batched_r(
+    X_concat        = rep(1.0, 5), X_offsets = c(0L, 3L, 5L),
+    Y_concat        = c(1, 2, -0.5, 0.7, 1.3),
+    W_concat        = c(1, 0, 0, 1, 0),
+    unit_id_per_row = c(0L, 1L, 2L, 0L, 2L),
+    p = 1L, n_units = 3L, est_method = 2L, want_influence = TRUE)
+  expect_null(result_dr)
 })

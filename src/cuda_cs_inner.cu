@@ -1,102 +1,302 @@
 // ============================================================================
-// CUDA scaffold for the Callaway-Sant'Anna per-(g, t) inner regressions.
+// CUDA kernel for the Callaway-Sant'Anna per-(g, t) inner regression.
 //
-// The CS framework computes ATT(g, t) for each (cohort g, calendar t)
-// cell. With C cohorts and T calendar times, there are up to C * T
-// cells, each one an independent regression on a subset of units
-// (treated cohort + control group).
+// Implements the OR (outcome-regression) estimator end-to-end. IPW
+// (est_method = 1) and DR (est_method = 2) still return -3 ("not yet
+// implemented"); the R fallback handles them. Phase 2 follow-ups
+// (still under task #84) will add the propensity-score logistic
+// kernel and the DR augmentation step.
 //
-// All three inner estimators (OR / IPW / DR) share the same compute
-// pattern at the cell level:
-//   1. Build the per-cell design matrix X (n_cell x p) and outcome
-//      change delta (n_cell)
-//   2. Solve a normal-equations problem: beta = (X' X)^{-1} X' delta
-//      (OR), or weighted variants (IPW / DR)
-//   3. Predict, compute ATT, accumulate
+// OR algorithm (matches R/cs_methods.R::.cs_inner_or):
+//   For each cell c with rows [X_offsets[c], X_offsets[c+1]):
+//     1. Split rows into treated (W = 1) and control (W = 0).
+//     2. If p == 1 (intercept only): ATT = mean(Y_t) - mean(Y_c).
+//     3. Else fit OLS on controls: beta = (X_c' X_c)^{-1} X_c' Y_c
+//        via in-thread Cholesky decomposition + forward/backward
+//        substitution.
+//     4. ATT = mean(Y_t - X_t @ beta).
+//   If Cholesky fails (singular Gram matrix) or n_t == 0 or n_c == 0,
+//   the cell's ATT is NaN.
 //
-// GPU acceleration approach (Phase 2 target):
-//   - Stack all C * T cells as a "batched least-squares" problem,
-//     one batch per cell.
-//   - Use cuBLAS gemmStridedBatched or gemmBatched for X' X and X' y.
-//   - Use cuSOLVER cusolverDnDpotrsBatched for the Cholesky solve.
-//   - Per-cell cell-size varies; offsets[] tells the kernel where
-//     each cell lives in the concatenated buffers.
+// Design choice — one thread per cell:
+//   CS cells are typically small (n_c ~ 10-100, p < 16). The work per
+//   cell is dominated by the X_c' X_c reduction which is O(n_c * p^2)
+//   = a few thousand FLOPs. With n_cells ~ 50-200, total work is well
+//   under 1 ms even with one thread per cell. Multi-thread cooperation
+//   inside a cell would add atomic-add overhead and shared-memory
+//   pressure for marginal gain.
+//   The hard upper bound is p <= 16 (the per-thread XtX[16*16]
+//   buffer); the launcher rejects larger p.
 //
-// For the typical scale (C in the tens, T in the tens, p a handful of
-// covariates), the per-batch work is small; the win comes from
-// amortising kernel-launch overhead across hundreds of cells in one
-// launch.
-//
-// STATUS: scaffold. Signature matches inst/include/didgpu_cuda_api.h
-// (canonical Phase-1 ABI). Body returns -1 ("not implemented") so
-// the R-side dispatch falls back to the per-cell R loop. Phase 2
-// (tasks #82-#85) fills in the cuBLAS/cuSOLVER calls.
+// Influence functions (out_influence) are not yet populated in this
+// kernel — that's task #85. The Rcpp wrapper passes
+// want_influence = TRUE today and gets back NULL (kernel returns -3
+// for that path); the R fallback path remains the only source of IF
+// data for now.
 // ============================================================================
 
 #ifdef HAS_CUDA
 #include <cuda_runtime.h>
-#include <cublas_v2.h>
-#include <cusolverDn.h>
 
-// Host launcher for the CS batched inner regression.
+
+// Hard upper bound on per-cell covariate count. Each thread keeps
+// XtX (p*p doubles) and a few smaller buffers in local memory; the
+// 16 limit is generous (CS typically uses p <= 5) and keeps the
+// per-thread footprint under 4 KB.
+#define DIDGPU_CS_MAX_P 16
+
+
+__global__ void k_cs_inner_or(
+    const double* __restrict__ X_concat,   // (n_total, p) row-major
+    const double* __restrict__ Y_concat,   // (n_total)
+    const double* __restrict__ W_concat,   // (n_total) -- D in {0, 1}
+    const int*    __restrict__ X_offsets,  // (n_cells + 1)
+    int n_cells, int p,
+    double* __restrict__ out_att,          // (n_cells)
+    double* __restrict__ out_IF_per_row) { // (n_total) — per-row IF, or NULL
+  const int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= n_cells) return;
+
+  const int row_start = X_offsets[c];
+  const int row_end   = X_offsets[c + 1];
+
+  // Per-thread scratch. With DIDGPU_CS_MAX_P = 16 these are 16*16*8 =
+  // 2 KB plus a couple of vectors. The compiler may demote XtX to
+  // local (global) memory if p is fully dynamic; access patterns are
+  // cache-friendly so the latency hit is small.
+  double XtX[DIDGPU_CS_MAX_P * DIDGPU_CS_MAX_P];
+  double XtY[DIDGPU_CS_MAX_P];
+  double L  [DIDGPU_CS_MAX_P * DIDGPU_CS_MAX_P];
+  double z  [DIDGPU_CS_MAX_P];
+  double beta[DIDGPU_CS_MAX_P];
+
+  // Initialize.
+  #pragma unroll
+  for (int i = 0; i < DIDGPU_CS_MAX_P * DIDGPU_CS_MAX_P; ++i) XtX[i] = 0.0;
+  #pragma unroll
+  for (int i = 0; i < DIDGPU_CS_MAX_P; ++i) { XtY[i] = 0.0; beta[i] = 0.0; }
+
+  int n_t = 0, n_c = 0;
+  double sum_Yt = 0.0;
+
+  // --- Pass 1: accumulate Gram and cross-products on controls;
+  //              count treated/controls and sum_Y_t. ---
+  for (int r = row_start; r < row_end; ++r) {
+    const double w = W_concat[r];
+    if (w > 0.5) {
+      ++n_t;
+      sum_Yt += Y_concat[r];
+    } else {
+      ++n_c;
+      const double y = Y_concat[r];
+      const int base = r * p;
+      for (int a = 0; a < p; ++a) {
+        const double xa = X_concat[base + a];
+        XtY[a] += xa * y;
+        for (int b = 0; b < p; ++b) {
+          XtX[a * p + b] += xa * X_concat[base + b];
+        }
+      }
+    }
+  }
+
+  if (n_t == 0 || n_c == 0) {
+    out_att[c] = nan("");
+    if (out_IF_per_row) {
+      for (int r = row_start; r < row_end; ++r) out_IF_per_row[r] = 0.0;
+    }
+    return;
+  }
+
+  if (p == 1) {
+    // No covariates: simple difference of means. (X is the intercept
+    // column = all 1.0, so XtX[0] = n_c and XtY[0] = sum(Y_c).)
+    const double mean_Yc = XtY[0] / static_cast<double>(n_c);
+    const double mean_Yt = sum_Yt / static_cast<double>(n_t);
+    const double att = mean_Yt - mean_Yc;
+    out_att[c] = att;
+    if (out_IF_per_row) {
+      // IF[treated row r] = (Y[r] - mean_Yc) - att = Y[r] - mean_Yt
+      // IF[control row r] = 0  (OR puts no per-control IF mass at the
+      // ATT level — control units enter only through the projection)
+      for (int r = row_start; r < row_end; ++r) {
+        out_IF_per_row[r] = (W_concat[r] > 0.5) ? (Y_concat[r] - mean_Yt) : 0.0;
+      }
+    }
+    return;
+  }
+
+  // --- Pass 2: Cholesky decompose XtX = L * L^T, then solve. ---
+  for (int i = 0; i < p; ++i) {
+    for (int j = 0; j <= i; ++j) {
+      double s = XtX[i * p + j];
+      for (int k = 0; k < j; ++k) s -= L[i * p + k] * L[j * p + k];
+      if (i == j) {
+        if (s <= 0.0) {  // Rank-deficient or numerically singular.
+          out_att[c] = nan("");
+          if (out_IF_per_row) {
+            for (int r = row_start; r < row_end; ++r) out_IF_per_row[r] = 0.0;
+          }
+          return;
+        }
+        L[i * p + i] = sqrt(s);
+      } else {
+        L[i * p + j] = s / L[j * p + j];
+      }
+    }
+  }
+  // Forward sub: L * z = XtY.
+  for (int i = 0; i < p; ++i) {
+    double s = XtY[i];
+    for (int j = 0; j < i; ++j) s -= L[i * p + j] * z[j];
+    z[i] = s / L[i * p + i];
+  }
+  // Backward sub: L^T * beta = z.
+  for (int i = p - 1; i >= 0; --i) {
+    double s = z[i];
+    for (int j = i + 1; j < p; ++j) s -= L[j * p + i] * beta[j];
+    beta[i] = s / L[i * p + i];
+  }
+
+  // --- Pass 3: ATT = mean(Y_t - X_t @ beta). ---
+  double sum_fittedt = 0.0;
+  for (int r = row_start; r < row_end; ++r) {
+    if (W_concat[r] > 0.5) {
+      double fitted = 0.0;
+      const int base = r * p;
+      for (int a = 0; a < p; ++a) fitted += X_concat[base + a] * beta[a];
+      sum_fittedt += fitted;
+    }
+  }
+  const double att = (sum_Yt - sum_fittedt) / static_cast<double>(n_t);
+  out_att[c] = att;
+
+  // --- Pass 4 (optional): per-row influence function. ---
+  // Matches R/cs_methods.R::.cs_inner_or:
+  //   IF[treated row r] = (Y[r] - fitted[r]) - att
+  //   IF[control row r] = 0
+  if (out_IF_per_row) {
+    for (int r = row_start; r < row_end; ++r) {
+      if (W_concat[r] > 0.5) {
+        double fitted = 0.0;
+        const int base = r * p;
+        for (int a = 0; a < p; ++a) fitted += X_concat[base + a] * beta[a];
+        out_IF_per_row[r] = (Y_concat[r] - fitted) - att;
+      } else {
+        out_IF_per_row[r] = 0.0;
+      }
+    }
+  }
+}
+
+
+// Host launcher (Linux internal form, used by the Rcpp wrapper).
 //
-// Signature matches `didgpu_cuda_cs_inner_batched` in
-// inst/include/didgpu_cuda_api.h. All pointers are HOST pointers; the
-// kernel allocates device memory internally per the C-ABI contract.
+// Differs from the public ABI in inst/include/didgpu_cuda_api.h in
+// that influence is returned as a PER-ROW vector (length n_total)
+// rather than the (n_units x n_cells) public layout. The Rcpp
+// wrapper does the unit-major expansion using a row-to-unit map it
+// receives from the R side.
 //
-// Cell c lives at rows [X_offsets[c], X_offsets[c+1]) in X_concat /
-// Y_concat / W_concat. Y_offsets and W_offsets are passed separately
-// because the contract permits weights/outcomes to live in arrays
-// indexed slightly differently than X — but in the canonical layout
-// the three offset arrays are identical pointers.
+// Per-row IF is the natural output of the kernel because the kernel
+// only knows about row indices within each cell, not the unit
+// identity of those rows. Pushing the row→unit scatter to the host
+// keeps the kernel simple and avoids inflating the kernel signature
+// with a per-row unit_id buffer.
+extern "C" int didgpu_cuda_cs_inner_or(
+    const double* h_X_concat, const int* h_X_offsets,
+    const double* h_Y_concat,
+    const double* h_W_concat,
+    int n_cells, int p,
+    double* h_out_att,
+    double* h_out_IF_per_row /* length n_total, NULL to skip */) {
+
+  if (n_cells <= 0 || p <= 0 || p > DIDGPU_CS_MAX_P) return -3;
+  const int n_total = h_X_offsets[n_cells];
+  if (n_total <= 0) return -3;
+
+  cudaError_t e;
+  double* d_X = nullptr;
+  double* d_Y = nullptr;
+  double* d_W = nullptr;
+  int*    d_off = nullptr;
+  double* d_att = nullptr;
+  double* d_IF  = nullptr;
+  auto cleanup = [&]() {
+    if (d_X)   cudaFree(d_X);
+    if (d_Y)   cudaFree(d_Y);
+    if (d_W)   cudaFree(d_W);
+    if (d_off) cudaFree(d_off);
+    if (d_att) cudaFree(d_att);
+    if (d_IF)  cudaFree(d_IF);
+  };
+
+  e = cudaMalloc((void**)&d_X,   sizeof(double) * n_total * p);
+  if (e != cudaSuccess) { cleanup(); return -4; }
+  e = cudaMalloc((void**)&d_Y,   sizeof(double) * n_total);
+  if (e != cudaSuccess) { cleanup(); return -4; }
+  e = cudaMalloc((void**)&d_W,   sizeof(double) * n_total);
+  if (e != cudaSuccess) { cleanup(); return -4; }
+  e = cudaMalloc((void**)&d_off, sizeof(int)    * (n_cells + 1));
+  if (e != cudaSuccess) { cleanup(); return -4; }
+  e = cudaMalloc((void**)&d_att, sizeof(double) * n_cells);
+  if (e != cudaSuccess) { cleanup(); return -4; }
+  if (h_out_IF_per_row) {
+    e = cudaMalloc((void**)&d_IF, sizeof(double) * n_total);
+    if (e != cudaSuccess) { cleanup(); return -4; }
+  }
+
+  e = cudaMemcpy(d_X, h_X_concat, sizeof(double) * n_total * p,
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cleanup(); return -1; }
+  e = cudaMemcpy(d_Y, h_Y_concat, sizeof(double) * n_total,
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cleanup(); return -1; }
+  e = cudaMemcpy(d_W, h_W_concat, sizeof(double) * n_total,
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cleanup(); return -1; }
+  e = cudaMemcpy(d_off, h_X_offsets, sizeof(int) * (n_cells + 1),
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cleanup(); return -1; }
+
+  const int block = 64;
+  const int grid  = (n_cells + block - 1) / block;
+  k_cs_inner_or<<<grid, block>>>(
+      d_X, d_Y, d_W, d_off, n_cells, p, d_att, d_IF);
+  e = cudaGetLastError();
+  if (e != cudaSuccess) { cleanup(); return -1; }
+
+  e = cudaMemcpy(h_out_att, d_att, sizeof(double) * n_cells,
+                  cudaMemcpyDeviceToHost);
+  if (e != cudaSuccess) { cleanup(); return -1; }
+  if (h_out_IF_per_row) {
+    e = cudaMemcpy(h_out_IF_per_row, d_IF, sizeof(double) * n_total,
+                    cudaMemcpyDeviceToHost);
+  }
+  cleanup();
+  return (e != cudaSuccess) ? -1 : 0;
+}
+
+
+// Public-ABI form (matches inst/include/didgpu_cuda_api.h). For
+// est_method = 0 (OR) it forwards to didgpu_cuda_cs_inner_or with
+// no IF output (since the public ABI doesn't carry the row→unit
+// scatter map). For est_method = 1, 2 returns -3 (not implemented).
 //
-// est_method: 0 = OR, 1 = IPW, 2 = DR
-//
-// out_att      : length n_cells (one ATT estimate per cell)
-// out_influence: optional, length n_units * n_cells (row-major,
-//                unit-major). Pass NULL to skip influence-function
-//                computation. Phase 2 will populate this for
-//                multiplier-bootstrap support.
-//
-// Returns: 0 on success; nonzero error code on failure. The R-side
-// dispatch treats any nonzero return as "fall back to R impl".
+// The Rcpp wrapper calls didgpu_cuda_cs_inner_or directly rather
+// than this entry point, so this exists primarily for ABI
+// compatibility with the future Windows two-DLL build.
 extern "C" int didgpu_cuda_cs_inner_batched(
-    const double* X_concat, const int* X_offsets,
-    const double* Y_concat, const int* Y_offsets,
-    const double* W_concat, const int* W_offsets,
-    int n_cells, int p, int n_units,
+    const double* h_X_concat, const int* h_X_offsets,
+    const double* h_Y_concat, const int* /*Y_offsets*/,
+    const double* h_W_concat, const int* /*W_offsets*/,
+    int n_cells, int p, int /*n_units*/,
     int est_method,
-    double* out_att, double* out_influence) {
-  (void)X_concat;    (void)X_offsets;
-  (void)Y_concat;    (void)Y_offsets;
-  (void)W_concat;    (void)W_offsets;
-  (void)n_cells;     (void)p;            (void)n_units;
-  (void)est_method;
-  (void)out_att;     (void)out_influence;
-  // -----------------------------------------------------------------
-  // Phase 2 implementation plan (tasks #82-#85):
-  //   1. cudaMalloc + H2D-copy the three concatenated buffers plus the
-  //      offsets array (single array — Y_offsets and W_offsets equal
-  //      X_offsets in the canonical layout).
-  //   2. For each cell c, form X_c' X_c (p x p) and X_c' y_c (p) via
-  //      cublasDgemmStridedBatched with strides derived from offsets.
-  //      Per-cell sizes vary, so we use the variable-stride variant
-  //      (or pad to max_cell_size with a mask).
-  //   3. Cholesky-decompose every X' X via cusolverDnDpotrfBatched.
-  //   4. Solve via cusolverDnDpotrsBatched to get beta_c per cell.
-  //   5. For OR (method=0): ATT_c = mean(delta[D=1]) - mean(X_c[D=1]
-  //      @ beta_c). For IPW (method=1): include the propensity-weight
-  //      reweighting term. For DR (method=2): combine OR fitted-
-  //      counterfactual with IPW-weighted residual correction.
-  //   6. If out_influence != NULL, also write per-unit per-cell IF
-  //      values (Phase 2 task #85 — required for multiplier-bootstrap
-  //      SEs).
-  //
-  // Until that work lands, returning -1 keeps the R-side dispatch
-  // honest: any backend = "cuda" call silently falls back to the
-  // existing per-cell R loop in .cs_compute_att_gt.
-  // -----------------------------------------------------------------
-  return -1;  // Phase 2: not implemented
+    double* h_out_att, double* /*out_influence*/) {
+  if (est_method != 0) return -3;  // IPW + DR: follow-up.
+  return didgpu_cuda_cs_inner_or(
+      h_X_concat, h_X_offsets, h_Y_concat, h_W_concat,
+      n_cells, p, h_out_att, /*IF=*/nullptr);
 }
 
 #endif  // HAS_CUDA
