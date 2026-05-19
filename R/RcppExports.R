@@ -25,6 +25,10 @@ didgpu_run_saxpy <- function(a, x, y) {
     .Call(`_didgpu_didgpu_run_saxpy`, a, x, y)
 }
 
+didgpu_cuda_multiplier_bootstrap_r <- function(IF, B, mult_kind, seed) {
+    .Call(`_didgpu_didgpu_cuda_multiplier_bootstrap_r`, IF, B, mult_kind, seed)
+}
+
 didgpu_cuda_cluster_bootstrap_r <- function(IF, cluster_id, n_clusters, B, seed) {
     .Call(`_didgpu_didgpu_cuda_cluster_bootstrap_r`, IF, cluster_id, n_clusters, B, seed)
 }

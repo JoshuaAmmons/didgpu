@@ -54,6 +54,11 @@ extern "C" int didgpu_cuda_cluster_bootstrap(
     const int* h_cluster_id, int n_clusters,
     int B, unsigned long long seed,
     double* h_out_estimates);
+extern "C" int didgpu_cuda_multiplier_bootstrap(
+    const double* h_IF, int n_units, int n_dims,
+    int B, int mult_kind,
+    unsigned long long seed,
+    double* h_out_estimates);
 #endif
 
 // [[Rcpp::export]]
@@ -295,6 +300,65 @@ Rcpp::NumericVector didgpu_run_saxpy(double a, Rcpp::NumericVector x, Rcpp::Nume
 #else
   (void)a; (void)x; (void)y;
   Rcpp::stop("didgpu was built without CUDA support. Reinstall after installing the NVIDIA CUDA Toolkit so nvcc is on PATH.");
+#endif
+}
+
+
+// Multiplier (wild) bootstrap on per-unit influence functions.
+//
+// Computes B bootstrap replicates of
+//
+//   out[b, d] = sum_i xi[i, b] * IF[i, d]
+//
+// where xi[i, b] is i.i.d. Rademacher (mult_kind = 0; +1/-1 with
+// equal probability) or N(0, 1) (mult_kind = 1).
+//
+// Inputs:
+//   IF        : R numeric matrix (n_units, n_dims).
+//   B         : number of bootstrap replicates.
+//   mult_kind : 0 = Rademacher, 1 = N(0, 1).
+//   seed      : cuRAND seed.
+//
+// Returns NULL on any CUDA failure; a (B, n_dims) numeric matrix
+// otherwise. As with the other bootstrap entry points, cuRAND and
+// R's MT19937 produce different per-replicate draws — column SDs
+// converge to the same population SE.
+//
+// [[Rcpp::export]]
+SEXP didgpu_cuda_multiplier_bootstrap_r(Rcpp::NumericMatrix IF,
+                                          int B,
+                                          int mult_kind,
+                                          int seed) {
+#ifdef HAS_CUDA
+  const int n_units = IF.nrow();
+  const int n_dims  = IF.ncol();
+  if (B <= 0)
+    Rcpp::stop("B must be positive; got %d", B);
+  if (mult_kind != 0 && mult_kind != 1)
+    Rcpp::stop("mult_kind must be 0 (Rademacher) or 1 (N(0,1)); got %d",
+               mult_kind);
+
+  std::vector<double> IF_rm(static_cast<size_t>(n_units) * n_dims);
+  for (int i = 0; i < n_units; ++i)
+    for (int j = 0; j < n_dims; ++j)
+      IF_rm[static_cast<size_t>(i) * n_dims + j] = IF(i, j);
+
+  std::vector<double> out(static_cast<size_t>(B) * n_dims);
+  int rc = didgpu_cuda_multiplier_bootstrap(
+      IF_rm.data(), n_units, n_dims,
+      B, mult_kind,
+      static_cast<unsigned long long>(seed),
+      out.data());
+  if (rc != 0) return R_NilValue;
+
+  Rcpp::NumericMatrix out_mat(B, n_dims);
+  for (int b = 0; b < B; ++b)
+    for (int d = 0; d < n_dims; ++d)
+      out_mat(b, d) = out[static_cast<size_t>(b) * n_dims + d];
+  return out_mat;
+#else
+  (void)IF; (void)B; (void)mult_kind; (void)seed;
+  return R_NilValue;
 #endif
 }
 

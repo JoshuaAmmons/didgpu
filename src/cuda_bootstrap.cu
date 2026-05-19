@@ -117,6 +117,127 @@ __global__ void k_cb_apply_weights(const double* __restrict__ weight,
 }
 
 
+// ----------------------------------------------------------------------------
+// Multiplier (wild) bootstrap kernel.
+//
+// For each replicate b and unit i, draw a random weight xi[i, b]:
+//   mult_kind = 0 -> Rademacher: +1 with prob 0.5, -1 otherwise
+//   mult_kind = 1 -> N(0, 1)
+// Bootstrap estimate: out[b, d] = sum_i xi[i, b] * IF[i, d].
+//
+// One block per replicate; threads cooperate per output dimension.
+// Each thread maintains its own cuRAND state seeded from
+// (master_seed, b * blockDim.x + threadIdx.x). For a given (b, i)
+// pair the same weight is drawn every time (reproducibility).
+// ----------------------------------------------------------------------------
+
+__device__ inline double draw_multiplier(curandState* s, int mult_kind) {
+  if (mult_kind == 0) {
+    // Rademacher: low bit of a 32-bit uniform -> +1 / -1.
+    unsigned int r = curand(s);
+    return (r & 1u) ? 1.0 : -1.0;
+  } else {
+    // N(0, 1). curand_normal_double available since CC 3.5.
+    return curand_normal_double(s);
+  }
+}
+
+// One block per replicate. Threads cooperate on the n_dims output
+// columns. Each thread also walks the n_units rows and accumulates
+// xi[i, b] * IF[i, d]. The cuRAND state must be per-thread (so all
+// threads in a block draw the SAME xi[i, b] for unit i and replicate
+// b) — we achieve this by re-seeding from (master_seed, b * n_units
+// + i) on the fly and only invoking the RNG once per (b, i) pair via
+// a single thread per (b, i) slice. To keep things simple and
+// correct, we just have one block reduce one replicate sequentially
+// over units, with threads splitting on dims.
+__global__ void k_mb_apply(const double* __restrict__ IF,
+                             int n_units, int n_dims,
+                             int B, int mult_kind,
+                             unsigned long long master_seed,
+                             double* __restrict__ out) {
+  const int b = blockIdx.x;
+  if (b >= B) return;
+
+  // Per-block running sum buffer in shared memory, one slot per dim.
+  extern __shared__ double s_acc[];
+  for (int d = threadIdx.x; d < n_dims; d += blockDim.x) s_acc[d] = 0.0;
+  __syncthreads();
+
+  // Thread 0 in the block walks the units and broadcasts xi to all
+  // other threads via shared memory. Each thread then adds xi * IF[i, d]
+  // into its slot. This keeps the RNG single-threaded (deterministic
+  // for fixed seed) while spreading the n_dims accumulation across
+  // the block.
+  __shared__ double s_xi;
+  __shared__ curandState s_state;
+  if (threadIdx.x == 0) {
+    curand_init(master_seed, /*seq=*/b, /*offset=*/0, &s_state);
+  }
+  __syncthreads();
+
+  for (int i = 0; i < n_units; ++i) {
+    if (threadIdx.x == 0) s_xi = draw_multiplier(&s_state, mult_kind);
+    __syncthreads();
+    const double xi = s_xi;
+    for (int d = threadIdx.x; d < n_dims; d += blockDim.x) {
+      s_acc[d] += xi * IF[i * n_dims + d];
+    }
+    __syncthreads();
+  }
+
+  for (int d = threadIdx.x; d < n_dims; d += blockDim.x) {
+    out[b * n_dims + d] = s_acc[d];
+  }
+}
+
+
+extern "C" int didgpu_cuda_multiplier_bootstrap(
+    const double* h_IF, int n_units, int n_dims,
+    int B, int mult_kind,
+    unsigned long long seed,
+    double* h_out_estimates) {
+
+  if (n_units <= 0 || n_dims <= 0 || B <= 0) return -3;
+  if (mult_kind != 0 && mult_kind != 1) return -3;
+
+  cudaError_t e;
+  double* d_IF  = nullptr;
+  double* d_out = nullptr;
+  auto cleanup = [&]() {
+    if (d_IF)  cudaFree(d_IF);
+    if (d_out) cudaFree(d_out);
+  };
+
+  e = cudaMalloc((void**)&d_IF,  sizeof(double) * n_units * n_dims);
+  if (e != cudaSuccess) { cleanup(); return -4; }
+  e = cudaMalloc((void**)&d_out, sizeof(double) * B * n_dims);
+  if (e != cudaSuccess) { cleanup(); return -4; }
+
+  e = cudaMemcpy(d_IF, h_IF, sizeof(double) * n_units * n_dims,
+                  cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cleanup(); return -1; }
+
+  const int threads = std::min(n_dims, 256);
+  const size_t shmem = sizeof(double) * n_dims;
+  k_mb_apply<<<B, threads, shmem>>>(d_IF, n_units, n_dims, B, mult_kind,
+                                     seed, d_out);
+  e = cudaGetLastError();
+  if (e != cudaSuccess) { cleanup(); return -1; }
+
+  e = cudaMemcpy(h_out_estimates, d_out,
+                  sizeof(double) * B * n_dims,
+                  cudaMemcpyDeviceToHost);
+  cleanup();
+  return (e != cudaSuccess) ? -1 : 0;
+}
+
+
+// ----------------------------------------------------------------------------
+// (legacy cluster-bootstrap launcher follows below)
+// ----------------------------------------------------------------------------
+
+
 // Host launcher.
 extern "C" int didgpu_cuda_cluster_bootstrap(
     const double* h_IF,            // (n_units, n_dims) row-major HOST
