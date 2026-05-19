@@ -13,23 +13,27 @@ test_that("didgpu_compare returns pass=TRUE on a panel where backends agree", {
 })
 
 test_that("didgpu_compare gracefully NAs when reference is not installed", {
-  with_mock_namespace <- function() {
-    # Temporarily mask DIDmultiplegtDYN. requireNamespace fails when the
-    # package isn't installed; we simulate that without actually
-    # uninstalling.
-    saved <- requireNamespace
-    # No-op; we can't easily mock requireNamespace cleanly. Skip this
-    # negative-path test if the reference is in fact installed.
-    if (requireNamespace("DIDmultiplegtDYN", quietly = TRUE)) {
-      skip("DIDmultiplegtDYN is installed; can't test 'not installed' branch")
-    }
-    p <- didgpu_simulate_panel(n_units = 20L, n_periods = 8L)
-    res <- expect_warning(
-      didgpu_compare(p, "Y", "unit", "period", "D",
-                      effects = 1L, verbose = FALSE),
-      "not installed"
-    )
-    expect_true(is.na(res$pass))
+  # Negative-path test: only runs when DIDmultiplegtDYN ISN'T installed
+  # (the function's "graceful NA" branch). We can't reliably mock
+  # requireNamespace, so we skip if the package is actually installed.
+  if (requireNamespace("DIDmultiplegtDYN", quietly = TRUE)) {
+    skip("DIDmultiplegtDYN is installed; can't test 'not installed' branch")
   }
-  with_mock_namespace()
+  p <- didgpu_simulate_panel(n_units = 20L, n_periods = 8L)
+
+  # Two separate calls: one to check that the warning fires (via
+  # expect_warning, which doesn't reliably propagate the function value
+  # in testthat 3 when the warning isn't promoted to an error), and
+  # one wrapped in suppressWarnings to capture the actual return value.
+  expect_warning(
+    didgpu_compare(p, "Y", "unit", "period", "D",
+                    effects = 1L, verbose = FALSE),
+    "not installed")
+  res <- suppressWarnings(
+    didgpu_compare(p, "Y", "unit", "period", "D",
+                    effects = 1L, verbose = FALSE))
+  expect_true(is.na(res$pass))
+  expect_null(res$report)
+  expect_null(res$fit_r)
+  expect_null(res$fit_ref)
 })
