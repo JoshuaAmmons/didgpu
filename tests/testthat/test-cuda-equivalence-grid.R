@@ -102,6 +102,48 @@ test_that("CS OR influence functions match CUDA vs R (no covariates)", {
   }
 })
 
+test_that("CS IPW/DR are safe under backend='cuda' (fall back to R, identical)", {
+  skip_if_not(cuda_available(), "CUDA not compiled in")
+  # The OR kernel is the only CS inner regression on the GPU; IPW (1)
+  # and DR (2) return -3 from the kernel, so backend = "cuda" must
+  # transparently fall back to the R per-cell path and produce
+  # bit-identical results to backend = "r". This pins that contract
+  # so a future IPW/DR kernel can't silently change results without
+  # tripping the equivalence bar.
+  for (method in c("IPW", "DR")) {
+    for (with_cov in c(FALSE, TRUE)) {
+      p <- make_cs_panel(80L, 10L, with_cov = with_cov)
+      covs <- if (with_cov) "x1" else NULL
+      fit_r <- didgpu_cs(p, "Y", "unit", "period", "D", covariates = covs,
+                          est_method = method, aggregation = "event",
+                          bootstrap_reps = 0L, backend = "r", verbose = FALSE)
+      fit_c <- didgpu_cs(p, "Y", "unit", "period", "D", covariates = covs,
+                          est_method = method, aggregation = "event",
+                          bootstrap_reps = 0L, backend = "cuda", verbose = FALSE)
+      info <- sprintf("method=%s with_cov=%s", method, with_cov)
+      expect_equal(fit_r$att_gt$att, fit_c$att_gt$att,
+                   tolerance = 1e-12, info = info)
+    }
+  }
+})
+
+test_that("CS cluster bootstrap SE is finite + positive under backend='cuda' for all methods", {
+  skip_if_not(cuda_available(), "CUDA not compiled in")
+  # OR uses the GPU IF; IPW/DR fall back to R for the inner fit but
+  # still exercise the bootstrap path. All should produce usable SEs.
+  for (method in c("OR", "IPW", "DR")) {
+    p <- make_cs_panel(60L, 10L)
+    fit <- didgpu_cs(p, "Y", "unit", "period", "D",
+                      est_method = method, aggregation = "event",
+                      bootstrap_reps = 150L, bootstrap_kind = "cluster",
+                      backend = "cuda", verbose = FALSE)
+    se <- fit$att_gt$se
+    info <- sprintf("method=%s", method)
+    expect_true(any(!is.na(se)), info = info)
+    expect_true(all(se[!is.na(se)] >= 0), info = info)
+  }
+})
+
 test_that("SAXPY smoke kernel is exact CUDA vs R reference", {
   skip_if_not(cuda_available(), "CUDA not compiled in")
   for (n in c(1L, 5L, 100L, 1000L)) {
