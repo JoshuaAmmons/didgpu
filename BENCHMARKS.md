@@ -138,6 +138,16 @@ This splits the two methods:
 in R (iterative demeaning, no SVD) and stays behind the same gate, so
 typical panels use R and only very large ones attempt the GPU.
 
+**mc-at-scale correctness is verified end-to-end**
+(`tools/verify-mc-at-scale.R`). On a 2500×80 panel (above the gate),
+the full iterated GPU mc fit agrees with the R fit to **2.2e-10** on
+the ATE and 2.5e-10 on the event-study estimates — the cuSOLVER SVD
+and R's LAPACK SVD agree to near machine precision and the per-
+iteration differences do not accumulate. That run was 3.71× faster
+(40.9 s vs 151.6 s). This is left as a `tools/` script rather than a
+CI test because the R side takes ~2.5 min; the softthreshold kernel
+itself is unit-tested at small sizes in `test-cuda-fect-svd-wiring.R`.
+
 ### Why #86 / #87 (fused fect kernels) were dropped
 
 Originally planned as device-resident kernels to amortise per-iter
