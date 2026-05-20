@@ -239,6 +239,30 @@ shortcut is applied exactly when it's provably valid.
 Net: the common, previously-slow cohort-LOO is now effectively
 instant — and this is an R-side win that works with or without a GPU.
 
+## didgpu_twfe() — naive TWFE baseline vs base-R lm()
+
+`tools/bench-twfe.R`. The companion TWFE event study vs the obvious
+base-R alternative, `lm(Y ~ leads/lags + factor(unit) +
+factor(period))`. (fixest::feols would be the specialized-tool
+benchmark — optimized C++, multithreaded — but it isn't installed in
+the WSL env.)
+
+| Units (x12 periods) | didgpu_twfe | lm() + FE dummies | Speedup |
+|---------------------|-------------|-------------------|---------|
+|   100 | 0.036s | 0.063s  |   1.7x |
+|   500 | 0.028s | 0.869s  |  31.2x |
+|  2000 | 0.065s | 44.780s | **685.9x** |
+|  5000 | 0.069s | (impractical) | — |
+
+didgpu_twfe stays ~flat (~0.07 s) because it absorbs the fixed
+effects by iterative demeaning (cost scales with observations, not
+units). lm() builds an N x (units + periods) dummy matrix and
+QR-factorizes it, so it explodes with the unit count and is unusable
+past a few thousand units. The point isn't to beat fixest on raw TWFE
+speed — it's to provide the baseline in the SAME package and output
+shape as the robust estimators, scaling to large panels without the
+lm() cliff.
+
 ## Notes
 
 - Numbers are from a laptop-class GPU (RTX 4000 Ada Laptop, 12 GB).
