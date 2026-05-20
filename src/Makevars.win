@@ -97,19 +97,16 @@ ifeq ($(HAVE_CUDA_BUILD),yes)
   # `#include <cuda_runtime.h>` which itself does `#include "crt/host_config.h"`,
   # and the Program Files install is missing the crt/ subdirectory.
   PKG_CXXFLAGS += -DHAS_CUDA=1 -I./cuda_shim -I"$(CUDA_HOME)/include"
-  # Bundle the CUDA objects into a local static archive (libcudadidgpu.a)
-  # and pull it in via PKG_LIBS. This pattern works because R's
-  # auto-generated link command honours PKG_LIBS, but it doesn't know
-  # about extra .o files we'd otherwise have to inject into OBJECTS.
-  # NOTE on -L"$(CUDA_HOME)/lib_extra/x64": some CUDA libs ship as
-  # separate redistributables (libcurand in particular) and aren't part
-  # of the base toolkit lib/x64. Our shadow tree carries them under
-  # lib_extra/x64/. Harmless if the dir doesn't exist — ld -L just
-  # silently ignores missing search paths.
-  PKG_LIBS     += -L. -lcudadidgpu \
-                  -L"$(CUDA_HOME)/lib/x64" \
-                  -L"$(CUDA_HOME)/lib_extra/x64" \
-                  -lcudart -lcublas -lcusolver -lcurand
+  # TWO-DLL build (the MinGW <-> MSVC bridge). The .cu kernels can't be
+  # linked into the MinGW-built didgpu.dll: nvcc/MSVC objects reference
+  # MSVC's own C++ math/runtime symbols (?sqrt@@YAMM@Z, ...) that MinGW
+  # ld cannot supply. So we link them into a SEPARATE didgpu_cuda.dll
+  # using nvcc (which drives MSVC's link.exe and resolves all of that),
+  # and didgpu.dll links only against a MinGW import library for it,
+  # calling the pure-C ABI in inst/include/didgpu_cuda_api.h.
+  # didgpu.dll therefore needs NO CUDA libraries directly — those are
+  # didgpu_cuda.dll's dependencies.
+  PKG_LIBS     += -L. -ldidgpu_cuda
 
   CUDA_SOURCES := $(wildcard *.cu)
   CUDA_OBJECTS := $(CUDA_SOURCES:.cu=.o)
@@ -145,55 +142,87 @@ ifeq ($(HAVE_CUDA_BUILD),yes)
   # on MSVC newer than it officially lists (e.g. VS 2022 17.14 /
   # _MSC_VER 1944). The generated code is fine for our kernels; this
   # flag downgrades that hard error. Harmless on supported MSVC.
+  # Target architectures. Overridable via the DIDGPU_CUDA_ARCH env var
+  # (e.g. DIDGPU_CUDA_ARCH="-gencode=arch=compute_89,code=sm_89" for a
+  # fast single-arch dev build). Default covers Turing..Hopper.
+  DIDGPU_CUDA_ARCH ?= -gencode=arch=compute_75,code=sm_75 \
+                      -gencode=arch=compute_80,code=sm_80 \
+                      -gencode=arch=compute_86,code=sm_86 \
+                      -gencode=arch=compute_89,code=sm_89 \
+                      -gencode=arch=compute_90,code=sm_90
+  # -DHAS_CUDA=1 MUST be passed to nvcc too (not just to g++ via
+  # PKG_CXXFLAGS): five .cu files wrap their whole body in
+  # #ifdef HAS_CUDA and would otherwise compile to empty objects, so
+  # their didgpu_cuda_* symbols would be missing at the .def export
+  # step. (Same fix as the Linux Makevars.)
   NVCC_FLAGS := -O2 -std=c++17 \
+                -DHAS_CUDA=1 \
                 -allow-unsupported-compiler \
                 -I./cuda_shim \
                 -Xcompiler=//MT,//GS- \
-                -gencode=arch=compute_75,code=sm_75 \
-                -gencode=arch=compute_80,code=sm_80 \
-                -gencode=arch=compute_86,code=sm_86 \
-                -gencode=arch=compute_89,code=sm_89 \
-                -gencode=arch=compute_90,code=sm_90
+                $(DIDGPU_CUDA_ARCH)
 else
   CUDA_OBJECTS :=
 endif
 
-# OBJECTS is what R's build system links into the package DLL.
-# By default it picks up all *.cpp -> *.o; we explicitly add the CUDA
-# objects (if any) on top.
-OBJECTS = $(patsubst %.cpp,%.o,$(wildcard *.cpp)) $(CUDA_OBJECTS)
+# OBJECTS is what R links into didgpu.dll. The CUDA objects do NOT go
+# here — they go into the separate didgpu_cuda.dll (two-DLL build).
+# didgpu.dll is pure MinGW + the import lib for didgpu_cuda.dll.
+OBJECTS = $(patsubst %.cpp,%.o,$(wildcard *.cpp))
 $(info Makevars.win: OBJECTS=$(OBJECTS))
 
 ifeq ($(HAVE_CUDA_BUILD),yes)
-# Per-file rules for .cu -> .o via nvcc.
-#
 # nvcc on Windows requires MSVC cl.exe AND its INCLUDE/LIB environment
-# populated by vcvars64.bat. Doing this inline from a Make recipe runs
-# into nested-quote hell between bash, Make, and cmd. Instead we call
-# a small helper `nvcc_wrapper.bat` (in src/) that finds vcvars64.bat
-# itself and forwards all args to nvcc. From Make's perspective it's
-# just `cmd /C wrapper.bat <nvcc-path> <flags...>` with no nesting.
-NVCC_RUN = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
+# populated by vcvars64.bat. We call nvcc_wrapper.bat (in src/) which
+# finds vcvars64.bat and forwards all args to nvcc, avoiding nested-
+# quote hell between make, cmd, and bash.
+NVCC_RUN  = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
 
-# Pattern rule for every .cu -> .o (mirrors the Linux Makevars). Using
-# a pattern rule rather than one explicit rule per file means new .cu
-# kernels are picked up automatically — the explicit-rules version
-# silently dropped cuda_bootstrap.cu when it was added later.
+# nvcc --shared drives MSVC's link.exe, so it resolves MSVC's own C++
+# math/runtime symbols that MinGW ld cannot. /DEF exports exactly the
+# C-ABI functions. Links the CUDA runtime/libs (didgpu_cuda.dll's deps).
+NVCC_LINK = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" -allow-unsupported-compiler \
+            -shared -o didgpu_cuda.dll $(CUDA_OBJECTS) \
+            -L"$(CUDA_HOME)/lib/x64" -lcudart -lcublas -lcusolver -lcurand \
+            -Xlinker //DEF:didgpu_cuda.def
+
+# Pattern rule: every .cu -> .o (auto-picks-up new kernels).
 %.o: %.cu
 	@echo "  [nvcc] $<"
 	$(NVCC_RUN)
 
-# Bundle the CUDA objects into a static archive. R's auto-link picks
-# this up via -lcudadidgpu in PKG_LIBS.
-libcudadidgpu.a: $(CUDA_OBJECTS)
-	@echo "  [ar]   $@"
-	ar rcs $@ $(CUDA_OBJECTS)
+# The CUDA half: one DLL linked entirely by nvcc/MSVC.
+didgpu_cuda.dll: $(CUDA_OBJECTS) didgpu_cuda.def
+	@echo "  [nvcc -shared] didgpu_cuda.dll"
+	$(NVCC_LINK)
 
-$(SHLIB): libcudadidgpu.a
+# MinGW import library for didgpu.dll to link against (-ldidgpu_cuda).
+libdidgpu_cuda.dll.a: didgpu_cuda.dll didgpu_cuda.def
+	@echo "  [dlltool] libdidgpu_cuda.dll.a"
+	dlltool -d didgpu_cuda.def -D didgpu_cuda.dll -l libdidgpu_cuda.dll.a
+
+# didgpu.dll must not link until the import lib exists.
+$(SHLIB): libdidgpu_cuda.dll.a
+
+# Bundle didgpu_cuda.dll + the CUDA runtime DLLs into the installed
+# package's libs dir so they load alongside didgpu.dll. R sets
+# R_PACKAGE_DIR and R_ARCH during install.
+all: $(SHLIB) bundle_cuda_dlls
+
+.PHONY: bundle_cuda_dlls
+bundle_cuda_dlls: didgpu_cuda.dll
+	@echo "  [bundle] didgpu_cuda.dll + CUDA runtime DLLs -> libs$(R_ARCH)"
+	@mkdir -p "$(R_PACKAGE_DIR)/libs$(R_ARCH)"
+	@cp -f didgpu_cuda.dll "$(R_PACKAGE_DIR)/libs$(R_ARCH)/"
+	@cp -f "$(CUDA_HOME)/bin/"cudart64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@cp -f "$(CUDA_HOME)/bin/"cublas64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@cp -f "$(CUDA_HOME)/bin/"cublasLt64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@cp -f "$(CUDA_HOME)/bin/"cusolver64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@cp -f "$(CUDA_HOME)/bin/"curand64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+else
+all: $(SHLIB)
 endif
 
-all: $(SHLIB)
-
 clean:
-	@rm -f *.o *.a $(SHLIB) crt/*.h
+	@rm -f *.o *.a *.dll *.def.a $(SHLIB) crt/*.h
 	@rmdir crt 2>/dev/null || true
