@@ -116,5 +116,58 @@ covers essentially all current NVIDIA GPUs regardless of R version.
       the repo), ready to upload.
 - [ ] Upload that `.zip` to a GitHub Release (needs your auth), e.g.
       `gh release create v0.1.0 C:\Users\ammonsj\didgpu_release\didgpu_0.1.0.zip`
-- [ ] Add the repo to r-universe for the CPU baseline.
-- [ ] README install section for both channels.
+- [ ] Add the repo to r-universe for the CPU baseline (config below).
+- [x] README install section for both channels (done — see README "Install").
+
+## Appendix: copy-paste configs
+
+### r-universe (CPU baseline)
+
+r-universe builds from a per-user registry repo. Create a public GitHub
+repo named **`jdammons.r-universe.dev`** containing a single
+`packages.json`:
+
+```json
+[
+  {
+    "package": "didgpu",
+    "url": "https://github.com/JoshuaAmmons/didgpu"
+  }
+]
+```
+
+Within a few minutes r-universe builds it (CPU-only — its runners have no
+GPU/CUDA, so the CUDA paths fall back to R) and the install line works:
+
+```r
+install.packages("didgpu", repos = "https://jdammons.r-universe.dev")
+```
+
+### GitHub Release (GPU lite binary)
+
+The artifact is already built + validated at
+`C:\Users\ammonsj\didgpu_release\didgpu_0.1.0.zip` (2.92 MB). Publish it:
+
+```powershell
+cd "C:\Users\ammonsj\DID GPU\didgpu"
+gh release create v0.1.0 `
+  "C:\Users\ammonsj\didgpu_release\didgpu_0.1.0.zip" `
+  --title "didgpu 0.1.0 (Windows GPU binary)" `
+  --notes "Prebuilt Windows + NVIDIA GPU binary (CUDA runtime bundled; no Toolkit/admin needed). install.packages from the asset URL — see README."
+```
+
+That makes the README one-liner live:
+
+```r
+install.packages(
+  "https://github.com/JoshuaAmmons/didgpu/releases/download/v0.1.0/didgpu_0.1.0.zip",
+  repos = NULL, type = "win.binary")
+```
+
+### Note on CI
+
+A GitHub Actions runner cannot build the GPU variant (no NVIDIA GPU / CUDA
+toolkit on hosted runners), so the GPU `.zip` is built on a CUDA machine
+(yours, via `tools/build-didgpu-win.ps1` with `DIDGPU_LITE=1`) and uploaded
+manually / via `gh release`. CI is only useful here for the CPU build and
+`R CMD check`; r-universe already provides the former.
