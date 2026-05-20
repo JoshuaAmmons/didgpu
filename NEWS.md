@@ -92,6 +92,11 @@ each with CUDA kernels for the hot paths.
   pre-trend is within +/- delta. Reports per-horizon and joint
   (intersection-union) verdicts plus the smallest defensible margin
   (`breakdown_delta`). Mirrors `didgpu_fect_equivalence()`.
+- `didgpu_joint_placebo(fit, horizons)` — the joint chi-square placebo
+  test (`p_jointplacebo`) restricted to a chosen pre-treatment window,
+  reusing the stored bootstrap covariance. Test parallel trends only over
+  the leads you care about; the full-window call reproduces the headline
+  `p_jointplacebo` exactly.
 
 ## Long-running workflow
 

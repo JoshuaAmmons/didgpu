@@ -139,3 +139,121 @@ print.didgpu_equivalence <- function(x, ...) {
   cat("i.e. it is positive evidence the pre-trend lies within +/- delta.\n")
   invisible(x)
 }
+
+
+# ============================================================================
+# Windowed / subset joint placebo test.
+#
+# The headline fit$results$p_jointplacebo is a chi-square Wald test of
+# H0: all placebos = 0, over EVERY placebo horizon. Applied work often
+# cares about parallel trends only over a specific pre-treatment window —
+# typically the few leads just before treatment (where contamination
+# matters most), or excluding noisy distant leads that inflate the joint
+# statistic. This runs the identical test on a chosen subset of horizons,
+# reusing the bootstrap covariance didgpu() already stored in coef$vcov.
+# ============================================================================
+
+
+#' Windowed / subset joint test of pre-treatment placebos
+#'
+#' Runs the same chi-square joint Wald test as `fit$results$p_jointplacebo`
+#' but on a chosen subset of placebo horizons, using the bootstrap
+#' covariance [didgpu()] already stored. Useful when parallel trends only
+#' need to hold over a specific pre-treatment window.
+#'
+#' @param x A `didgpu_result` from [didgpu()] run with `placebo > 0` and
+#'   `bootstrap_reps > 0`.
+#' @param horizons Integer vector of placebo horizons to include, as
+#'   positive distances before treatment (1 = the period immediately
+#'   pre-treatment, i.e. event time -1, matching `Placebo_1`). Negative
+#'   values are accepted and used by magnitude. `NULL` (default) uses all
+#'   placebo horizons, reproducing `fit$results$p_jointplacebo`.
+#' @return A `didgpu_joint_placebo` object: a list with `statistic`
+#'   (chi-square), `df`, `p_value`, `horizons` (the included event times,
+#'   negative), `estimates` (the included placebo point estimates), and
+#'   `n_boot`.
+#' @seealso [didgpu_equivalence()] for an equivalence (TOST) framing of the
+#'   same placebos.
+#' @examples
+#' \donttest{
+#' p <- didgpu_simulate_panel(n_units = 80L, n_periods = 12L,
+#'                            tau_profile = c(0.5, 1.0), seed = 7L)
+#' p$D <- as.integer(p$D >= 0.5)
+#' fit <- didgpu(p, "Y", "unit", "period", "D", effects = 3L, placebo = 3L,
+#'               bootstrap_reps = 200L, verbose = FALSE)
+#' didgpu_joint_placebo(fit, horizons = 1:2)   # only the two nearest leads
+#' }
+#' @export
+didgpu_joint_placebo <- function(x, horizons = NULL) {
+  stopifnot(inherits(x, "didgpu_result"))
+  pl <- x$results$Placebos
+  if (is.null(pl) || nrow(pl) == 0L)
+    stop("`x` has no placebo estimates. Re-run didgpu() with placebo > 0.")
+  n_p <- nrow(pl)
+  pl_names <- rownames(pl)
+  if (is.null(pl_names)) pl_names <- paste0("Placebo_", seq_len(n_p))
+
+  if (is.null(horizons)) {
+    idx <- seq_len(n_p)
+  } else {
+    if (!is.numeric(horizons) || length(horizons) == 0L)
+      stop("`horizons` must be a non-empty numeric vector (or NULL for all).")
+    idx <- as.integer(abs(horizons))
+    if (any(is.na(idx)) || any(idx < 1L) || any(idx > n_p))
+      stop(sprintf("`horizons` must be in 1..%d (the placebo horizons available).",
+                   n_p))
+    idx <- sort(unique(idx))
+  }
+  sel <- pl_names[idx]
+
+  b <- x$coef$b
+  V <- x$coef$vcov
+  if (is.null(b) || is.null(V))
+    stop("`x` lacks the stored coefficient vector / bootstrap covariance.")
+  if (!all(sel %in% names(b)))
+    stop("internal: placebo names not found in the coefficient vector.")
+
+  theta <- b[sel]
+  Vsub  <- V[sel, sel, drop = FALSE]
+  k     <- length(sel)
+
+  if (any(!is.finite(Vsub))) {
+    # Too few bootstrap reps to form a covariance (matches .joint_pvalue).
+    stat <- NA_real_; pval <- NA_real_
+  } else {
+    inv <- try(solve(Vsub), silent = TRUE)
+    if (inherits(inv, "try-error")) inv <- MASS::ginv(Vsub)
+    stat <- as.numeric(t(theta) %*% inv %*% theta)
+    pval <- stats::pchisq(stat, df = k, lower.tail = FALSE)
+  }
+
+  out <- list(
+    statistic = stat,
+    df        = k,
+    p_value   = pval,
+    horizons  = -idx,                       # included event times (negative)
+    estimates = theta,
+    n_boot    = x$results$n_boot %||% NA_integer_
+  )
+  class(out) <- "didgpu_joint_placebo"
+  out
+}
+
+
+#' Print method for didgpu_joint_placebo
+#' @param x A `didgpu_joint_placebo` object from [didgpu_joint_placebo()].
+#' @param ... Unused.
+#' @return `x`, invisibly.
+#' @export
+print.didgpu_joint_placebo <- function(x, ...) {
+  cat("didgpu windowed joint placebo test\n")
+  cat(sprintf("  horizons (event time): %s\n",
+              paste(x$horizons, collapse = ", ")))
+  cat(sprintf("  chi-square = %.4g  on df = %d\n", x$statistic, x$df))
+  reject <- !is.na(x$p_value) && x$p_value < 0.05
+  cat(sprintf("  p-value    = %.4g%s\n", x$p_value,
+              if (reject) "  (reject joint zero pre-trend)" else ""))
+  cat("  A LARGE p-value fails to reject parallel pre-trends over this\n")
+  cat("  window; for positive equivalence evidence use didgpu_equivalence().\n")
+  invisible(x)
+}
