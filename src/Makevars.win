@@ -141,7 +141,12 @@ ifeq ($(HAVE_CUDA_BUILD),yes)
   # /MT statically links MSVC's C runtime into the .o file, so we don't
   # need msvcrt.dll at link time (avoids _Init_thread_* symbols that
   # otherwise pull in vcruntime.lib).
+  # -allow-unsupported-compiler: CUDA 12.6's host_config.h hard-errors
+  # on MSVC newer than it officially lists (e.g. VS 2022 17.14 /
+  # _MSC_VER 1944). The generated code is fine for our kernels; this
+  # flag downgrades that hard error. Harmless on supported MSVC.
   NVCC_FLAGS := -O2 -std=c++17 \
+                -allow-unsupported-compiler \
                 -I./cuda_shim \
                 -Xcompiler=//MT,//GS- \
                 -gencode=arch=compute_75,code=sm_75 \
@@ -170,27 +175,11 @@ ifeq ($(HAVE_CUDA_BUILD),yes)
 # just `cmd /C wrapper.bat <nvcc-path> <flags...>` with no nesting.
 NVCC_RUN = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
 
-cuda_didkernel.o: cuda_didkernel.cu
-	@echo "  [nvcc] $<"
-	$(NVCC_RUN)
-
-cuda_saxpy.o: cuda_saxpy.cu
-	@echo "  [nvcc] $<"
-	$(NVCC_RUN)
-
-cuda_fect_fe.o: cuda_fect_fe.cu
-	@echo "  [nvcc] $<"
-	$(NVCC_RUN)
-
-cuda_fect_svd.o: cuda_fect_svd.cu
-	@echo "  [nvcc] $<"
-	$(NVCC_RUN)
-
-cuda_testmechs_bootstrap.o: cuda_testmechs_bootstrap.cu
-	@echo "  [nvcc] $<"
-	$(NVCC_RUN)
-
-cuda_cs_inner.o: cuda_cs_inner.cu
+# Pattern rule for every .cu -> .o (mirrors the Linux Makevars). Using
+# a pattern rule rather than one explicit rule per file means new .cu
+# kernels are picked up automatically — the explicit-rules version
+# silently dropped cuda_bootstrap.cu when it was added later.
+%.o: %.cu
 	@echo "  [nvcc] $<"
 	$(NVCC_RUN)
 
