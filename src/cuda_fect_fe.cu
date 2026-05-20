@@ -140,33 +140,61 @@ __global__ void k_fect_col_mean(
 
 
 // ---------------------------------------------------------------------------
-// Host launcher: run the demeaning iteration to convergence on device-
-// resident Y, M. Returns alpha, xi on device. Caller is responsible for
-// H2D transfer of inputs and D2H of outputs.
+// Host-facing entry point (pure-C ABI): run the demeaning iteration to
+// convergence. Takes HOST row-major Y (n_units x n_periods) and mask M,
+// allocates and frees all device memory internally, and writes the fitted
+// alpha (n_units) and xi (n_periods) into the caller's HOST buffers. No
+// device pointer crosses this boundary, so the MinGW-built didgpu.dll that
+// calls this never links the CUDA runtime.
 //
 // Convergence check (max |alpha_new - alpha_old| and max |xi_new -
 // xi_old|) is done on host between launches; this keeps the kernel
 // itself stateless and easy to compose.
 //
-// Returns: 0 on success, non-zero on CUDA error. On success, *out_iter
-// holds the iteration count and *out_delta holds the final max-abs
-// change.
+// Returns: 0 on success, non-zero (a cudaError_t code) on CUDA error. On
+// success, *out_iter holds the iteration count and *out_delta the final
+// max-abs change.
 // ---------------------------------------------------------------------------
 extern "C" int didgpu_cuda_fect_fe(
-    const double* d_Y,
-    const int*    d_M,
-    double*       d_alpha,
-    double*       d_xi,
+    const double* Y_rm,
+    const int*    M_rm,
     int n_units, int n_periods,
     double tol, int max_iter,
+    double* out_alpha, double* out_xi,
     int* out_iter, double* out_delta) {
 
-  // Zero-initialise alpha and xi.
+  const size_t cells = static_cast<size_t>(n_units) * n_periods;
   cudaError_t e;
-  e = cudaMemset(d_alpha, 0, n_units   * sizeof(double));
-  if (e != cudaSuccess) return static_cast<int>(e);
-  e = cudaMemset(d_xi,    0, n_periods * sizeof(double));
-  if (e != cudaSuccess) return static_cast<int>(e);
+  double *d_Y = nullptr, *d_alpha = nullptr, *d_xi = nullptr;
+  int    *d_M = nullptr;
+
+  // Device allocations. On any failure, free what we have and bail.
+  e = cudaMalloc((void**)&d_Y, cells * sizeof(double));
+  if (e != cudaSuccess) { return static_cast<int>(e); }
+  e = cudaMalloc((void**)&d_M, cells * sizeof(int));
+  if (e != cudaSuccess) { cudaFree(d_Y); return static_cast<int>(e); }
+  e = cudaMalloc((void**)&d_alpha, static_cast<size_t>(n_units) * sizeof(double));
+  if (e != cudaSuccess) { cudaFree(d_Y); cudaFree(d_M); return static_cast<int>(e); }
+  e = cudaMalloc((void**)&d_xi, static_cast<size_t>(n_periods) * sizeof(double));
+  if (e != cudaSuccess) { cudaFree(d_Y); cudaFree(d_M); cudaFree(d_alpha);
+                          return static_cast<int>(e); }
+
+  // A single cleanup lambda keeps every early-return path leak-free.
+  auto free_dev = [&]() {
+    cudaFree(d_Y); cudaFree(d_M); cudaFree(d_alpha); cudaFree(d_xi);
+  };
+
+  // Host -> device transfer of the inputs.
+  e = cudaMemcpy(d_Y, Y_rm, cells * sizeof(double), cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { free_dev(); return static_cast<int>(e); }
+  e = cudaMemcpy(d_M, M_rm, cells * sizeof(int), cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { free_dev(); return static_cast<int>(e); }
+
+  // Zero-initialise alpha and xi.
+  e = cudaMemset(d_alpha, 0, static_cast<size_t>(n_units)   * sizeof(double));
+  if (e != cudaSuccess) { free_dev(); return static_cast<int>(e); }
+  e = cudaMemset(d_xi,    0, static_cast<size_t>(n_periods) * sizeof(double));
+  if (e != cudaSuccess) { free_dev(); return static_cast<int>(e); }
 
   // Scratch host buffers for convergence check.
   double* h_alpha     = new double[n_units];
@@ -176,6 +204,11 @@ extern "C" int didgpu_cuda_fect_fe(
   for (int i = 0; i < n_units;   ++i) { h_alpha_old[i] = 0.0; }
   for (int t = 0; t < n_periods; ++t) { h_xi_old[t]    = 0.0; }
 
+  auto free_all = [&]() {
+    delete[] h_alpha; delete[] h_xi; delete[] h_alpha_old; delete[] h_xi_old;
+    free_dev();
+  };
+
   int iter = 0;
   double delta = 1e30;
   for (iter = 1; iter <= max_iter; ++iter) {
@@ -183,16 +216,12 @@ extern "C" int didgpu_cuda_fect_fe(
     k_fect_row_mean<<<n_units, DIDGPU_FECT_BLOCK>>>(
       d_Y, d_M, d_xi, d_alpha, n_units, n_periods);
     e = cudaGetLastError();
-    if (e != cudaSuccess) { delete[] h_alpha; delete[] h_xi;
-                            delete[] h_alpha_old; delete[] h_xi_old;
-                            return static_cast<int>(e); }
+    if (e != cudaSuccess) { free_all(); return static_cast<int>(e); }
     // Update xi.
     k_fect_col_mean<<<n_periods, DIDGPU_FECT_BLOCK>>>(
       d_Y, d_M, d_alpha, d_xi, n_units, n_periods);
     e = cudaGetLastError();
-    if (e != cudaSuccess) { delete[] h_alpha; delete[] h_xi;
-                            delete[] h_alpha_old; delete[] h_xi_old;
-                            return static_cast<int>(e); }
+    if (e != cudaSuccess) { free_all(); return static_cast<int>(e); }
     // Pull alpha, xi for convergence check.
     cudaMemcpy(h_alpha, d_alpha, n_units   * sizeof(double),
                cudaMemcpyDeviceToHost);
@@ -213,8 +242,13 @@ extern "C" int didgpu_cuda_fect_fe(
     if (delta < tol) break;
   }
 
-  delete[] h_alpha; delete[] h_xi;
-  delete[] h_alpha_old; delete[] h_xi_old;
+  // Device -> host transfer of the results.
+  cudaMemcpy(out_alpha, d_alpha, static_cast<size_t>(n_units)   * sizeof(double),
+             cudaMemcpyDeviceToHost);
+  cudaMemcpy(out_xi,    d_xi,    static_cast<size_t>(n_periods) * sizeof(double),
+             cudaMemcpyDeviceToHost);
+
+  free_all();
   if (out_iter)  *out_iter  = iter;
   if (out_delta) *out_delta = delta;
   return 0;

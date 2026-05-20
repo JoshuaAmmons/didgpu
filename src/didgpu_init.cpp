@@ -6,9 +6,16 @@
 // stubs return NA so callers can detect-and-fall-back at runtime.
 
 #include <Rcpp.h>
+#include <vector>     // std::vector — host marshalling buffers
+#include <algorithm>  // std::min — shape checks in the SVD wrapper
 
 #ifdef HAS_CUDA
-#include <cuda_runtime.h>
+// NOTE: this translation unit is compiled by the R toolchain (MinGW g++ on
+// Windows). It must NOT touch the CUDA runtime directly — every CUDA call
+// lives behind the pure-C ABI below (implemented in the .cu files, which
+// nvcc/MSVC build into didgpu_cuda.dll on Windows / the single .so on Linux).
+// So: no <cuda_runtime.h>, no cudaMalloc/cudaMemcpy/cudaFree here. All ABI
+// pointers are HOST pointers; the .cu side owns all device memory.
 extern "C" int didgpu_cuda_saxpy(int n, float a, const float* x, float* y);
 extern "C" int didgpu_cuda_run_one_event_time(
     const double* outcome, const double* N_gt,
@@ -16,15 +23,12 @@ extern "C" int didgpu_cuda_run_one_event_time(
     const int* F_g, const int* S_g, const int* T_g, const int* L_g,
     int n_rows, int n_groups, int n_cohorts,
     int k, int direction, double G_over_Ninc,
-    double* diff_y_k, int* never_change_k, int* candidate_dist_k,
-    int* dist_k_final, double* kernel_val, double* U_g,
-    double* N_t_control, double* N_t_switch_cand,
-    double* did_out_device);
+    double* out_did);
 extern "C" int didgpu_cuda_fect_fe(
-    const double* d_Y, const int* d_M,
-    double* d_alpha, double* d_xi,
+    const double* Y_rm, const int* M_rm,
     int n_units, int n_periods,
     double tol, int max_iter,
+    double* out_alpha, double* out_xi,
     int* out_iter, double* out_delta);
 extern "C" int didgpu_cuda_cs_inner_batched(
     const double* X_concat, const int* X_offsets,
@@ -48,15 +52,15 @@ extern "C" int didgpu_cuda_cs_inner_logit(
     double* out_att,
     double* out_IF_per_row);
 extern "C" int didgpu_cuda_fect_svd_truncated(
-    const double* d_M_rm,
+    const double* M_rm,
     int m, int n, int r,
-    double* d_L_out_rm,
-    double* d_F_out_rm);
+    double* out_L_rm,
+    double* out_F_rm);
 extern "C" int didgpu_cuda_fect_svd_softthreshold(
-    const double* d_Y_complete_rm,
+    const double* Y_complete_rm,
     int m, int n,
     double lambda,
-    double* d_Y_hat_rm,
+    double* out_Y_hat_rm,
     int* out_n_nonzero);
 extern "C" int didgpu_cuda_testmechs_bootstrap(
     const int* h_d, const int* h_m, const int* h_y,
@@ -115,94 +119,19 @@ double didgpu_cuda_did(
   if (S_g.size() != n_groups || T_g.size() != n_groups || L_g.size() != n_groups)
     Rcpp::stop("group-vector length mismatch");
 
-  // Device allocations.
-  double *d_outcome=nullptr, *d_Ngt=nullptr, *d_diff=nullptr, *d_kernel=nullptr;
-  double *d_Ug=nullptr, *d_Nctrl=nullptr, *d_Nswitch=nullptr, *d_did=nullptr;
-  int *d_rtog=nullptr, *d_rtot=nullptr, *d_ckey=nullptr;
-  int *d_Fg=nullptr, *d_Sg=nullptr, *d_Tg=nullptr, *d_Lg=nullptr;
-  int *d_nck=nullptr, *d_cdist=nullptr, *d_dist=nullptr;
-
-  auto fail = [&](const char* msg) -> double {
-    if (d_outcome) cudaFree(d_outcome);
-    if (d_Ngt)     cudaFree(d_Ngt);
-    if (d_diff)    cudaFree(d_diff);
-    if (d_kernel)  cudaFree(d_kernel);
-    if (d_Ug)      cudaFree(d_Ug);
-    if (d_Nctrl)   cudaFree(d_Nctrl);
-    if (d_Nswitch) cudaFree(d_Nswitch);
-    if (d_did)     cudaFree(d_did);
-    if (d_rtog)    cudaFree(d_rtog);
-    if (d_rtot)    cudaFree(d_rtot);
-    if (d_ckey)    cudaFree(d_ckey);
-    if (d_Fg)      cudaFree(d_Fg);
-    if (d_Sg)      cudaFree(d_Sg);
-    if (d_Tg)      cudaFree(d_Tg);
-    if (d_Lg)      cudaFree(d_Lg);
-    if (d_nck)     cudaFree(d_nck);
-    if (d_cdist)   cudaFree(d_cdist);
-    if (d_dist)    cudaFree(d_dist);
-    Rcpp::stop("CUDA error: %s", msg);
-    return 0.0;
-  };
-
-  cudaError_t e;
-  #define ALLOC(p, n, T) do { e = cudaMalloc((void**)&p, (n) * sizeof(T)); \
-                              if (e != cudaSuccess) return fail(cudaGetErrorString(e)); } while(0)
-  #define H2D(dst, src, n, T) do { e = cudaMemcpy(dst, src, (n) * sizeof(T), \
-                                                    cudaMemcpyHostToDevice); \
-                                    if (e != cudaSuccess) return fail(cudaGetErrorString(e)); } while(0)
-
-  ALLOC(d_outcome, n_rows, double);
-  ALLOC(d_Ngt,     n_rows, double);
-  ALLOC(d_rtog,    n_rows, int);
-  ALLOC(d_rtot,    n_rows, int);
-  ALLOC(d_ckey,    n_rows, int);
-  ALLOC(d_Fg,      n_groups, int);
-  ALLOC(d_Sg,      n_groups, int);
-  ALLOC(d_Tg,      n_groups, int);
-  ALLOC(d_Lg,      n_groups, int);
-  ALLOC(d_diff,    n_rows, double);
-  ALLOC(d_nck,     n_rows, int);
-  ALLOC(d_cdist,   n_rows, int);
-  ALLOC(d_dist,    n_rows, int);
-  ALLOC(d_kernel,  n_rows, double);
-  ALLOC(d_Ug,      n_groups, double);
-  ALLOC(d_Nctrl,   n_cohorts, double);
-  ALLOC(d_Nswitch, n_cohorts, double);
-  ALLOC(d_did,     1, double);
-
-  H2D(d_outcome, &outcome[0],     n_rows,   double);
-  H2D(d_Ngt,     &N_gt[0],        n_rows,   double);
-  H2D(d_rtog,    &row_to_g[0],    n_rows,   int);
-  H2D(d_rtot,    &row_to_t[0],    n_rows,   int);
-  H2D(d_ckey,    &cohort_key[0],  n_rows,   int);
-  H2D(d_Fg,      &F_g[0],         n_groups, int);
-  H2D(d_Sg,      &S_g[0],         n_groups, int);
-  H2D(d_Tg,      &T_g[0],         n_groups, int);
-  H2D(d_Lg,      &L_g[0],         n_groups, int);
-
+  // The CUDA DLL owns all device memory; we hand it HOST pointers and get
+  // back the scalar DiD estimate. R's IntegerVector stores int and
+  // NumericVector stores double, so &v[0] already matches the C-ABI element
+  // types — no copy/cast needed here.
+  double did = 0.0;
   int ec = didgpu_cuda_run_one_event_time(
-      d_outcome, d_Ngt, d_rtog, d_rtot, d_ckey,
-      d_Fg, d_Sg, d_Tg, d_Lg,
+      &outcome[0], &N_gt[0], &row_to_g[0], &row_to_t[0], &cohort_key[0],
+      &F_g[0], &S_g[0], &T_g[0], &L_g[0],
       n_rows, n_groups, n_cohorts,
       k, direction, G_over_Ninc,
-      d_diff, d_nck, d_cdist, d_dist, d_kernel, d_Ug,
-      d_Nctrl, d_Nswitch, d_did);
-  if (ec != 0) return fail("kernel chain failed");
-
-  double did = 0.0;
-  e = cudaMemcpy(&did, d_did, sizeof(double), cudaMemcpyDeviceToHost);
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-
-  cudaFree(d_outcome); cudaFree(d_Ngt); cudaFree(d_diff); cudaFree(d_kernel);
-  cudaFree(d_Ug); cudaFree(d_Nctrl); cudaFree(d_Nswitch); cudaFree(d_did);
-  cudaFree(d_rtog); cudaFree(d_rtot); cudaFree(d_ckey);
-  cudaFree(d_Fg); cudaFree(d_Sg); cudaFree(d_Tg); cudaFree(d_Lg);
-  cudaFree(d_nck); cudaFree(d_cdist); cudaFree(d_dist);
-
+      &did);
+  if (ec != 0) Rcpp::stop("CUDA DID kernel failed with code %d", ec);
   return did;
-  #undef ALLOC
-  #undef H2D
 #else
   (void)outcome; (void)N_gt; (void)row_to_g; (void)row_to_t; (void)cohort_key;
   (void)F_g; (void)S_g; (void)T_g; (void)L_g;
@@ -242,49 +171,18 @@ Rcpp::List didgpu_cuda_fect_fe_r(
     }
   }
 
-  double *d_Y = nullptr, *d_alpha = nullptr, *d_xi = nullptr;
-  int    *d_M = nullptr;
-  auto fail = [&](const char* msg) -> Rcpp::List {
-    if (d_Y)     cudaFree(d_Y);
-    if (d_M)     cudaFree(d_M);
-    if (d_alpha) cudaFree(d_alpha);
-    if (d_xi)    cudaFree(d_xi);
-    Rcpp::stop("CUDA error: %s", msg);
-    return Rcpp::List::create();
-  };
-
-  cudaError_t e;
-  e = cudaMalloc((void**)&d_Y,     n_units * n_periods * sizeof(double));
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-  e = cudaMalloc((void**)&d_M,     n_units * n_periods * sizeof(int));
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-  e = cudaMalloc((void**)&d_alpha, n_units * sizeof(double));
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-  e = cudaMalloc((void**)&d_xi,    n_periods * sizeof(double));
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-
-  e = cudaMemcpy(d_Y, Y_rm.data(),
-                  n_units * n_periods * sizeof(double),
-                  cudaMemcpyHostToDevice);
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-  e = cudaMemcpy(d_M, M_rm.data(),
-                  n_units * n_periods * sizeof(int),
-                  cudaMemcpyHostToDevice);
-  if (e != cudaSuccess) return fail(cudaGetErrorString(e));
-
+  // The CUDA DLL allocates/frees all device memory; we pass host buffers
+  // (Y_rm/M_rm in, alpha/xi out) across the pure-C ABI.
+  Rcpp::NumericVector alpha(n_units), xi(n_periods);
   int iter = 0;
   double delta = 0.0;
-  int ec = didgpu_cuda_fect_fe(d_Y, d_M, d_alpha, d_xi,
-                                  n_units, n_periods,
-                                  tol, max_iter, &iter, &delta);
-  if (ec != 0) return fail("kernel chain failed");
-
-  Rcpp::NumericVector alpha(n_units), xi(n_periods);
-  cudaMemcpy(&alpha[0], d_alpha, n_units * sizeof(double),
-              cudaMemcpyDeviceToHost);
-  cudaMemcpy(&xi[0],    d_xi,    n_periods * sizeof(double),
-              cudaMemcpyDeviceToHost);
-  cudaFree(d_Y); cudaFree(d_M); cudaFree(d_alpha); cudaFree(d_xi);
+  int ec = didgpu_cuda_fect_fe(
+      Y_rm.data(), M_rm.data(),
+      n_units, n_periods,
+      tol, max_iter,
+      &alpha[0], &xi[0],
+      &iter, &delta);
+  if (ec != 0) Rcpp::stop("CUDA fect_fe kernel failed with code %d", ec);
 
   return Rcpp::List::create(
     Rcpp::_["alpha"] = alpha,
@@ -543,36 +441,13 @@ SEXP didgpu_cuda_fect_svd_truncated_r(Rcpp::NumericMatrix M, int r) {
     for (int j = 0; j < n; ++j)
       M_rm[static_cast<size_t>(i) * n + j] = M(i, j);
 
-  double *d_M = nullptr, *d_L = nullptr, *d_F = nullptr;
-  cudaError_t e;
-  auto cleanup_and_return_null = [&]() -> SEXP {
-    if (d_M) cudaFree(d_M);
-    if (d_L) cudaFree(d_L);
-    if (d_F) cudaFree(d_F);
-    return R_NilValue;
-  };
-
-  e = cudaMalloc((void**)&d_M, sizeof(double) * m * n);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-  e = cudaMalloc((void**)&d_L, sizeof(double) * m * r);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-  e = cudaMalloc((void**)&d_F, sizeof(double) * r * n);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-
-  e = cudaMemcpy(d_M, M_rm.data(), sizeof(double) * m * n,
-                  cudaMemcpyHostToDevice);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-
-  int rc = didgpu_cuda_fect_svd_truncated(d_M, m, n, r, d_L, d_F);
-  if (rc != 0) return cleanup_and_return_null();
-
+  // The CUDA DLL owns device memory; pass host buffers. L_rm (m x r) and
+  // F_rm (r x n) come back row-major; converted to column-major R below.
   std::vector<double> L_rm(static_cast<size_t>(m) * r);
   std::vector<double> F_rm(static_cast<size_t>(r) * n);
-  cudaMemcpy(L_rm.data(), d_L, sizeof(double) * m * r,
-              cudaMemcpyDeviceToHost);
-  cudaMemcpy(F_rm.data(), d_F, sizeof(double) * r * n,
-              cudaMemcpyDeviceToHost);
-  cudaFree(d_M); cudaFree(d_L); cudaFree(d_F);
+  int rc = didgpu_cuda_fect_svd_truncated(
+      M_rm.data(), m, n, r, L_rm.data(), F_rm.data());
+  if (rc != 0) return R_NilValue;
 
   // Convert row-major host -> column-major R matrices.
   Rcpp::NumericMatrix L(m, r), F(r, n);
@@ -622,31 +497,13 @@ SEXP didgpu_cuda_fect_svd_softthreshold_r(Rcpp::NumericMatrix Y_complete,
     for (int j = 0; j < n; ++j)
       Y_rm[static_cast<size_t>(i) * n + j] = Y_complete(i, j);
 
-  double *d_Y = nullptr, *d_Yhat = nullptr;
-  cudaError_t e;
-  auto cleanup_and_return_null = [&]() -> SEXP {
-    if (d_Y)    cudaFree(d_Y);
-    if (d_Yhat) cudaFree(d_Yhat);
-    return R_NilValue;
-  };
-
-  e = cudaMalloc((void**)&d_Y,    sizeof(double) * m * n);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-  e = cudaMalloc((void**)&d_Yhat, sizeof(double) * m * n);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-  e = cudaMemcpy(d_Y, Y_rm.data(), sizeof(double) * m * n,
-                  cudaMemcpyHostToDevice);
-  if (e != cudaSuccess) return cleanup_and_return_null();
-
-  int n_nonzero = 0;
-  int rc = didgpu_cuda_fect_svd_softthreshold(d_Y, m, n, lambda,
-                                                d_Yhat, &n_nonzero);
-  if (rc != 0) return cleanup_and_return_null();
-
+  // The CUDA DLL owns device memory; pass host buffers. Yhat_rm (m x n)
+  // comes back row-major; converted to a column-major R matrix below.
   std::vector<double> Yhat_rm(static_cast<size_t>(m) * n);
-  cudaMemcpy(Yhat_rm.data(), d_Yhat, sizeof(double) * m * n,
-              cudaMemcpyDeviceToHost);
-  cudaFree(d_Y); cudaFree(d_Yhat);
+  int n_nonzero = 0;
+  int rc = didgpu_cuda_fect_svd_softthreshold(
+      Y_rm.data(), m, n, lambda, Yhat_rm.data(), &n_nonzero);
+  if (rc != 0) return R_NilValue;
 
   Rcpp::NumericMatrix Y_hat(m, n);
   for (int i = 0; i < m; ++i)

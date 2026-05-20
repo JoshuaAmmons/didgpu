@@ -130,7 +130,10 @@ __global__ void k_build_F_from_Vcm(const double* __restrict__ V_cm,
 // and F (r x n) such that L * F is a rank-r approximation of M.
 // Specifically L = U_r * sqrt(D_r), F = sqrt(D_r) * V_r^T.
 // ---------------------------------------------------------------------------
-extern "C" int didgpu_cuda_fect_svd_truncated(
+// INTERNAL device-side helper: every pointer here is a device pointer.
+// The host-facing didgpu_cuda_fect_svd_truncated() wrapper below owns the
+// device memory and exposes only host pointers across the C ABI.
+static int fect_svd_truncated_dev(
     const double* d_M_rm,   // device, row-major (m x n)
     int m, int n, int r,
     double* d_L_out_rm,     // device, row-major (m x r), preallocated
@@ -270,7 +273,9 @@ __global__ void k_soft_threshold(double* d, int n, double lambda) {
 // Same scaffold structure as the truncated SVD above. Once the
 // scaffolds are filled in, this is the kernel chain mc needs per iter.
 // ---------------------------------------------------------------------------
-extern "C" int didgpu_cuda_fect_svd_softthreshold(
+// INTERNAL device-side helper (device pointers only); wrapped by the
+// host-facing didgpu_cuda_fect_svd_softthreshold() below.
+static int fect_svd_softthreshold_dev(
     const double* d_Y_complete_rm,
     int m, int n,
     double lambda,
@@ -370,6 +375,74 @@ extern "C" int didgpu_cuda_fect_svd_softthreshold(
   cusolverDnDestroyGesvdjInfo(params);
   cusolverDnDestroy(hs); cublasDestroy(hb);
   return 0;
+}
+
+
+// ===========================================================================
+// Host-facing entry points (pure-C ABI). These own all device memory: they
+// upload the HOST inputs, call the device-side helpers above, download the
+// HOST outputs, and free everything. No device pointer crosses the boundary,
+// so the MinGW-built didgpu.dll never links the CUDA runtime.
+// ===========================================================================
+
+// Truncated rank-r SVD. M_rm is HOST (m x n) row-major; out_L_rm (m x r)
+// and out_F_rm (r x n) are HOST buffers the caller has preallocated, filled
+// such that out_L_rm * out_F_rm is a rank-r approximation of M.
+extern "C" int didgpu_cuda_fect_svd_truncated(
+    const double* M_rm,
+    int m, int n, int r,
+    double* out_L_rm,
+    double* out_F_rm) {
+  if (r <= 0 || r > std::min(m, n)) return -1;
+
+  cudaError_t e;
+  double *d_M = nullptr, *d_L = nullptr, *d_F = nullptr;
+  e = cudaMalloc((void**)&d_M, sizeof(double) * m * n);
+  if (e != cudaSuccess) { return -3; }
+  e = cudaMalloc((void**)&d_L, sizeof(double) * m * r);
+  if (e != cudaSuccess) { cudaFree(d_M); return -3; }
+  e = cudaMalloc((void**)&d_F, sizeof(double) * r * n);
+  if (e != cudaSuccess) { cudaFree(d_M); cudaFree(d_L); return -3; }
+
+  e = cudaMemcpy(d_M, M_rm, sizeof(double) * m * n, cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cudaFree(d_M); cudaFree(d_L); cudaFree(d_F); return -3; }
+
+  int rc = fect_svd_truncated_dev(d_M, m, n, r, d_L, d_F);
+  if (rc != 0) { cudaFree(d_M); cudaFree(d_L); cudaFree(d_F); return rc; }
+
+  e = cudaMemcpy(out_L_rm, d_L, sizeof(double) * m * r, cudaMemcpyDeviceToHost);
+  if (e == cudaSuccess)
+    e = cudaMemcpy(out_F_rm, d_F, sizeof(double) * r * n, cudaMemcpyDeviceToHost);
+  cudaFree(d_M); cudaFree(d_L); cudaFree(d_F);
+  return (e == cudaSuccess) ? 0 : -3;
+}
+
+// Soft-thresholded SVD reconstruction. Y_complete_rm is HOST (m x n)
+// row-major; out_Y_hat_rm (m x n) is a HOST buffer the caller preallocated.
+extern "C" int didgpu_cuda_fect_svd_softthreshold(
+    const double* Y_complete_rm,
+    int m, int n,
+    double lambda,
+    double* out_Y_hat_rm,
+    int* out_n_nonzero) {
+  cudaError_t e;
+  double *d_Y = nullptr, *d_Yhat = nullptr;
+  e = cudaMalloc((void**)&d_Y, sizeof(double) * m * n);
+  if (e != cudaSuccess) { return -3; }
+  e = cudaMalloc((void**)&d_Yhat, sizeof(double) * m * n);
+  if (e != cudaSuccess) { cudaFree(d_Y); return -3; }
+
+  e = cudaMemcpy(d_Y, Y_complete_rm, sizeof(double) * m * n,
+                 cudaMemcpyHostToDevice);
+  if (e != cudaSuccess) { cudaFree(d_Y); cudaFree(d_Yhat); return -3; }
+
+  int rc = fect_svd_softthreshold_dev(d_Y, m, n, lambda, d_Yhat, out_n_nonzero);
+  if (rc != 0) { cudaFree(d_Y); cudaFree(d_Yhat); return rc; }
+
+  e = cudaMemcpy(out_Y_hat_rm, d_Yhat, sizeof(double) * m * n,
+                 cudaMemcpyDeviceToHost);
+  cudaFree(d_Y); cudaFree(d_Yhat);
+  return (e == cudaSuccess) ? 0 : -3;
 }
 
 #endif  // HAS_CUDA

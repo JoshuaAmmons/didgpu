@@ -205,10 +205,14 @@ __global__ void k_final_did(
 }
 
 // --------------------------------------------------------------------------
-// Host-side launcher: run all kernels for a single (k, direction) pair on
-// one bootstrap iteration. Returns the DID value via did_out (host-resident).
+// Device-side launcher: run all kernels for a single (k, direction) pair on
+// one bootstrap iteration. Returns the DID value via did_out_device (device-
+// resident). This is an INTERNAL helper — every pointer it touches is a
+// device pointer. The host-facing entry point
+// didgpu_cuda_run_one_event_time() below owns all device memory and never
+// lets a device pointer cross the C ABI (keeps the MinGW side CUDA-free).
 //
-// Caller is responsible for:
+// Caller (the host wrapper) is responsible for:
 //   - allocating + populating all device arrays (outcome, N_gt, row_to_*,
 //     F_g, S_g, T_g, L_g, cohort_key)
 //   - providing a workspace big enough for diff_y_k, never_change_k,
@@ -220,7 +224,7 @@ __global__ void k_final_did(
 //     candidate_dist_k * N_gt sum after gating; we leave it to the
 //     caller for now so the kernel chain stays linear.
 // --------------------------------------------------------------------------
-extern "C" int didgpu_cuda_run_one_event_time(
+static int run_one_event_time_dev(
     const double* outcome,           // [n_rows]
     const double* N_gt,              // [n_rows]
     const int*    row_to_g,          // [n_rows]
@@ -275,4 +279,108 @@ extern "C" int didgpu_cuda_run_one_event_time(
 
   CUDA_CHECK(cudaDeviceSynchronize());
   return 0;
+}
+
+// --------------------------------------------------------------------------
+// Host-facing entry point (pure-C ABI). Takes HOST arrays, allocates and
+// frees all device memory internally, and returns the scalar DiD estimate
+// in *out_did (host). No device pointer crosses this boundary, so the
+// MinGW-built didgpu.dll that calls this never links the CUDA runtime.
+//
+// Mirrors what R/core_r.R::.core_one_event_time produces; see the device
+// launcher above and that R file for the meaning of each argument.
+// Returns 0 on success, non-zero (a cudaError_t code, or the device
+// launcher's status) on failure.
+// --------------------------------------------------------------------------
+extern "C" int didgpu_cuda_run_one_event_time(
+    const double* h_outcome,    // [n_rows]
+    const double* h_N_gt,       // [n_rows]
+    const int*    h_row_to_g,   // [n_rows]
+    const int*    h_row_to_t,   // [n_rows]
+    const int*    h_cohort_key, // [n_rows]
+    const int*    h_F_g,        // [n_groups]
+    const int*    h_S_g,        // [n_groups]
+    const int*    h_T_g,        // [n_groups]
+    const int*    h_L_g,        // [n_groups]
+    int n_rows, int n_groups, int n_cohorts,
+    int k, int direction, double G_over_Ninc,
+    double* out_did)            // host [1]
+{
+  double *d_outcome=nullptr, *d_Ngt=nullptr, *d_diff=nullptr, *d_kernel=nullptr;
+  double *d_Ug=nullptr, *d_Nctrl=nullptr, *d_Nswitch=nullptr, *d_did=nullptr;
+  int *d_rtog=nullptr, *d_rtot=nullptr, *d_ckey=nullptr;
+  int *d_Fg=nullptr, *d_Sg=nullptr, *d_Tg=nullptr, *d_Lg=nullptr;
+  int *d_nck=nullptr, *d_cdist=nullptr, *d_dist=nullptr;
+  cudaError_t e = cudaSuccess;
+  int rc = 0;
+
+  #define DG_ALLOC(p, n, T) do { e = cudaMalloc((void**)&p, (size_t)(n) * sizeof(T)); \
+                                 if (e != cudaSuccess) { rc = (int)e; goto cleanup; } } while (0)
+  #define DG_H2D(dst, src, n, T) do { e = cudaMemcpy(dst, src, (size_t)(n) * sizeof(T), \
+                                       cudaMemcpyHostToDevice); \
+                                      if (e != cudaSuccess) { rc = (int)e; goto cleanup; } } while (0)
+
+  DG_ALLOC(d_outcome, n_rows,   double);
+  DG_ALLOC(d_Ngt,     n_rows,   double);
+  DG_ALLOC(d_rtog,    n_rows,   int);
+  DG_ALLOC(d_rtot,    n_rows,   int);
+  DG_ALLOC(d_ckey,    n_rows,   int);
+  DG_ALLOC(d_Fg,      n_groups, int);
+  DG_ALLOC(d_Sg,      n_groups, int);
+  DG_ALLOC(d_Tg,      n_groups, int);
+  DG_ALLOC(d_Lg,      n_groups, int);
+  DG_ALLOC(d_diff,    n_rows,   double);
+  DG_ALLOC(d_nck,     n_rows,   int);
+  DG_ALLOC(d_cdist,   n_rows,   int);
+  DG_ALLOC(d_dist,    n_rows,   int);
+  DG_ALLOC(d_kernel,  n_rows,   double);
+  DG_ALLOC(d_Ug,      n_groups, double);
+  DG_ALLOC(d_Nctrl,   n_cohorts, double);
+  DG_ALLOC(d_Nswitch, n_cohorts, double);
+  DG_ALLOC(d_did,     1,        double);
+
+  DG_H2D(d_outcome, h_outcome,    n_rows,   double);
+  DG_H2D(d_Ngt,     h_N_gt,       n_rows,   double);
+  DG_H2D(d_rtog,    h_row_to_g,   n_rows,   int);
+  DG_H2D(d_rtot,    h_row_to_t,   n_rows,   int);
+  DG_H2D(d_ckey,    h_cohort_key, n_rows,   int);
+  DG_H2D(d_Fg,      h_F_g,        n_groups, int);
+  DG_H2D(d_Sg,      h_S_g,        n_groups, int);
+  DG_H2D(d_Tg,      h_T_g,        n_groups, int);
+  DG_H2D(d_Lg,      h_L_g,        n_groups, int);
+
+  rc = run_one_event_time_dev(
+      d_outcome, d_Ngt, d_rtog, d_rtot, d_ckey,
+      d_Fg, d_Sg, d_Tg, d_Lg,
+      n_rows, n_groups, n_cohorts,
+      k, direction, G_over_Ninc,
+      d_diff, d_nck, d_cdist, d_dist, d_kernel, d_Ug,
+      d_Nctrl, d_Nswitch, d_did);
+  if (rc != 0) goto cleanup;
+
+  e = cudaMemcpy(out_did, d_did, sizeof(double), cudaMemcpyDeviceToHost);
+  if (e != cudaSuccess) rc = (int)e;
+
+cleanup:
+  if (d_outcome) cudaFree(d_outcome);
+  if (d_Ngt)     cudaFree(d_Ngt);
+  if (d_diff)    cudaFree(d_diff);
+  if (d_kernel)  cudaFree(d_kernel);
+  if (d_Ug)      cudaFree(d_Ug);
+  if (d_Nctrl)   cudaFree(d_Nctrl);
+  if (d_Nswitch) cudaFree(d_Nswitch);
+  if (d_did)     cudaFree(d_did);
+  if (d_rtog)    cudaFree(d_rtog);
+  if (d_rtot)    cudaFree(d_rtot);
+  if (d_ckey)    cudaFree(d_ckey);
+  if (d_Fg)      cudaFree(d_Fg);
+  if (d_Sg)      cudaFree(d_Sg);
+  if (d_Tg)      cudaFree(d_Tg);
+  if (d_Lg)      cudaFree(d_Lg);
+  if (d_nck)     cudaFree(d_nck);
+  if (d_cdist)   cudaFree(d_cdist);
+  if (d_dist)    cudaFree(d_dist);
+  #undef DG_ALLOC
+  #undef DG_H2D
+  return rc;
 }
