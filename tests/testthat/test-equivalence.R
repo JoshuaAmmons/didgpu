@@ -75,3 +75,54 @@ test_that("print method runs and returns invisibly", {
   expect_output(print(eq), "equivalence test")
   expect_identical(withVisible(print(eq))$visible, FALSE)
 })
+
+
+# ---- #100: didgpu_joint_placebo (windowed / subset joint test) ----
+
+test_that("full-window joint placebo reproduces fit$results$p_jointplacebo", {
+  fit <- make_fit(placebo = 3L, reps = 80L)
+  jp <- didgpu_joint_placebo(fit)            # all horizons
+  expect_s3_class(jp, "didgpu_joint_placebo")
+  expect_equal(jp$df, nrow(fit$results$Placebos))
+  expect_equal(jp$p_value, as.numeric(fit$results$p_jointplacebo),
+               tolerance = 1e-8)
+})
+
+test_that("subset selects the right horizons, df, and is magnitude-based", {
+  fit <- make_fit(placebo = 3L, reps = 80L)
+  j2 <- didgpu_joint_placebo(fit, horizons = 1:2)
+  expect_equal(j2$df, 2L)
+  expect_equal(j2$horizons, c(-1L, -2L))
+  expect_equal(unname(j2$estimates),
+               as.numeric(fit$results$Placebos[1:2, "Estimate"]),
+               tolerance = 1e-12)
+  jneg <- didgpu_joint_placebo(fit, horizons = c(-1, -2))  # negatives by |.|
+  expect_equal(jneg$p_value, j2$p_value, tolerance = 1e-12)
+})
+
+test_that("single-horizon joint test equals the two-sided z-test", {
+  fit <- make_fit(placebo = 3L, reps = 80L)
+  j1  <- didgpu_joint_placebo(fit, horizons = 1L)
+  expect_equal(j1$df, 1L)
+  v11 <- fit$coef$vcov["Placebo_1", "Placebo_1"]
+  est <- as.numeric(fit$coef$b["Placebo_1"])
+  expect_equal(j1$p_value, 2 * stats::pnorm(-abs(est / sqrt(v11))),
+               tolerance = 1e-8)
+})
+
+test_that("didgpu_joint_placebo errors informatively", {
+  fit <- make_fit(placebo = 2L, reps = 60L)
+  expect_error(didgpu_joint_placebo(fit, horizons = 99L), "1\\.\\.2")
+  expect_error(didgpu_joint_placebo(list()), "didgpu_result")
+  p <- didgpu_simulate_panel(n_units = 60L, n_periods = 10L,
+                             tau_profile = c(0.5, 1.0), seed = 3L)
+  p$D <- as.integer(p$D >= 0.5)
+  fit_nopl <- didgpu(p, "Y", "unit", "period", "D", effects = 2L, placebo = 0L,
+                     bootstrap_reps = 0L, backend = "r", verbose = FALSE)
+  expect_error(didgpu_joint_placebo(fit_nopl), "placebo")
+})
+
+test_that("didgpu_joint_placebo print runs", {
+  fit <- make_fit(placebo = 2L, reps = 60L)
+  expect_output(print(didgpu_joint_placebo(fit)), "joint placebo test")
+})
