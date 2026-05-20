@@ -209,6 +209,16 @@ $(SHLIB): libdidgpu_cuda.dll.a
 # R_PACKAGE_DIR and R_ARCH during install.
 all: $(SHLIB) bundle_cuda_dlls
 
+# The bundled CUDA DLL set is the full transitive closure of
+# didgpu_cuda.dll's load-time dependencies:
+#   didgpu_cuda.dll -> cudart64, cublas64, cusolver64
+#   cusolver64      -> cusparse64, cublas64, cublasLt64
+#   cublas64        -> cublasLt64
+#   cusparse64      -> nvJitLink_120_0
+# Miss any one and didgpu_cuda.dll links fine but fails to LOAD with
+# "LoadLibrary failure: The specified module could not be found".
+# (curand64 is bundled defensively though the device-side cuRAND the
+# kernels use needs no host DLL.)
 .PHONY: bundle_cuda_dlls
 bundle_cuda_dlls: didgpu_cuda.dll
 	@echo "  [bundle] didgpu_cuda.dll + CUDA runtime DLLs -> libs$(R_ARCH)"
@@ -218,6 +228,8 @@ bundle_cuda_dlls: didgpu_cuda.dll
 	@cp -f "$(CUDA_HOME)/bin/"cublas64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
 	@cp -f "$(CUDA_HOME)/bin/"cublasLt64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
 	@cp -f "$(CUDA_HOME)/bin/"cusolver64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@cp -f "$(CUDA_HOME)/bin/"cusparse64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@cp -f "$(CUDA_HOME)/bin/"nvJitLink_*.dll   "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
 	@cp -f "$(CUDA_HOME)/bin/"curand64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
 else
 all: $(SHLIB)
