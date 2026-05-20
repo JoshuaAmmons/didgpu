@@ -85,6 +85,13 @@ each with CUDA kernels for the hot paths.
   equivalent of the reference's `by_path` argument).
 - Sample-size columns (`N`, `Switchers`, `N.w`, `Switchers.w`) match
   the reference exactly.
+- `didgpu_equivalence(fit, delta)` — pre-trends equivalence (TOST) test on
+  the placebo estimates. Instead of "failed to reject a zero pre-trend"
+  (weak, and worst exactly when underpowered), it tests
+  H0: |pre-trend| >= delta and REJECTING is positive evidence the
+  pre-trend is within +/- delta. Reports per-horizon and joint
+  (intersection-union) verdicts plus the smallest defensible margin
+  (`breakdown_delta`). Mirrors `didgpu_fect_equivalence()`.
 
 ## Long-running workflow
 
