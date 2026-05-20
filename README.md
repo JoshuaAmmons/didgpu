@@ -9,6 +9,8 @@ Currently includes **five estimator families plus a sensitivity layer**:
 - **TestMechs** (Kwon & Roth 2026) sharp mediation testing — `didgpu_test_sharp_null()`. All three test methods (CS / ARP / FSST), binary AND multi-level mediators (K >= 2).
 - **HonestDiD** (Rambachan & Roth 2023) sensitivity analysis — `didgpu_honest_did()`. Bounds post-treatment effects under user-specified restrictions on pre-trend violations; reports the "breakdown" parameter at which the conclusion flips. Both `"M"` (smoothness) and `"RM"` (relative magnitudes) methods. Wraps the reference [HonestDiD](https://cran.r-project.org/package=HonestDiD) package.
 
+Plus the **naive TWFE baseline** every applied paper reports for comparison — `didgpu_twfe()`, a two-way fixed-effects dynamic event study (distributed-lag form) with cluster-robust SEs. Its `Effect_k` / `Placebo_j` output mirrors `didgpu()` so the bias-prone TWFE estimate sits right next to the robust one. (Point estimates are bit-exact to `lm()`/`fixest`; intended as a baseline — TWFE is biased under heterogeneous effects.)
+
 Designed for long-running econometric work: per-cell checkpointing to disk, resumable runs after crash or OOM, configurable backends (pure R, optional CUDA), and bit-for-bit numerical equivalence with the reference packages.
 
 ## Status
