@@ -90,13 +90,36 @@ GPU and CPU results stay in lock-step.
 
 ## Install
 
+**Windows + NVIDIA GPU (recommended).** A prebuilt binary that bundles the
+CUDA runtime — no CUDA Toolkit, no compiler, no admin rights. You only need
+an NVIDIA driver (which you already have if you have the GPU):
+
 ```r
-# From the package source directory
+install.packages(
+  "https://github.com/JoshuaAmmons/didgpu/releases/download/v0.1.0/didgpu_0.1.0.zip",
+  repos = NULL, type = "win.binary")
+```
+
+**Any platform, CPU baseline (always works).** From r-universe — a source
+build with no GPU; every `backend = "cuda"` call transparently falls back to
+the R implementation:
+
+```r
+install.packages("didgpu", repos = "https://jdammons.r-universe.dev")
+```
+
+**From source.** Linux/macOS pick up the GPU automatically when `nvcc` is on
+PATH. Windows source GPU builds use Rtools44 + VS Build Tools + a user-local
+CUDA toolkit (no admin) — see [`WINDOWS_BUILD_STATUS.md`](WINDOWS_BUILD_STATUS.md):
+
+```r
 install.packages("didgpu", repos = NULL, type = "source",
                  INSTALL_opts = "--no-multiarch")
 ```
 
-For optional CUDA support, install the NVIDIA CUDA Toolkit so `nvcc` is on PATH, then reinstall. See [`inst/doc/cuda_setup.md`](inst/doc/cuda_setup.md) for Windows details.
+The CUDA backend is verified on Windows and Linux/WSL (RTX 4000 Ada, CUDA
+12.6); see [GPU acceleration](#gpu-acceleration) below. On any machine
+without a GPU/CUDA, didgpu still works — the GPU paths fall back to R.
 
 ## Quick start
 
