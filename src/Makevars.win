@@ -150,6 +150,24 @@ ifeq ($(HAVE_CUDA_BUILD),yes)
                       -gencode=arch=compute_86,code=sm_86 \
                       -gencode=arch=compute_89,code=sm_89 \
                       -gencode=arch=compute_90,code=sm_90
+  # LITE build (set DIDGPU_LITE=1 in the environment): omit cuSOLVER/cuBLAS
+  # so didgpu_cuda.dll depends only on cudart64 (~0.5 MB) instead of ~1.1 GB
+  # of cuBLAS/cuBLASLt/cuSOLVER/cuSPARSE/nvJitLink. Only the size-gated fect
+  # GPU SVD path uses those libs; in lite it returns a sentinel (-99) and
+  # falls back to R svd(). This is the build for the distributable Windows
+  # binary (RELEASE_PLAN.md). Default (unset) = full build, unchanged.
+  ifeq ($(DIDGPU_LITE),1)
+    DIDGPU_LITE_FLAG  := -DDIDGPU_LITE
+    CUDA_LINK_LIBS    := -lcudart
+    BUNDLE_CUDA_GLOBS := cudart64_*.dll
+  else
+    DIDGPU_LITE_FLAG  :=
+    CUDA_LINK_LIBS    := -lcudart -lcublas -lcusolver -lcurand
+    BUNDLE_CUDA_GLOBS := cudart64_*.dll cublas64_*.dll cublasLt64_*.dll \
+                         cusolver64_*.dll cusparse64_*.dll nvJitLink_*.dll \
+                         curand64_*.dll
+  endif
+
   # -DHAS_CUDA=1 MUST be passed to nvcc too (not just to g++ via
   # PKG_CXXFLAGS): five .cu files wrap their whole body in
   # #ifdef HAS_CUDA and would otherwise compile to empty objects, so
@@ -157,6 +175,7 @@ ifeq ($(HAVE_CUDA_BUILD),yes)
   # step. (Same fix as the Linux Makevars.)
   NVCC_FLAGS := -O2 -std=c++17 \
                 -DHAS_CUDA=1 \
+                $(DIDGPU_LITE_FLAG) \
                 -allow-unsupported-compiler \
                 -I./cuda_shim \
                 -Xcompiler=//MT,//GS- \
@@ -183,7 +202,7 @@ NVCC_RUN  = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
 # C-ABI functions. Links the CUDA runtime/libs (didgpu_cuda.dll's deps).
 NVCC_LINK = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" -allow-unsupported-compiler \
             -shared -o didgpu_cuda.dll $(CUDA_OBJECTS) \
-            -L"$(CUDA_HOME)/lib/x64" -lcudart -lcublas -lcusolver -lcurand \
+            -L"$(CUDA_HOME)/lib/x64" $(CUDA_LINK_LIBS) \
             -Xlinker //DEF:didgpu_cuda.def
 
 # Pattern rule: every .cu -> .o (auto-picks-up new kernels).
@@ -209,28 +228,23 @@ $(SHLIB): libdidgpu_cuda.dll.a
 # R_PACKAGE_DIR and R_ARCH during install.
 all: $(SHLIB) bundle_cuda_dlls
 
-# The bundled CUDA DLL set is the full transitive closure of
-# didgpu_cuda.dll's load-time dependencies:
+# Bundle didgpu_cuda.dll + its CUDA runtime DLL deps into libs/. The DLL
+# set ($(BUNDLE_CUDA_GLOBS), chosen above by the lite/full switch) is the
+# full transitive closure of didgpu_cuda.dll's load-time dependencies:
 #   didgpu_cuda.dll -> cudart64, cublas64, cusolver64
 #   cusolver64      -> cusparse64, cublas64, cublasLt64
-#   cublas64        -> cublasLt64
-#   cusparse64      -> nvJitLink_120_0
+#   cublas64        -> cublasLt64;   cusparse64 -> nvJitLink_120_0
 # Miss any one and didgpu_cuda.dll links fine but fails to LOAD with
-# "LoadLibrary failure: The specified module could not be found".
-# (curand64 is bundled defensively though the device-side cuRAND the
-# kernels use needs no host DLL.)
+# "LoadLibrary failure: The specified module could not be found". In the
+# lite build only cudart64 is required (and bundled). (curand64 is bundled
+# defensively in full; the device-side cuRAND the kernels use needs no
+# host DLL.)
 .PHONY: bundle_cuda_dlls
 bundle_cuda_dlls: didgpu_cuda.dll
 	@echo "  [bundle] didgpu_cuda.dll + CUDA runtime DLLs -> libs$(R_ARCH)"
 	@mkdir -p "$(R_PACKAGE_DIR)/libs$(R_ARCH)"
 	@cp -f didgpu_cuda.dll "$(R_PACKAGE_DIR)/libs$(R_ARCH)/"
-	@cp -f "$(CUDA_HOME)/bin/"cudart64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
-	@cp -f "$(CUDA_HOME)/bin/"cublas64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
-	@cp -f "$(CUDA_HOME)/bin/"cublasLt64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
-	@cp -f "$(CUDA_HOME)/bin/"cusolver64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
-	@cp -f "$(CUDA_HOME)/bin/"cusparse64_*.dll  "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
-	@cp -f "$(CUDA_HOME)/bin/"nvJitLink_*.dll   "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
-	@cp -f "$(CUDA_HOME)/bin/"curand64_*.dll    "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true
+	@for g in $(BUNDLE_CUDA_GLOBS); do cp -f "$(CUDA_HOME)/bin/"$$g "$(R_PACKAGE_DIR)/libs$(R_ARCH)/" 2>/dev/null || true; done
 else
 all: $(SHLIB)
 endif

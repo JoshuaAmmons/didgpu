@@ -25,6 +25,28 @@
 // ============================================================================
 
 #ifdef HAS_CUDA
+
+#if defined(DIDGPU_LITE)
+// ===========================================================================
+// LITE build (-DDIDGPU_LITE): compiled WITHOUT cuSOLVER/cuBLAS so the
+// resulting didgpu_cuda.dll depends only on cudart64 (~0.5 MB) instead of
+// dragging in cuBLAS + cuBLASLt + cuSOLVER + cuSPARSE + nvJitLink (~1.1 GB
+// of redistributable DLLs). This is the build used for the distributable
+// Windows binary — see RELEASE_PLAN.md.
+//
+// The fect GPU SVD path is therefore unavailable: both entry points return
+// the sentinel -99, which the Rcpp wrapper turns into R_NilValue, so the R
+// side falls back to LAPACK svd(). This costs nothing in practice — the SVD
+// path is size-gated (only ever engaged on very large balanced panels) and
+// the fallback is numerically identical, just on the CPU.
+// ===========================================================================
+extern "C" int didgpu_cuda_fect_svd_truncated(
+    const double*, int, int, int, double*, double*) { return -99; }
+extern "C" int didgpu_cuda_fect_svd_softthreshold(
+    const double*, int, int, double, double*, int*) { return -99; }
+
+#else  // ---- full build (with cuSOLVER/cuBLAS) --------------------------
+
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
 #include <cmath>
@@ -445,4 +467,5 @@ extern "C" int didgpu_cuda_fect_svd_softthreshold(
   return (e == cudaSuccess) ? 0 : -3;
 }
 
+#endif  // DIDGPU_LITE (full build with cuSOLVER/cuBLAS)
 #endif  // HAS_CUDA
