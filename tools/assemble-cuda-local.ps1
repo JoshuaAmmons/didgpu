@@ -18,7 +18,13 @@ $paths = @(
   "cuda_cccl/windows-x86_64/cuda_cccl-windows-x86_64-12.6.77-archive.zip",
   "libcublas/windows-x86_64/libcublas-windows-x86_64-12.6.4.1-archive.zip",
   "libcusolver/windows-x86_64/libcusolver-windows-x86_64-11.7.1.2-archive.zip",
-  "libcurand/windows-x86_64/libcurand-windows-x86_64-10.3.7.77-archive.zip"
+  "libcurand/windows-x86_64/libcurand-windows-x86_64-10.3.7.77-archive.zip",
+  # cuSPARSE is a RUNTIME dependency of cuSOLVER (cusolver64_11.dll imports
+  # cusparse64_12.dll), and cuSPARSE in turn pulls nvJitLink. Without these
+  # two, didgpu_cuda.dll links fine but fails to LOAD at runtime with
+  # "LoadLibrary failure: The specified module could not be found".
+  "libcusparse/windows-x86_64/libcusparse-windows-x86_64-12.5.4.2-archive.zip",
+  "libnvjitlink/windows-x86_64/libnvjitlink-windows-x86_64-12.6.85-archive.zip"
 )
 
 foreach ($p in $paths) {
@@ -51,4 +57,6 @@ Write-Output "`n=== Verify assembled tree ==="
 "curand64 DLL:    " + ((Get-ChildItem "$root\bin\curand64_*.dll" -EA SilentlyContinue | Measure-Object).Count)
 "cublas64 DLL:    " + ((Get-ChildItem "$root\bin\cublas64_*.dll" -EA SilentlyContinue | Measure-Object).Count)
 "cusolver64 DLL:  " + ((Get-ChildItem "$root\bin\cusolver64_*.dll" -EA SilentlyContinue | Measure-Object).Count)
+"cusparse64 DLL:  " + ((Get-ChildItem "$root\bin\cusparse64_*.dll" -EA SilentlyContinue | Measure-Object).Count)
+"nvJitLink DLL:   " + ((Get-ChildItem "$root\bin\nvJitLink*.dll" -EA SilentlyContinue | Measure-Object).Count)
 Write-Output "DONE"
