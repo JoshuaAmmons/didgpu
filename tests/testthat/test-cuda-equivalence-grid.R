@@ -102,27 +102,46 @@ test_that("CS OR influence functions match CUDA vs R (no covariates)", {
   }
 })
 
-test_that("CS IPW/DR are safe under backend='cuda' (fall back to R, identical)", {
+test_that("CS IPW/DR point estimate matches CUDA vs R", {
   skip_if_not(cuda_available(), "CUDA not compiled in")
-  # The OR kernel is the only CS inner regression on the GPU; IPW (1)
-  # and DR (2) return -3 from the kernel, so backend = "cuda" must
-  # transparently fall back to the R per-cell path and produce
-  # bit-identical results to backend = "r". This pins that contract
-  # so a future IPW/DR kernel can't silently change results without
-  # tripping the equivalence bar.
+  # IPW (est_method 1) and DR (est_method 2) now run on the GPU:
+  #   * no covariates (p = 1): the kernel uses the exact mean-difference
+  #     closed form -> agreement is to summation-order noise (1e-10).
+  #   * with covariates (p > 1): a per-cell IRLS logistic propensity
+  #     model replicating stats::glm.fit. Both converge to the same
+  #     MLE, so ATT agrees to ~1e-8 (measured); we assert 1e-6 with
+  #     margin. This is ~6 orders of magnitude below the estimator's
+  #     sampling error, i.e. numerically the same estimate.
   for (method in c("IPW", "DR")) {
-    for (with_cov in c(FALSE, TRUE)) {
-      p <- make_cs_panel(80L, 10L, with_cov = with_cov)
-      covs <- if (with_cov) "x1" else NULL
-      fit_r <- didgpu_cs(p, "Y", "unit", "period", "D", covariates = covs,
-                          est_method = method, aggregation = "event",
-                          bootstrap_reps = 0L, backend = "r", verbose = FALSE)
-      fit_c <- didgpu_cs(p, "Y", "unit", "period", "D", covariates = covs,
-                          est_method = method, aggregation = "event",
-                          bootstrap_reps = 0L, backend = "cuda", verbose = FALSE)
-      info <- sprintf("method=%s with_cov=%s", method, with_cov)
-      expect_equal(fit_r$att_gt$att, fit_c$att_gt$att,
-                   tolerance = 1e-12, info = info)
+    # No-covariate: near-exact.
+    p0 <- make_cs_panel(80L, 10L, with_cov = FALSE)
+    r0 <- didgpu_cs(p0, "Y", "unit", "period", "D", est_method = method,
+                     aggregation = "event", bootstrap_reps = 0L,
+                     backend = "r", verbose = FALSE)
+    c0 <- didgpu_cs(p0, "Y", "unit", "period", "D", est_method = method,
+                     aggregation = "event", bootstrap_reps = 0L,
+                     backend = "cuda", verbose = FALSE)
+    expect_equal(r0$att_gt$att, c0$att_gt$att, tolerance = 1e-10,
+                 info = sprintf("method=%s no-cov", method))
+
+    # With covariates: IRLS logistic; assert 1e-6 (actual ~1e-8).
+    for (nu in c(60L, 120L)) {
+      p1 <- make_cs_panel(nu, 12L, with_cov = TRUE)
+      r1 <- didgpu_cs(p1, "Y", "unit", "period", "D", covariates = "x1",
+                       est_method = method, aggregation = "event",
+                       bootstrap_reps = 0L, backend = "r", verbose = FALSE)
+      c1 <- didgpu_cs(p1, "Y", "unit", "period", "D", covariates = "x1",
+                       est_method = method, aggregation = "event",
+                       bootstrap_reps = 0L, backend = "cuda", verbose = FALSE)
+      info <- sprintf("method=%s nu=%d with-cov", method, nu)
+      expect_equal(r1$att_gt$att, c1$att_gt$att, tolerance = 1e-6, info = info)
+      # Influence functions drive the bootstrap SEs -> check them too.
+      IFr <- attr(r1$att_gt, "IF_per_cell")
+      IFc <- attr(c1$att_gt, "IF_per_cell")
+      for (i in seq_along(IFr)) {
+        expect_equal(IFr[[i]]$IF, IFc[[i]]$IF, tolerance = 1e-5,
+                     info = sprintf("%s cell %d IF", info, i))
+      }
     }
   }
 })

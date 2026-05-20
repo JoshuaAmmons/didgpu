@@ -58,11 +58,12 @@ fect note below), so `backend = "cuda"` is always safe.
 | Path | GPU status | Speedup vs R | Notes |
 |------|-----------|--------------|-------|
 | `didgpu_cs()` **cluster bootstrap** | ✅ live | **179–228×** | Influence-function shortcut; the headline win. R re-runs the full estimator per replicate (~25–50 s for B=200); CUDA does one `(B × n_units) @ (n_units × n_cells)` product (~0.1 s). |
+| `didgpu_cs()` **IPW / DR cluster bootstrap** | ✅ live | **173–196×** | DR (the doubly-robust gold standard) at ~192×. Per-cell IRLS logistic propensity kernel matches R's `glm.fit`; ATT agrees to ~1e-8. |
 | `didgpu_cs()` multiplier (wild) bootstrap | ✅ live | 1.2–1.7× | R is already IF-based; GPU win is bounded by the IF-matrix copy. |
-| `didgpu_cs(est_method = "OR")` point estimate | ✅ live | ~1× | Bit-exact vs R (1e-12 no-cov, 1e-6 with covariates). CS inner regressions are small, so H2D/D2H roughly cancels the compute win. |
-| TestMechs bootstrap | ✅ live | (cuRAND) | Nonparametric partial-density bootstrap on GPU; bootstrap moments match R within Monte-Carlo error. |
-| `didgpu_fect()` (fe / ife / mc) | 🔵 size-gated | ~1× (small panels) | GPU SVD only engages for very large balanced panels (`n_units ≥ 2000` and `n_units·n_periods ≥ 2e5`); below that it transparently uses R's LAPACK, which is far faster for small matrices. |
-| `didgpu_cs(est_method = "IPW" / "DR")` | ⚪ R fallback | — | Batched logistic-regression kernel not yet implemented; uses the R path. |
+| `didgpu_cs(est_method = "OR"/"IPW"/"DR")` point estimate | ✅ live | ~1× | Matches R (1e-12 no-cov OR, 1e-6 with covariates / IRLS). CS inner regressions are small, so H2D/D2H roughly cancels the compute win — the bootstrap is where the GPU pays off. |
+| TestMechs bootstrap | ✅ live | 4–18× | Nonparametric partial-density bootstrap on GPU; bootstrap moments match R within Monte-Carlo error. |
+| `didgpu_fect(method = "mc")` at scale | ✅ live | 3.6–7.9× | Full-SVD matrix completion; engages for large balanced panels (`n_units ≥ 2000`). Verified correct to 2.2e-10. |
+| `didgpu_fect()` (fe / ife / small mc) | 🔵 size-gated | ~1× (small panels) | GPU SVD only helps very large panels; below the gate it transparently uses R's LAPACK (far faster for small matrices). ife uses R at all sizes. |
 
 Full numbers and methodology in [`BENCHMARKS.md`](BENCHMARKS.md).
 

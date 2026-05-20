@@ -40,6 +40,13 @@ extern "C" int didgpu_cuda_cs_inner_or(
     int n_cells, int p,
     double* out_att,
     double* out_IF_per_row);
+extern "C" int didgpu_cuda_cs_inner_logit(
+    const double* X_concat, const int* X_offsets,
+    const double* Y_concat,
+    const double* W_concat,
+    int n_cells, int p, int est_method,
+    double* out_att,
+    double* out_IF_per_row);
 extern "C" int didgpu_cuda_fect_svd_truncated(
     const double* d_M_rm,
     int m, int n, int r,
@@ -719,9 +726,8 @@ SEXP didgpu_cuda_cs_inner_batched_r(
     Rcpp::stop("unit_id_per_row length (%d) does not match n_total (%d)",
                (int)unit_id_per_row.size(), n_total);
 
-  // Phase 2 #84: only OR is implemented in the kernel. IPW / DR fall
-  // back via the -3 return.
-  if (est_method != 0) return R_NilValue;
+  // est_method: 0 = OR, 1 = IPW, 2 = DR. All three have GPU kernels.
+  if (est_method < 0 || est_method > 2) return R_NilValue;
 
   std::vector<double> att(n_cells, NA_REAL);
   std::vector<double> IF_per_row;
@@ -731,12 +737,20 @@ SEXP didgpu_cuda_cs_inner_batched_r(
     IF_ptr = IF_per_row.data();
   }
 
-  int rc = didgpu_cuda_cs_inner_or(
-      &X_concat[0], &X_offsets[0],
-      &Y_concat[0],
-      &W_concat[0],
-      n_cells, p,
-      att.data(), IF_ptr);
+  int rc;
+  if (est_method == 0) {
+    rc = didgpu_cuda_cs_inner_or(
+        &X_concat[0], &X_offsets[0],
+        &Y_concat[0], &W_concat[0],
+        n_cells, p,
+        att.data(), IF_ptr);
+  } else {
+    rc = didgpu_cuda_cs_inner_logit(
+        &X_concat[0], &X_offsets[0],
+        &Y_concat[0], &W_concat[0],
+        n_cells, p, est_method,
+        att.data(), IF_ptr);
+  }
 
   if (rc != 0) return R_NilValue;
 

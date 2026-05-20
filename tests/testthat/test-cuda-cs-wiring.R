@@ -84,22 +84,29 @@ test_that("Rcpp wrapper didgpu_cuda_cs_inner_batched_r computes ATT and IF for O
   expect_equal(dim(result$influence), c(3L, 2L))
 })
 
-test_that("Rcpp wrapper returns NULL for IPW / DR (not yet implemented)", {
+test_that("Rcpp wrapper computes IPW / DR (no-cov closed form)", {
   skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
                               error = function(e) FALSE)),
               "CUDA support not compiled into this build")
-  result_ipw <- didgpu:::didgpu_cuda_cs_inner_batched_r(
-    X_concat        = rep(1.0, 5), X_offsets = c(0L, 3L, 5L),
-    Y_concat        = c(1, 2, -0.5, 0.7, 1.3),
-    W_concat        = c(1, 0, 0, 1, 0),
-    unit_id_per_row = c(0L, 1L, 2L, 0L, 2L),
-    p = 1L, n_units = 3L, est_method = 1L, want_influence = TRUE)
-  expect_null(result_ipw)
-  result_dr <- didgpu:::didgpu_cuda_cs_inner_batched_r(
-    X_concat        = rep(1.0, 5), X_offsets = c(0L, 3L, 5L),
-    Y_concat        = c(1, 2, -0.5, 0.7, 1.3),
-    W_concat        = c(1, 0, 0, 1, 0),
-    unit_id_per_row = c(0L, 1L, 2L, 0L, 2L),
-    p = 1L, n_units = 3L, est_method = 2L, want_influence = TRUE)
-  expect_null(result_dr)
+  # p = 1 (intercept only) -> IPW and DR both reduce to the simple
+  # mean-difference with the SPECIAL no-cov influence function:
+  #   att = mean(Y_t) - mean(Y_c)
+  #   IF[treated]  = Y - mean_t - att/2
+  #   IF[control]  = -(Y - mean_c) - att/2
+  # Cell: treated rows 0 & 3, control rows 1, 2, 4.
+  # Y_t = (1.0, 0.7) -> mean_t = 0.85; Y_c = (2, -0.5, 1.3) -> mean_c = 0.9333..
+  # But these are TWO cells: [0,3) and [3,5). Compute per cell.
+  for (m in c(1L, 2L)) {
+    res <- didgpu:::didgpu_cuda_cs_inner_batched_r(
+      X_concat        = rep(1.0, 5), X_offsets = c(0L, 3L, 5L),
+      Y_concat        = c(1, 2, -0.5, 0.7, 1.3),
+      W_concat        = c(1, 0, 0, 1, 0),
+      unit_id_per_row = c(0L, 1L, 2L, 0L, 2L),
+      p = 1L, n_units = 3L, est_method = m, want_influence = TRUE)
+    expect_false(is.null(res))
+    # Cell 1: treated {1.0}, control {2, -0.5} -> att = 1.0 - 0.75 = 0.25.
+    # Cell 2: treated {0.7}, control {1.3}     -> att = 0.7 - 1.3  = -0.6.
+    expect_equal(res$att, c(0.25, -0.6), tolerance = 1e-12,
+                 info = sprintf("est_method=%d", m))
+  }
 })
