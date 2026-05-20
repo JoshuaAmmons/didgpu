@@ -106,8 +106,15 @@ covers essentially all current NVIDIA GPUs regardless of R version.
 ## Status
 
 - [x] Source builds CPU / GPU-lite / GPU-full from one tree.
-- [x] GPU-lite verified: 2.32 MB, loads, all non-SVD GPU paths bit-exact,
-      fect SVD falls back correctly.
-- [ ] Produce + upload the GPU-lite `.zip` to a GitHub Release (needs auth).
+- [x] GPU-lite verified: 2.32 MB libs, loads, all non-SVD GPU paths
+      bit-exact, fect SVD falls back correctly.
+- [x] GPU-lite win.binary **built + validated**: full multi-arch
+      `didgpu_0.1.0.zip` (**2.92 MB**) produced via `R CMD INSTALL --build`,
+      confirmed to contain `libs/x64/{didgpu.dll, didgpu_cuda.dll,
+      cudart64_12.dll}` (so `--build` does package the bundled DLLs — no
+      silent breakage). Sits at `C:\Users\ammonsj\didgpu_release\` (outside
+      the repo), ready to upload.
+- [ ] Upload that `.zip` to a GitHub Release (needs your auth), e.g.
+      `gh release create v0.1.0 C:\Users\ammonsj\didgpu_release\didgpu_0.1.0.zip`
 - [ ] Add the repo to r-universe for the CPU baseline.
 - [ ] README install section for both channels.
