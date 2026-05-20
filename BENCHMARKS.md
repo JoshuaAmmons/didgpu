@@ -203,6 +203,35 @@ draw different sequences, so per-replicate output differs; the
 bootstrap covariance converges to the same value (verified in
 `tests/testthat/test-cuda-testmechs-wiring.R`).
 
+## Leave-one-out (didgpu_loo) — why #88 was ruled out
+
+`tools/measure-loo.R`. LOO re-fits the estimator dropping one
+cohort/unit at a time. Each refit is a POINT estimate
+(`bootstrap_reps = 0`), so there's no bootstrap to accelerate.
+
+| Panel | by | R | CUDA | Speedup |
+|-------|-----|----|------|---------|
+| 80 units  | cohort (7) |  1.469s |  2.397s | 0.61x |
+| 80 units  | unit (80)  | 21.702s | 22.992s | 0.94x |
+| 200 units | cohort (7) |  1.622s |  1.711s | 0.95x |
+| 200 units | unit (200) | 47.632s | 44.220s | 1.08x |
+
+One CS point-estimate refit is ~0.19–0.26 s, and that time is
+dominated by **R-side orchestration** — the data.table cell
+construction (merging Y_pre/Y_t, selecting control units per (g, t)) —
+not the inner regression, which is the only GPU-accelerable piece and
+a small fraction of each refit. So GPU LOO ≈ CPU LOO (CUDA is even
+slightly slower for cohort-LOO, where per-refit launch overhead isn't
+amortised).
+
+A batched LOO **kernel** (the original #88 plan) would accelerate
+only that small inner-regression slice and cannot move the wall
+clock. The real LOO speedup would be an R-side algorithmic refactor —
+incremental cell updates exploiting that dropping one unit barely
+changes the cell structure — which is outside the GPU-acceleration
+scope and its own project. #88 is therefore closed by analysis, the
+same data-driven call as the fect fused kernels (#86/#87).
+
 ## Notes
 
 - Numbers are from a laptop-class GPU (RTX 4000 Ada Laptop, 12 GB).
