@@ -42,18 +42,26 @@ Designed for long-running econometric work: per-cell checkpointing to disk, resu
 | `didgpu_by()` (subgroup-by-subgroup estimation) | ✅ done (wraps didgpu(); per-subgroup checkpoints) |
 | `didgpu_by_path()` (treatment-trajectory subgroup analysis) | ✅ done (mirrors reference's by_path argument) |
 | `n_workers=` (parallel bootstrap)         | ✅ done (bit-identical to sequential) |
-| CUDA backend                              | ✅ live on Linux/WSL (built + verified end-to-end on an RTX 4000 Ada; see GPU acceleration below) |
+| CUDA backend                              | ✅ live on **Windows and Linux/WSL** (built + verified end-to-end on an RTX 4000 Ada — Windows needs no admin rights; see GPU acceleration below) |
 | Rcpp+Eigen CPU backend                    | 🟡 scaffolded (smoke .cpp compiles; real port TBD) |
 
 For the supported subset (binary, no controls), the r-backend's output matches the reference bit-for-bit on point estimates, SEs, ATE, and the four sample-size columns. See `tests/testthat/test-r-backend.R`, `test-bidirectional.R`, and `test-reference-parity.R` (100+ assertions, all green).
 
 ## GPU acceleration
 
-The CUDA backend is built and verified end-to-end on Linux/WSL2 (NVIDIA
-RTX 4000 Ada, CUDA 12.6). Set `backend = "cuda"` on a supported call to
+The CUDA backend is built and verified end-to-end on **Windows** (native
+R 4.4 + Rtools44 + a user-local CUDA toolkit — **no admin rights needed**)
+and **Linux/WSL2**, on an NVIDIA RTX 4000 Ada (CUDA 12.6); results are
+bit-identical across both. Set `backend = "cuda"` on a supported call to
 use it; every GPU path falls back transparently to the R implementation
 when CUDA is unavailable **or when the GPU would be slower** (see the
 fect note below), so `backend = "cuda"` is always safe.
+
+On Windows the GPU half ships as a separate `didgpu_cuda.dll` (built by
+nvcc/MSVC) that the R-facing `didgpu.dll` (Rtools/MinGW) calls across a
+pure-C ABI — see [`WINDOWS_BUILD_STATUS.md`](WINDOWS_BUILD_STATUS.md). A
+prebuilt Windows binary (so end users skip the toolchain entirely) is in
+progress.
 
 ### Where the GPU helps — and by how much
 

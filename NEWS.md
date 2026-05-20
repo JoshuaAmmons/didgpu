@@ -105,8 +105,13 @@ each with CUDA kernels for the hot paths.
   200 K rows.
 - `"reference"` — delegate to `DIDmultiplegtDYN::did_multiplegt_dyn`,
   used as the parity oracle.
-- `"cuda"` — **live on Linux/WSL2** (built + verified end-to-end on an
-  NVIDIA RTX 4000 Ada, CUDA 12.6). Live GPU paths: the CS cluster
+- `"cuda"` — **live on Windows and Linux/WSL2** (built + verified
+  end-to-end on an NVIDIA RTX 4000 Ada, CUDA 12.6; bit-identical results
+  on both). On Windows it needs **no admin rights**: a user-local CUDA
+  toolkit plus a two-DLL split (`didgpu_cuda.dll` built by nvcc/MSVC,
+  the R-facing `didgpu.dll` built by Rtools/MinGW, bridged by a pure-C
+  ABI) sidesteps the MinGW↔MSVC link barrier — see
+  `WINDOWS_BUILD_STATUS.md`. Live GPU paths: the CS cluster
   bootstrap (**179–228× faster** than R via the influence-function
   shortcut), the CS multiplier bootstrap, the CS OR point estimate
   (bit-exact vs R), and the TestMechs nonparametric bootstrap. The
