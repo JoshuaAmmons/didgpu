@@ -203,34 +203,41 @@ draw different sequences, so per-replicate output differs; the
 bootstrap covariance converges to the same value (verified in
 `tests/testthat/test-cuda-testmechs-wiring.R`).
 
-## Leave-one-out (didgpu_loo) — why #88 was ruled out
+## Leave-one-out (didgpu_loo) — algorithmic shortcut, ~200x
 
-`tools/measure-loo.R`. LOO re-fits the estimator dropping one
-cohort/unit at a time. Each refit is a POINT estimate
-(`bootstrap_reps = 0`), so there's no bootstrap to accelerate.
+`tools/measure-loo.R` first showed a CUDA *kernel* can't help LOO:
+each leave-out refit is a POINT estimate (`bootstrap_reps = 0`), and
+one CS point estimate (~0.19–0.26 s) is dominated by R-side
+data.table cell construction, not the inner regression (the only
+GPU-accelerable slice). A batched kernel would move <10% of the wall
+clock — so a GPU kernel for #88 is correctly ruled out.
 
-| Panel | by | R | CUDA | Speedup |
-|-------|-----|----|------|---------|
-| 80 units  | cohort (7) |  1.469s |  2.397s | 0.61x |
-| 80 units  | unit (80)  | 21.702s | 22.992s | 0.94x |
-| 200 units | cohort (7) |  1.622s |  1.711s | 0.95x |
-| 200 units | unit (200) | 47.632s | 44.220s | 1.08x |
+**But that doesn't mean LOO has to stay slow.** The right fix is
+algorithmic. For **cohort-LOO with never-treated controls** — the
+default and most common case — dropping a treated cohort `g*` leaves
+every *other* `(g, t)` cell unchanged: the never-treated control pool
+is a fixed set disjoint from all treated cohorts, and the other
+cohorts' treated units are untouched. So the leave-out estimate is
+just the full-sample `att_gt` table **re-aggregated without `g*`'s
+rows** — no refit at all.
 
-One CS point-estimate refit is ~0.19–0.26 s, and that time is
-dominated by **R-side orchestration** — the data.table cell
-construction (merging Y_pre/Y_t, selecting control units per (g, t)) —
-not the inner regression, which is the only GPU-accelerable piece and
-a small fraction of each refit. So GPU LOO ≈ CPU LOO (CUDA is even
-slightly slower for cohort-LOO, where per-refit launch overhead isn't
-amortised).
+`.loo_cs_cohort_fast()` implements this. Verified bit-identical to
+the full-refit LOO (`tools/verify-loo-fast.R`):
 
-A batched LOO **kernel** (the original #88 plan) would accelerate
-only that small inner-regression slice and cannot move the wall
-clock. The real LOO speedup would be an R-side algorithmic refactor —
-incremental cell updates exploiting that dropping one unit barely
-changes the cell structure — which is outside the GPU-acceleration
-scope and its own project. #88 is therefore closed by analysis, the
-same data-driven call as the fect fused kernels (#86/#87).
+| Panel | refit LOO | re-aggregate LOO | Speedup | max diff |
+|-------|-----------|------------------|---------|----------|
+| 80 units, 7 cohorts  | 1.407s | 0.0080s | **177x** | 0.0e0 |
+| 200 units, 7 cohorts | 1.375s | 0.0059s | **235x** | 0.0e0 |
+
+Agreement is exact (`0.000e+00`) across `overall` / `event` / `group`
+aggregations. `control_group = "notyet"` correctly falls back to the
+refit path (dropping a cohort there *does* change other cells, since
+the dropped cohort may have been a not-yet-treated control), and
+`by = "unit"` still refits (a unit appears in many cells). So the
+shortcut is applied exactly when it's provably valid.
+
+Net: the common, previously-slow cohort-LOO is now effectively
+instant — and this is an R-side win that works with or without a GPU.
 
 ## Notes
 

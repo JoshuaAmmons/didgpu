@@ -92,6 +92,31 @@ didgpu_loo <- function(fit, by = "cohort", df = NULL, verbose = TRUE) {
   # Full-sample estimate for delta reference.
   full_est <- .loo_extract_headline(fit, family)
 
+  # ---- Fast path: CS cohort-LOO with never-treated controls. ----
+  # Dropping a treated cohort g* leaves every OTHER (g, t) cell
+  # unchanged (never-treated controls are a fixed pool disjoint from
+  # all treated cohorts, and the other cohorts' treated units are
+  # untouched). So the leave-out estimate is just the full-sample
+  # att_gt table re-aggregated WITHOUT g*'s cells -- no refit needed.
+  # This is bit-identical to the refit path but ~100x faster (K cheap
+  # re-aggregations instead of K full didgpu_cs fits). Only valid for
+  # control_group = "never"; "notyet" controls DO change other cells
+  # when a cohort is dropped, so that case falls through to the refit
+  # loop below.
+  if (identical(family, "cs") && identical(by, "cohort")) {
+    fast <- .loo_cs_cohort_fast(fit, full_est)
+    if (!is.null(fast)) {
+      out <- fast[order(-abs(fast$delta), na.last = TRUE), , drop = FALSE]
+      rownames(out) <- NULL
+      attr(out, "full")   <- full_est
+      attr(out, "by")     <- by_levels$column
+      attr(out, "family") <- family
+      attr(out, "method") <- "reaggregate (no refit)"
+      class(out) <- c("didgpu_loo_result", class(out))
+      return(out)
+    }
+  }
+
   results <- vector("list", length(by_levels$values))
   for (i in seq_along(by_levels$values)) {
     lvl <- by_levels$values[i]
@@ -151,6 +176,58 @@ didgpu_loo <- function(fit, by = "cohort", df = NULL, verbose = TRUE) {
   attr(out, "family")  <- family
   class(out) <- c("didgpu_loo_result", class(out))
   out
+}
+
+
+# Fast cohort-LOO for the CS family: re-aggregate the precomputed
+# att_gt table excluding each cohort's cells, instead of refitting.
+#
+# Valid ONLY when control_group == "never": then dropping a treated
+# cohort g* does not alter any other (g, t) cell (the never-treated
+# control pool is disjoint from all treated cohorts, and the other
+# cohorts' treated units are untouched), so the refit's att_gt is
+# exactly the full-sample att_gt minus g*'s rows. Re-aggregating that
+# subset reproduces the refit's headline bit-for-bit.
+#
+# Returns a data.frame with the standard LOO columns, or NULL to
+# signal "not applicable -> use the generic refit path".
+#' @keywords internal
+#' @noRd
+.loo_cs_cohort_fast <- function(fit, full_est) {
+  args <- fit$args
+  # notyet controls: dropping a cohort can change other cells (the
+  # dropped cohort may have served as a not-yet-treated control), so
+  # the shortcut is invalid -> fall back to refit.
+  if (!identical(args$control_group %||% "never", "never")) return(NULL)
+  att_gt <- fit$att_gt
+  if (is.null(att_gt) || !("g" %in% names(att_gt)) || nrow(att_gt) == 0L) {
+    return(NULL)
+  }
+  cohorts <- sort(unique(att_gt$g))
+  if (length(cohorts) < 2L) return(NULL)
+
+  rows <- lapply(cohorts, function(gstar) {
+    sub <- att_gt[att_gt$g != gstar, , drop = FALSE]
+    # Carry the IF / units attributes through so .cs_aggregate (and any
+    # SE machinery it touches) sees a well-formed att_gt subset.
+    attr(sub, "IF_per_cell")  <- attr(att_gt, "IF_per_cell")
+    attr(sub, "F_g_per_unit") <- attr(att_gt, "F_g_per_unit")
+    attr(sub, "units")        <- attr(att_gt, "units")
+    if (nrow(sub) == 0L) {
+      return(data.frame(leave_out = format(gstar), estimate = NA_real_,
+                        delta = NA_real_, delta_pct = NA_real_,
+                        note = "all cells dropped", stringsAsFactors = FALSE))
+    }
+    agg <- .cs_aggregate(sub, args$aggregation, args)
+    est <- if ("estimate" %in% names(agg) && nrow(agg) > 0L)
+             as.numeric(agg$estimate[1]) else NA_real_
+    delta <- est - full_est
+    pct <- if (!is.na(full_est) && full_est != 0)
+             100 * delta / abs(full_est) else NA_real_
+    data.frame(leave_out = format(gstar), estimate = est, delta = delta,
+               delta_pct = pct, note = "", stringsAsFactors = FALSE)
+  })
+  do.call(rbind, rows)
 }
 
 
