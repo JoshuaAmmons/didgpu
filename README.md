@@ -1,5 +1,11 @@
 # didgpu
 
+<!-- badges: start -->
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![r-universe](https://jdammons.r-universe.dev/badges/didgpu)](https://jdammons.r-universe.dev/didgpu)
+[![Lifecycle: maturing](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://lifecycle.r-lib.org/articles/stages.html#maturing)
+<!-- badges: end -->
+
 A GPU-capable, checkpointed hub for causal inference on panel and cross-sectional data.
 Currently includes **five estimator families plus a sensitivity layer**:
 
@@ -52,7 +58,7 @@ Designed for long-running econometric work: per-cell checkpointing to disk, resu
 | `didgpu_by_path()` (treatment-trajectory subgroup analysis) | ✅ done (mirrors reference's by_path argument) |
 | `n_workers=` (parallel bootstrap)         | ✅ done (bit-identical to sequential) |
 | CUDA backend                              | ✅ live on **Windows and Linux/WSL** (built + verified end-to-end on an RTX 4000 Ada — Windows needs no admin rights; see GPU acceleration below) |
-| Rcpp+Eigen CPU backend                    | 🟡 scaffolded (smoke .cpp compiles; real port TBD) |
+| Rcpp+Eigen CPU backend                    | ✅ done (binary-no-controls inner kernel in C++; bit-identical to `r`; ~1.5–3× on top; falls back to `r` for complex options) |
 
 For the supported subset (binary, no controls), the r-backend's output matches the reference bit-for-bit on point estimates, SEs, ATE, and the four sample-size columns. See `tests/testthat/test-r-backend.R`, `test-bidirectional.R`, and `test-reference-parity.R` (100+ assertions, all green).
 
@@ -238,17 +244,17 @@ plot(fit)                       # base-R event-study plot with error bars
 
 ```r
 didgpu_backend_info()
-#     backend available                                                                notes
+#     backend available                                                              notes
 # 1 reference      TRUE                                            DIDmultiplegtDYN 2.2.0
-# 2         r      TRUE binary; effects + placebos + controls + weight + trends_nonparam
-# 3       cpu     FALSE                                              stub; needs Rcpp port
-# 4      cuda     FALSE          stub; install CUDA Toolkit with full headers + nvcc
+# 2         r      TRUE   binary; full reference parity (controls, weight, trends_*, ...)
+# 3       cpu      TRUE   binary-no-controls effects in C++; complex opts fall back to r
+# 4      cuda      TRUE         effects only (binary, no controls); placebos use r-backend
 ```
 
 - `"reference"` — delegates to `DIDmultiplegtDYN::did_multiplegt_dyn`. Always available if the reference is installed. Used as the parity oracle.
 - `"r"` — standalone pure-R port using `data.table` primitives. 14–60× faster than the reference depending on panel size (see benchmark below). **Bit-identical** to the reference across every commonly-used DIDmultiplegtDYN option (binary / multivalued / continuous treatment; `controls`, `weight`, `trends_nonparam`, `trends_lin`, `normalized`, `predict_het`, switcher restrictions, `only_never_switchers`, `same_switchers`, `same_switchers_pl`, `dont_drop_larger_lower`, all sample-size columns, cluster-bootstrap SEs at the same seed).
 - `"cpu"` — Rcpp port of the per-event-time inner kernel for the binary-no-controls case. **Bit-identical** to the `"r"` backend. ~1.5-3× faster on top of `"r"` (≈ 100-190× vs reference). Falls back to `"r"` transparently for unsupported feature combinations (controls, weight, normalized, trends_lin, same_switchers, predict_het, continuous, trends_nonparam).
-- `"cuda"` — scaffolded but blocked on a CUDA Toolkit install with full headers. The kernel, host launcher, R glue, and build infrastructure are all in place; it will compile and run as soon as `nvcc` is on `PATH` and the package is reinstalled from source.
+- `"cuda"` — CUDA port (nvcc + cuBLAS / cuSOLVER) of the bootstrap-heavy paths, **live** on Windows (no-admin user-local toolkit) and Linux/WSL. The headline wins are the CS cluster bootstrap (179–228×) and the IPW/DR bootstrap (~192×); see [GPU acceleration](#gpu-acceleration). Falls back to `"r"` transparently when CUDA is unavailable **or when the GPU would be slower** (size-gated paths), so it is always safe to request.
 
 `backend = "auto"` picks the best available, preferring cuda > cpu > r > reference.
 
@@ -292,6 +298,20 @@ This is enforced by a comprehensive test suite (300+ tests across 24 test files)
 The package design (call graph, kernel formulas, where bugs would hide) is documented in [`inst/doc/reference_internals.md`](inst/doc/reference_internals.md). That document was derived from a careful read of every line of the reference package source; it doubles as the spec for any future backend port.
 
 The high-level architecture is in [`../NOTES_did_gpu_checkpointed.Rmd`](../NOTES_did_gpu_checkpointed.Rmd) ("as-built status" section).
+
+## Citation
+
+```r
+citation("didgpu")
+```
+
+didgpu is a reimplementation of published estimators. Please cite the package
+**and** the original method paper(s) you use — de Chaisemartin &
+D'Haultfoeuille (2020, 2024); Callaway & Sant'Anna (2021); Callaway,
+Goodman-Bacon & Sant'Anna (2024); Liu, Wang & Xu (2024); Goodman-Bacon (2021);
+Freyaldenhoven, Hansen & Shapiro (2019); Rambachan & Roth (2023); Kwon & Roth
+(2026). See `?<function>` for the relevant reference in each estimator's help
+page.
 
 ## License
 

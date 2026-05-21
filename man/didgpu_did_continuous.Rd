@@ -16,7 +16,7 @@ didgpu_did_continuous(df, outcome, treatment, id, time,
 continuous treatment, unit id, and time.}
 
 \item{estimator}{\code{"parametric"} (degree-\code{degree} polynomial in dD;
-sqrt(n)) or \code{"nonparametric"} (local-linear in dD; n^{2/5};
+sqrt(n)) or \code{"nonparametric"} (local-linear in dD; n^(2/5);
 EXPERIMENTAL).}
 
 \item{degree}{Polynomial degree for the parametric estimator (default 2).}
@@ -52,7 +52,7 @@ common trend identified from quasi-stayers (units with \eqn{dD \approx 0}).
 Two estimators of \eqn{E[dY|dD=d]}: \code{"parametric"} fits a degree-\code{degree}
 polynomial in dD by OLS (sqrt(n) rate; the authors' parametric alternative),
 while \code{"nonparametric"} uses a local-linear (Gaussian-kernel) regression
-evaluated at each dose with quasi-stayers near it (n^{2/5} rate; slower
+evaluated at each dose with quasi-stayers near it (n^(2/5) rate; slower
 because it estimates a derivative). Both are validated by simulation
 (recovering a known dose-response); there is no maintained R reference
 package to cross-check bit-for-bit, so the nonparametric path in particular

@@ -8,3 +8,16 @@
 ^cran-comments\.md$
 ^\.Rcheck$
 ^.*\.tar\.gz$
+^BENCHMARKS\.md$
+^ESTIMATES\.md$
+^FUTURE_FEATURES\.md$
+^RELEASE_PLAN\.md$
+^ROADMAP\.md$
+^STATUS-overnight\.md$
+^WINDOWS_BUILD_STATUS\.md$
+^tools$
+^src/.*\.o$
+^src/.*\.dll$
+^src/.*\.a$
+^src/.*\.exp$
+^src/.*\.lib$

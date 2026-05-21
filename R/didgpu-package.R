@@ -88,5 +88,11 @@ utils::globalVariables(c(
   "Y_XX", "G_XX", "T_XX", "D_XX", "Y_pre", "Y_t", "delta_XX",
   # summarize.R scratch
   "Y_", "G_", "T_", "D_", "d_sq", "F_g", "d_sq2",
-  "avg_post", "direction"
+  "avg_post", "direction",
+  # did_static.R (.didm_point) scratch
+  "D_lag", "Y_lag", "dY", "trans",
+  # cs_continuous.R scratch
+  "dy", "dose",
+  # twfe.R scratch (data.table update-join)
+  "i.vv"
 ))
