@@ -13,6 +13,13 @@ Plus the **naive TWFE baseline** every applied paper reports for comparison — 
 
 Pre-trends robustness, beyond the built-in placebo test: `didgpu_equivalence()` runs a TOST equivalence test (positive evidence that pre-trends are within a margin, not just "failed to reject zero"), `didgpu_joint_placebo()` runs the joint placebo test over a chosen pre-treatment window, and `didgpu_honest_did()` is the Rambachan-Roth (2023) sensitivity analysis.
 
+Four further DiD designs round out the toolkit, each a **native reimplementation cross-checked against its reference package** (or, where none exists, validated by simulation):
+
+- **de Chaisemartin & D'Haultfoeuille (2020)** instantaneous DID_M — `didgpu_did_static()`. Unlike the staggered-adoption methods it allows treatment to switch **on *and* off** (non-absorbing): it compares each switcher's period-over-period outcome change to same-baseline stayers and averages over all switch events, with a cluster bootstrap SE. Matches [DIDmultiplegt](https://cran.r-project.org/package=DIDmultiplegt).
+- **Freyaldenhoven, Hansen & Shapiro (2019)** pre-event proxy event study — `didgpu_freyaldenhoven()`. `estimator = "OLS"` is the two-way FE event study; `estimator = "FHS"` adds an auxiliary proxy covariate and 2SLS-instruments it with a far policy lead to purge a confound that generates pre-trends. Coefficients match [eventstudyr](https://cran.r-project.org/package=eventstudyr) (OLS and FHS) to machine precision.
+- **Callaway, Goodman-Bacon & Sant'Anna (2024)** continuous-treatment DiD — `didgpu_cs_continuous()`. Estimates the dose-response: level effect ATT(d) and causal response ACRT(d) = ATT′(d), via a B-spline regression of the within-unit outcome change on the dose vs a never-treated comparison; multiplier-bootstrap SEs. ATT(d)/ACRT(d) match [contdid](https://cran.r-project.org/package=contdid) exactly.
+- **de Chaisemartin & D'Haultfoeuille (2024)** continuous treatment with **no stayers** — `didgpu_did_continuous()`. When the dose changes for (almost) every unit there is no pure control group, so identification is in first differences: the common trend `E[dY|dD=0]` is recovered from "quasi-stayers" (units with `dD ≈ 0`), giving the level effect `effect(d)` and the average causal response `ACR(d)`. A `"parametric"` (√n polynomial) and an experimental `"nonparametric"` (local-linear, n^{2/5}) estimator; validated by simulation against a known dose-response.
+
 Designed for long-running econometric work: per-cell checkpointing to disk, resumable runs after crash or OOM, configurable backends (pure R, optional CUDA), and bit-for-bit numerical equivalence with the reference packages.
 
 ## Status

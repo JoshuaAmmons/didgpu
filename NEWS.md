@@ -122,6 +122,17 @@ each with CUDA kernels for the hot paths.
   change on the dose, vs a never-treated comparison; multiplier-bootstrap
   SEs. Native reimplementation (spline basis via splines2); ATT(d)/ACRT(d)
   match `contdid::cont_did` exactly.
+- `didgpu_did_continuous()` — de Chaisemartin & D'Haultfoeuille (2024)
+  continuous treatment with NO STAYERS. When the dose changes for (almost)
+  every unit there is no pure control group, so identification is in first
+  differences: with dY, dD the within-unit changes, the common trend
+  E[dY|dD=0] is recovered from quasi-stayers (dD near 0), giving the level
+  effect effect(d) = E[dY|dD=d] - E[dY|dD=0] and the average causal response
+  ACR(d). `estimator = "parametric"` fits a polynomial in dD (sqrt(n));
+  `estimator = "nonparametric"` is a local-linear (kernel) fit (n^2/5; flagged
+  EXPERIMENTAL — no maintained R reference exists to bit-validate it).
+  Multiplier-bootstrap SEs. Both estimators validated by simulation against a
+  known dose-response.
 
 ## Long-running workflow
 
