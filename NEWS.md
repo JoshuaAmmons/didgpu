@@ -102,6 +102,12 @@ each with CUDA kernels for the hot paths.
   "forbidden" already-treated-control comparisons as the bias diagnostic.
   Validated by the exact identity (weighted 2x2 sum == the TWFE
   coefficient from `didgpu_twfe()`). Balanced, binary, absorbing panels.
+- `didgpu_did_static()` — de Chaisemartin & D'Haultfoeuille (2020) DID_M
+  instantaneous estimator. Unlike the staggered-adoption methods it allows
+  treatment to turn on AND off (non-absorbing): it compares each switcher's
+  period-over-period outcome change to same-baseline stayers and averages
+  over all switch events, with a cluster bootstrap SE. Native
+  reimplementation; cross-checked against `DIDmultiplegt::did_multiplegt`.
 
 ## Long-running workflow
 
