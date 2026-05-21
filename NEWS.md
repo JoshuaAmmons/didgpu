@@ -115,6 +115,13 @@ each with CUDA kernels for the hot paths.
   purge a confound that generates pre-trends. Native reimplementation of
   the first-difference parameterization; coefficients match
   `eventstudyr::EventStudy` (OLS and FHS) to machine precision.
+- `didgpu_cs_continuous()` — Callaway, Goodman-Bacon & Sant'Anna (2024)
+  difference-in-differences with a CONTINUOUS treatment (dose). Estimates
+  the dose-response curve: the level effect ATT(d) and the causal response
+  ACRT(d) = ATT'(d), via a B-spline regression of the within-unit outcome
+  change on the dose, vs a never-treated comparison; multiplier-bootstrap
+  SEs. Native reimplementation (spline basis via splines2); ATT(d)/ACRT(d)
+  match `contdid::cont_did` exactly.
 
 ## Long-running workflow
 
