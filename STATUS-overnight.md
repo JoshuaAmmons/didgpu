@@ -64,12 +64,14 @@ incl. fect GPU SVD). The GPU-lite release artifact is at
    from `RELEASE_PLAN.md` for the CPU baseline.
 3. **#97 fresh-Windows-VM UX validation** — needs a clean VM.
 
-## Deliberately not done
+## Done after you checked in (2026-05-21)
 
-- **#101 `didgpu_bacon()`** (Goodman-Bacon decomposition) — on the roadmap
-  but lower-priority and substantial (2×2 enumeration + weights, ideally
-  cross-validated against `bacondecomp`). Left for a supervised session so
-  the output format / validation target can be chosen with you.
+- **#101 `didgpu_bacon()`** — Goodman-Bacon (2021) decomposition of the
+  TWFE DiD into its 2×2 timing-group comparisons, reporting the weight on
+  "forbidden" already-treated-control comparisons. Validated by the exact
+  identity (weighted 2×2 sum == TWFE coefficient, == `didgpu_twfe()`'s
+  Effect_1). All five estimator families plus the TWFE baseline and its
+  Goodman-Bacon diagnostic are now in place.
 
 ## Note
 
