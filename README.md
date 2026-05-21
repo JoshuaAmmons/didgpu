@@ -2,7 +2,7 @@
 
 <!-- badges: start -->
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![r-universe](https://jdammons.r-universe.dev/badges/didgpu)](https://jdammons.r-universe.dev/didgpu)
+[![r-universe](https://joshuaammons.r-universe.dev/badges/didgpu)](https://joshuaammons.r-universe.dev/didgpu)
 [![Lifecycle: maturing](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://lifecycle.r-lib.org/articles/stages.html#maturing)
 <!-- badges: end -->
 
@@ -120,7 +120,7 @@ build with no GPU; every `backend = "cuda"` call transparently falls back to
 the R implementation:
 
 ```r
-install.packages("didgpu", repos = "https://jdammons.r-universe.dev")
+install.packages("didgpu", repos = "https://joshuaammons.r-universe.dev")
 ```
 
 **From source.** Linux/macOS pick up the GPU automatically when `nvcc` is on
