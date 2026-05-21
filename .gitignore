@@ -83,3 +83,4 @@ Thumbs.db
 # These live OUTSIDE the repo for ammonsj, but guard against accidental copies.
 *.zip
 *-archive/
+tests/testthat/testthat-problems.rds
