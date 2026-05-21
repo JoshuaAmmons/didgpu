@@ -139,25 +139,33 @@ didgpu_did_continuous <- function(df, outcome, treatment, id, time,
   if (is.null(bandwidth))
     bandwidth <- 1.06 * stats::sd(dD) * length(dD)^(-1 / 5)
 
-  # Point estimator: returns effect(d), acr(d), overall ACR, given (x=dD,y=dY).
-  fit_fun <- function(x, y) {
+  # Point estimator: returns effect(d), acr(d), and (when `overall`) the overall
+  # ACR, given (x=dD, y=dY). `overall` is FALSE in the bootstrap, where only the
+  # dvals slice is consumed: this avoids recomputing the overall ACR every
+  # replicate (for the nonparametric path that was an O(n^2) local-linear over
+  # all n points on each rep — the bootstrap's dominant cost).
+  pw <- seq_len(degree)
+  fit_fun <- function(x, y, overall = TRUE) {
     if (estimator == "parametric") {
-      X <- outer(x, seq_len(degree), `^`)             # [x, x^2, ..., x^degree]
+      X <- outer(x, pw, `^`)                           # [x, x^2, ..., x^degree]
       fit <- stats::lm.fit(cbind(1, X), y)
-      bet <- fit$coefficients                          # [intercept, b1..bdeg]
-      slope_coef <- bet[-1L]
-      polyval <- function(dd) as.numeric(outer(dd, seq_len(degree), `^`) %*% slope_coef)
+      slope_coef <- fit$coefficients[-1L]              # drop intercept
+      polyval <- function(dd) as.numeric(outer(dd, pw, `^`) %*% slope_coef)
+      acrval  <- function(dd) vapply(dd, function(z) sum(slope_coef * pw * z^(pw - 1L)), numeric(1))
       eff <- polyval(dvals)                            # E[dY|d]-E[dY|0] (intercept cancels)
-      acr <- vapply(dvals, function(dd) {
-        sum(slope_coef * seq_len(degree) * dd^(seq_len(degree) - 1L)) }, numeric(1))
-      acr_overall <- mean(vapply(x, function(dd) {
-        sum(slope_coef * seq_len(degree) * dd^(seq_len(degree) - 1L)) }, numeric(1)))
+      acr <- acrval(dvals)
+      acr_overall <- if (overall) mean(acrval(x)) else NA_real_
     } else {
       ll0 <- .didc_loclin(x, y, 0, bandwidth)$level    # trend (quasi-stayers)
       ll  <- .didc_loclin(x, y, dvals, bandwidth)
       eff <- ll$level - ll0
       acr <- ll$slope
-      acr_overall <- mean(.didc_loclin(x, y, x, bandwidth)$slope, na.rm = TRUE)
+      # Overall ACR = mean local slope over a quantile GRID of dD (O(n*grid)),
+      # not all n points (O(n^2)); only needed for the point estimate.
+      acr_overall <- if (overall) {
+        grid <- as.numeric(stats::quantile(x, probs = seq(0.05, 0.95, length.out = 50L)))
+        mean(.didc_loclin(x, y, grid, bandwidth)$slope, na.rm = TRUE)
+      } else NA_real_
     }
     list(eff = eff, acr = acr, acr_overall = acr_overall)
   }
@@ -174,7 +182,7 @@ didgpu_did_continuous <- function(df, outcome, treatment, id, time,
     bacr <- matrix(NA_real_, bootstrap_reps, length(dvals))
     for (b in seq_len(bootstrap_reps)) {
       idx <- sample.int(n, n, replace = TRUE)
-      fb <- tryCatch(fit_fun(dD[idx], dY[idx]), error = function(e) NULL)
+      fb <- tryCatch(fit_fun(dD[idx], dY[idx], overall = FALSE), error = function(e) NULL)
       if (!is.null(fb)) { beff[b, ] <- fb$eff; bacr[b, ] <- fb$acr }
     }
     res$effect.d_se <- apply(beff, 2L, stats::sd, na.rm = TRUE)

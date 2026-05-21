@@ -142,18 +142,22 @@ didgpu_did_static <- function(df, outcome, group, time, treatment,
   if (bootstrap_reps > 0L && !is.na(pt$did)) {
     clusters <- unique(d$CL)
     nc <- length(clusters)
+    # Pre-split row indices by cluster ONCE. The naive approach filters
+    # `d[CL == draw[i]]` for every drawn cluster on every replicate, which is
+    # O(n_units^2 * T) per rep and dominates the runtime (a B=1000 bootstrap at
+    # 1000 units took ~21 min). Splitting once turns each replicate into an O(n)
+    # gather + vectorized relabel. Results are bit-identical: the RNG draw
+    # sequence is unchanged and each drawn copy still gets a distinct group id.
+    by_cl <- split(seq_len(nrow(d)), factor(d$CL, levels = clusters))
     set.seed(seed)
     boot <- numeric(bootstrap_reps)
     for (b in seq_len(bootstrap_reps)) {
       draw <- sample(clusters, nc, replace = TRUE)
-      # Rebuild the resampled panel; relabel drawn clusters uniquely so a
-      # cluster sampled twice contributes as two independent units.
-      idx <- lapply(seq_along(draw), function(i) {
-        rows <- d[CL == draw[i]]
-        rows[, G := paste0(G, "__b", i)]   # unique unit ids per draw copy
-        rows
-      })
-      db <- data.table::rbindlist(idx)
+      idx_list <- by_cl[as.character(draw)]
+      all_idx  <- unlist(idx_list, use.names = FALSE)
+      block    <- rep.int(seq_len(nc), lengths(idx_list))  # distinct id per draw copy
+      db <- d[all_idx]
+      db[, G := paste0(G, "__b", block)]                   # relabel drawn copies uniquely
       boot[b] <- .didm_point(db)$did
     }
     boot <- boot[is.finite(boot)]

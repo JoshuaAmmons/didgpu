@@ -133,6 +133,13 @@ each with CUDA kernels for the hot paths.
   EXPERIMENTAL — no maintained R reference exists to bit-validate it).
   Multiplier-bootstrap SEs. Both estimators validated by simulation against a
   known dose-response.
+- All eight auxiliary estimators above were benchmarked to verify they belong
+  on the CPU (none has a GPU-amenable hot path; see `BENCHMARKS.md`). The audit
+  also caught and fixed two quadratic bootstraps: `didgpu_did_static`'s cluster
+  bootstrap was O(n_units^2) per replicate (pre-splitting by cluster makes it
+  O(n); 12-23x faster, bit-identical SEs), and `didgpu_did_continuous` no longer
+  recomputes the O(n^2) overall-ACR on every bootstrap replicate (nonparametric
+  bootstrap ~675x faster; reported effect(d)/ACR(d) unchanged).
 
 ## Long-running workflow
 

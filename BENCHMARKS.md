@@ -263,6 +263,70 @@ speed — it's to provide the baseline in the SAME package and output
 shape as the robust estimators, scaling to large panels without the
 lm() cliff.
 
+## The 8 auxiliary estimators (#98-#105): GPU-worthiness verification
+
+`tools/bench-new-estimators.R`. The newer single-purpose estimators
+(`didgpu_twfe`, `_equivalence`, `_joint_placebo`, `_bacon`, `_did_static`,
+`_freyaldenhoven`, `_cs_continuous`, `_did_continuous`) ship as pure R. To
+verify that decision empirically — rather than by assertion — each was timed
+on CPU at realistic and large sizes, decomposing point-estimate vs
+bootstrap-loop cost and reporting per-replicate time.
+
+| Estimator | SE method | Cost (large config) | per-rep | GPU verdict |
+|-----------|-----------|---------------------|---------|-------------|
+| `twfe` | analytic CR1 sandwich | 0.16s @ n5000·T20 | — | no bootstrap; sub-second; nothing to accelerate |
+| `freyaldenhoven` (OLS/FHS) | analytic CR1/CR2 | 0.18–0.22s @ n1000·T24 | — | analytic; sub-second |
+| `bacon` | closed-form (no SE) | 0.20s @ n5000·T20 | — | closed-form; sub-second |
+| `equivalence` / `joint_placebo` | post-hoc on stored vcov | <1 ms | — | trivial reduction |
+| `cs_continuous` | multiplier (Rademacher), IF | 1.6s @ n5000·B1000 | 1.5 ms | IF-based; GPU ceiling ~1.5× (cf. CS multiplier) — not worth a kernel |
+| `did_continuous(par)` | resample, poly-OLS refit | (see below) | 1.9 ms | small dense OLS; no GPU regime |
+| `did_continuous(np)` | resample, local-linear refit | (see below) | 2.2 ms | local-linear; algorithmic fix, not GPU |
+| `did_static` | cluster bootstrap, refit | (see below) | 81 ms | refit dominated by data.table reshaping — GPU can't help (cf. LOO) |
+
+**Verdict: none of the eight is GPU-worthy.** The five analytic/closed-form/
+post-hoc estimators have no loop to accelerate and finish well under a second
+even at large `n`. `cs_continuous` is already influence-function based, so the
+GPU ceiling is the ~1.5× the CS multiplier bootstrap showed. The three with a
+refit/resample loop are bound by data.table reshaping and small per-rep linear
+algebra, not by dense GPU-amenable compute — the same regime where the LOO
+kernel was ruled out (#88).
+
+### But the benchmark caught two real R-side performance defects
+
+Measuring "everything" surfaced two quadratic bottlenecks, both fixed in R
+(no GPU):
+
+- **`did_static` cluster bootstrap was O(n_units²·T) per replicate.** The
+  resampler filtered `d[CL == draw[i]]` once per drawn cluster on every
+  replicate. A B=1000 bootstrap at 1000 units took **21 minutes**; n5000·B100
+  took 11.5 min (6.9 s/rep). Pre-splitting the row indices by cluster once
+  makes each replicate an O(n) gather + relabel.
+
+  | config | before | after | speedup |
+  |--------|--------|-------|---------|
+  | n1000·T12·B200 | 204.6s | 16.2s | **12.6×** |
+  | n5000·T20·B100 | 690.2s | 30.6s | **22.5×** |
+
+  The fix is **bit-identical**: same RNG draw sequence, same per-copy group
+  relabeling. SE matches the old path to all printed digits
+  (`0.054876003881`, `all.equal` tolerance 0).
+
+- **`did_continuous` recomputed an O(n²) overall-ACR on every bootstrap rep.**
+  The nonparametric path evaluated a local-linear fit at all `n` points each
+  replicate to form the overall ACR — a value the bootstrap discards (it only
+  uses the dvals slice). Skipping it in the bootstrap, and gridding the
+  point-estimate overall ACR (50 quantiles instead of all `n`), leaves the
+  reported `effect(d)`/`ACR(d)` unchanged:
+
+  | config | before | after | speedup |
+  |--------|--------|-------|---------|
+  | `np` n4000·B200 | 299.8s | 0.44s | **~675×** |
+  | `par` n10000·B1000 | 20.6s | 1.86s | **11×** |
+
+This is the payoff of measuring instead of assuming: the GPU question came
+back "no" for all eight, but the audit turned up two pathological
+bootstraps that are now 12–675× faster.
+
 ## Notes
 
 - Numbers are from a laptop-class GPU (RTX 4000 Ada Laptop, 12 GB).
