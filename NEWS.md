@@ -97,6 +97,11 @@ each with CUDA kernels for the hot paths.
   reusing the stored bootstrap covariance. Test parallel trends only over
   the leads you care about; the full-window call reproduces the headline
   `p_jointplacebo` exactly.
+- `didgpu_bacon()` — Goodman-Bacon (2021) decomposition of the static TWFE
+  DiD into its 2x2 timing-group comparisons, with the total weight on
+  "forbidden" already-treated-control comparisons as the bias diagnostic.
+  Validated by the exact identity (weighted 2x2 sum == the TWFE
+  coefficient from `didgpu_twfe()`). Balanced, binary, absorbing panels.
 
 ## Long-running workflow
 
