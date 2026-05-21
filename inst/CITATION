@@ -1,0 +1,20 @@
+citHeader(
+  "To cite didgpu in publications, cite the package and the original ",
+  "method paper(s) you use:")
+
+bibentry(
+  bibtype = "Manual",
+  title   = "{didgpu}: GPU-Accelerated, Checkpointed Difference-in-Differences Estimators",
+  author  = person("Joshua", "Ammons"),
+  year    = "2026",
+  note    = "R package version 0.1.0",
+  url     = "https://github.com/JoshuaAmmons/didgpu"
+)
+
+citFooter(
+  "didgpu reimplements published estimators. Please also cite the relevant ",
+  "method paper(s) -- de Chaisemartin & D'Haultfoeuille (2020, 2024); ",
+  "Callaway & Sant'Anna (2021); Callaway, Goodman-Bacon & Sant'Anna (2024); ",
+  "Liu, Wang & Xu (2024); Goodman-Bacon (2021); Freyaldenhoven, Hansen & ",
+  "Shapiro (2019); Rambachan & Roth (2023); Kwon & Roth (2026) -- shown on ",
+  "each estimator's help page.")
