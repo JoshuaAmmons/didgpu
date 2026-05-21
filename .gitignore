@@ -1,0 +1,86 @@
+# ----------------------------------------------------------------------------
+# Build artifacts
+# ----------------------------------------------------------------------------
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dll
+*.dll.a
+*.exp
+*.pdb
+*.dylib
+
+# R-specific build outputs
+/src/*.o
+/src/*.obj
+/src/*.a
+/src/*.dll
+/src/*.so
+/src/Makevars.d
+/src/symbols.rds
+/src/*.cmd
+/src/*.def
+
+# R CMD check / build output
+*.Rcheck/
+*.tar.gz
+/inst/doc/*.html
+/inst/doc/*.R
+
+# ----------------------------------------------------------------------------
+# R session / RStudio artifacts
+# ----------------------------------------------------------------------------
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+.lintr
+
+# ----------------------------------------------------------------------------
+# OS / editor cruft
+# ----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.bak
+.vscode/
+.idea/
+
+# ----------------------------------------------------------------------------
+# Project-specific
+# ----------------------------------------------------------------------------
+
+# NVIDIA CUDA shim headers — downloaded from NVIDIA's redist archive on
+# demand by tools/setup-wsl-env.sh (or the future Windows build script).
+# Not tracked because (a) they're upstream NVIDIA code that we shouldn't
+# duplicate in the repo, (b) they're large-ish, (c) they vary by CUDA
+# version. Only needed for a partial Windows CUDA 13.2.1 install — Linux
+# builds don't use them at all.
+/src/cuda_shim/
+
+# Local checkpoint scratch from didgpu_resume / didgpu_bootstrap_more
+/scratch/
+/checkpoints/
+
+# Overnight stress test outputs — large logs, not source.
+/inst/overnight_reports/*.log
+/inst/overnight_reports/*.rds
+/inst/overnight_reports/*.csv
+
+# Local R library overrides (if anyone uses renv or similar)
+/renv/library/
+/renv/staging/
+/renv/local/
+
+# tarballs of cached redist archives (cuda_local, cuda_crt_redist)
+# These live OUTSIDE the repo for ammonsj, but guard against accidental copies.
+*.zip
+*-archive/
+tests/testthat/testthat-problems.rds

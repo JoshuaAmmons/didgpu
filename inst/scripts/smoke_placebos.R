@@ -1,0 +1,37 @@
+# Compare r-backend vs reference for placebos.
+library(didgpu)
+library(DIDmultiplegtDYN)
+
+p <- didgpu_simulate_panel(
+  n_units = 80L, n_periods = 18L, frac_treated = 0.6,
+  min_treat_period = 7L, max_treat_period = 12L,   # leave room for placebos
+  tau_profile = c(0.5, 1.0, 1.2),
+  sigma = 0.4, seed = 17L
+)
+
+for (cfg in list(c(eff = 2L, pl = 1L), c(eff = 3L, pl = 2L), c(eff = 1L, pl = 3L))) {
+  cat(sprintf("\n=== effects = %d, placebos = %d ===\n", cfg["eff"], cfg["pl"]))
+  ref <- suppressMessages(suppressWarnings(did_multiplegt_dyn(
+    df = as.data.frame(p), outcome = "Y", group = "unit",
+    time = "period", treatment = "D",
+    effects = as.double(cfg["eff"]),
+    placebo = as.double(cfg["pl"]),
+    graph_off = TRUE
+  )))
+  us <- didgpu(p, "Y", "unit", "period", "D",
+                effects = as.integer(cfg["eff"]),
+                placebo = as.integer(cfg["pl"]),
+                bootstrap_reps = 0L, backend = "r", verbose = FALSE)
+  ref_e <- as.numeric(ref$results$Effects[, 1])
+  us_e  <- as.numeric(us$results$Effects[, "Estimate"])
+  ref_p <- as.numeric(ref$results$Placebos[, 1])
+  us_p  <- as.numeric(us$results$Placebos[, "Estimate"])
+  cat("  Effects:\n")
+  cat("    reference: ", paste(sprintf("%.6f", ref_e), collapse = "  "), "\n")
+  cat("    didgpu:    ", paste(sprintf("%.6f", us_e),  collapse = "  "), "\n")
+  cat("    max diff:  ", sprintf("%.2e", max(abs(ref_e - us_e))), "\n")
+  cat("  Placebos:\n")
+  cat("    reference: ", paste(sprintf("%.6f", ref_p), collapse = "  "), "\n")
+  cat("    didgpu:    ", paste(sprintf("%.6f", us_p),  collapse = "  "), "\n")
+  cat("    max diff:  ", sprintf("%.2e", max(abs(ref_p - us_p))), "\n")
+}

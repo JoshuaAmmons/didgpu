@@ -1,0 +1,225 @@
+# didgpu 0.1.0
+
+First public release. Five estimator families plus a sensitivity layer,
+each with CUDA kernels for the hot paths.
+
+## Callaway-Sant'Anna (2021) — `didgpu_cs()`
+
+- `est_method = c("OR", "IPW", "DR")` — all three inner estimators. DR is
+  Sant'Anna-Zhao (2020) doubly-robust.
+- `control_group = c("never", "notyet")` — never-treated OR not-yet-treated.
+- `covariates =` for OR/IPW/DR adjustment.
+- Pre-treatment placebos computed automatically; joint chi-square test
+  on the placebo block via `fit$placebo`.
+- Four aggregations (`event` / `group` / `calendar` / `overall`) with
+  `didgpu_cs_aggregate()` for switching post-fit.
+- `bootstrap_kind = c("cluster", "multiplier")` — cluster bootstrap on
+  units, or multiplier wild bootstrap on per-unit influence functions
+  (much faster for large B).
+- CUDA: all three inner regressions (OR / IPW / DR) run on the GPU
+  (`src/cuda_cs_inner.cu`) with per-row influence functions. OR uses
+  an in-thread Cholesky per cell; IPW/DR add a per-cell IRLS logistic
+  propensity model replicating `stats::glm.fit` (ATT agrees with R to
+  ~1e-8), and DR layers on the outcome-regression augmentation. With
+  per-cell IFs, the cluster + multiplier bootstrap SEs all run on the
+  GPU — the DR cluster bootstrap is ~192x faster than R.
+- Cross-validated against the reference `did` package on simulated
+  panels (max abs diff < 0.25 on event-study estimates).
+
+## TestMechs (Kwon & Roth 2026) — `didgpu_test_sharp_null()`
+
+- All three test methods: `"CS"` (Cox-Shi 2023), `"ARP"`
+  (Andrews-Roth-Pakes 2023), `"FSST"` (Fang-Santos-Shaikh-Torgovitsky 2023).
+- Both binary mediator (K = 2) and multi-level (K >= 2) under
+  no-defiers.
+- Generic CS engine `.testmechs_cs_test(theta_hat, Sigma, A, A_eq, b_eq)`
+  is reusable for any moment-inequality test.
+- Nonparametric and Bayesian (Dirichlet) bootstrap of the partial-density
+  vector beta.obs.
+- CUDA bootstrap kernel `src/cuda_testmechs_bootstrap.cu` (cuRAND
+  multinomial; the main acceleration target). Live on Linux/WSL and
+  wired through `.testmechs_bootstrap_cuda`; the "nonparametric"
+  method runs on the GPU, "bayes" uses the R path. cuRAND vs R's
+  MT19937 differ per-replicate, so bootstrap moments match within
+  Monte-Carlo error rather than bit-for-bit.
+
+## Leave-one-out robustness — `didgpu_loo()`
+
+- Drops one entity at a time (cohort / unit / cluster / arbitrary
+  column level) and re-fits the estimator.
+- Works on all three estimator families: `didgpu_result`,
+  `didgpu_cs_result`, `didgpu_fect_result`.
+- Returns a `didgpu_loo_result` data.frame with `leave_out`,
+  `estimate`, `delta`, and `delta_pct` columns, sorted by
+  `abs(delta)` descending so the most-influential drop is on top.
+- `print()` shows the top-N most influential rows with an
+  interpretation hint; `plot()` draws a tornado plot of deltas.
+- Default `by = "cohort"` (leave-one-cohort-out, the standard DiD
+  diagnostic). Pass `by = "unit"`, `"cluster"`, or any column name
+  to drop on a different key.
+
+## HonestDiD (Rambachan & Roth 2023) — `didgpu_honest_did()`
+
+- Sensitivity analysis on event-study DiD estimates.
+- `method = c("RM", "M")` — relative-magnitudes OR smoothness bounds.
+- Reports the breakdown parameter (smallest Mbar at which the CI
+  includes zero) so users can read off how robust their conclusion is.
+- Works on both `didgpu_result` (DIDmultiplegtDYN-style) and
+  `didgpu_cs_result` (Callaway-Sant'Anna) fits.
+
+## fect family (counterfactual-prediction estimators) — `didgpu_fect()`
+
+## Estimator (bit-identical to `DIDmultiplegtDYN::did_multiplegt_dyn`)
+
+- Binary, multivalued, and continuous treatment.
+- `effects`, `placebo`, `switchers = ""/"in"/"out"`, ATE.
+- `weight`, `controls`, `trends_nonparam` cohort extension.
+- `only_never_switchers`, `same_switchers`, `dont_drop_larger_lower`.
+- `normalized = TRUE` (per-unit-of-treatment), `trends_lin = TRUE`
+  (linear cohort trends with cumulative-recovery placebos).
+- `same_switchers_pl` (placebo-side same-switchers gate; mirrors the
+  reference's constraint that it must be paired with `same_switchers`).
+- `predict_het` (heterogeneity regression with HC1 robust SEs and joint
+  F-test).
+- `didgpu_by_path()` for treatment-trajectory subgroup analysis (the
+  equivalent of the reference's `by_path` argument).
+- Sample-size columns (`N`, `Switchers`, `N.w`, `Switchers.w`) match
+  the reference exactly.
+- `didgpu_equivalence(fit, delta)` — pre-trends equivalence (TOST) test on
+  the placebo estimates. Instead of "failed to reject a zero pre-trend"
+  (weak, and worst exactly when underpowered), it tests
+  H0: |pre-trend| >= delta and REJECTING is positive evidence the
+  pre-trend is within +/- delta. Reports per-horizon and joint
+  (intersection-union) verdicts plus the smallest defensible margin
+  (`breakdown_delta`). Mirrors `didgpu_fect_equivalence()`.
+- `didgpu_joint_placebo(fit, horizons)` — the joint chi-square placebo
+  test (`p_jointplacebo`) restricted to a chosen pre-treatment window,
+  reusing the stored bootstrap covariance. Test parallel trends only over
+  the leads you care about; the full-window call reproduces the headline
+  `p_jointplacebo` exactly.
+- `didgpu_bacon()` — Goodman-Bacon (2021) decomposition of the static TWFE
+  DiD into its 2x2 timing-group comparisons, with the total weight on
+  "forbidden" already-treated-control comparisons as the bias diagnostic.
+  Validated by the exact identity (weighted 2x2 sum == the TWFE
+  coefficient from `didgpu_twfe()`). Balanced, binary, absorbing panels.
+- `didgpu_did_static()` — de Chaisemartin & D'Haultfoeuille (2020) DID_M
+  instantaneous estimator. Unlike the staggered-adoption methods it allows
+  treatment to turn on AND off (non-absorbing): it compares each switcher's
+  period-over-period outcome change to same-baseline stayers and averages
+  over all switch events, with a cluster bootstrap SE. Native
+  reimplementation; cross-checked against `DIDmultiplegt::did_multiplegt`.
+- `didgpu_freyaldenhoven()` — Freyaldenhoven, Hansen & Shapiro (2019)
+  pre-event panel event study. `estimator = "OLS"` is the two-way FE
+  event study; `estimator = "FHS"` adds an auxiliary proxy covariate as an
+  endogenous regressor and 2SLS-instruments it with a far policy lead to
+  purge a confound that generates pre-trends. Native reimplementation of
+  the first-difference parameterization; coefficients match
+  `eventstudyr::EventStudy` (OLS and FHS) to machine precision.
+- `didgpu_cs_continuous()` — Callaway, Goodman-Bacon & Sant'Anna (2024)
+  difference-in-differences with a CONTINUOUS treatment (dose). Estimates
+  the dose-response curve: the level effect ATT(d) and the causal response
+  ACRT(d) = ATT'(d), via a B-spline regression of the within-unit outcome
+  change on the dose, vs a never-treated comparison; multiplier-bootstrap
+  SEs. Native reimplementation (spline basis via splines2); ATT(d)/ACRT(d)
+  match `contdid::cont_did` exactly.
+- `didgpu_did_continuous()` — de Chaisemartin & D'Haultfoeuille (2024)
+  continuous treatment with NO STAYERS. When the dose changes for (almost)
+  every unit there is no pure control group, so identification is in first
+  differences: with dY, dD the within-unit changes, the common trend
+  E[dY|dD=0] is recovered from quasi-stayers (dD near 0), giving the level
+  effect effect(d) = E[dY|dD=d] - E[dY|dD=0] and the average causal response
+  ACR(d). `estimator = "parametric"` fits a polynomial in dD (sqrt(n));
+  `estimator = "nonparametric"` is a local-linear (kernel) fit (n^2/5; flagged
+  EXPERIMENTAL — no maintained R reference exists to bit-validate it).
+  Multiplier-bootstrap SEs. Both estimators validated by simulation against a
+  known dose-response.
+- All eight auxiliary estimators above were benchmarked to verify they belong
+  on the CPU (none has a GPU-amenable hot path; see `BENCHMARKS.md`). The audit
+  also caught and fixed two quadratic bootstraps: `didgpu_did_static`'s cluster
+  bootstrap was O(n_units^2) per replicate (pre-splitting by cluster makes it
+  O(n); 12-23x faster, bit-identical SEs), and `didgpu_did_continuous` no longer
+  recomputes the O(n^2) overall-ACR on every bootstrap replicate (nonparametric
+  bootstrap ~675x faster; reported effect(d)/ACR(d) unchanged).
+
+## Long-running workflow
+
+- Per-cell checkpointing to disk with atomic writes (`saveRDS`
+  tmp + rename) and append-only `manifest.csv`. Resumable on crash.
+- `didgpu_resume(checkpoint_dir, df, ...)` — re-invokes with every
+  stored arg restored from `meta.json`.
+- `didgpu_bootstrap_more(checkpoint_dir, df, extra_reps)` — extend a
+  finished run with more bootstrap reps without rework.
+- `didgpu_by(df, by_var, ...)` — per-subgroup fits, each with its own
+  checkpoint subdirectory.
+- `n_workers > 1L` parallelises the bootstrap loop via
+  `parallel::makeCluster`; bit-identical to sequential at the same seed.
+
+## Backends
+
+- `"r"` — pure R via `data.table`. 60× faster than the reference at
+  200 K rows.
+- `"reference"` — delegate to `DIDmultiplegtDYN::did_multiplegt_dyn`,
+  used as the parity oracle.
+- `"cuda"` — **live on Windows and Linux/WSL2** (built + verified
+  end-to-end on an NVIDIA RTX 4000 Ada, CUDA 12.6; bit-identical results
+  on both). On Windows it needs **no admin rights**: a user-local CUDA
+  toolkit plus a two-DLL split (`didgpu_cuda.dll` built by nvcc/MSVC,
+  the R-facing `didgpu.dll` built by Rtools/MinGW, bridged by a pure-C
+  ABI) sidesteps the MinGW↔MSVC link barrier — see
+  `WINDOWS_BUILD_STATUS.md`. Live GPU paths: the CS cluster
+  bootstrap (**179–228× faster** than R via the influence-function
+  shortcut), the CS multiplier bootstrap, the CS OR point estimate
+  (bit-exact vs R), and the TestMechs nonparametric bootstrap. The
+  fect SVD path is size-gated — it only engages for very large
+  balanced panels, since cuSOLVER loses to CPU LAPACK on the small
+  matrices typical of fect. Every GPU path falls back transparently
+  to R when CUDA is unavailable or would be slower, so `backend =
+  "cuda"` is always safe. See `BENCHMARKS.md` and
+  `tests/testthat/test-cuda-equivalence-grid.R` (142 lock-step
+  assertions). Tests skip GPU paths when `nvcc` / a device is absent.
+- `"cpu"` — Rcpp+Eigen, scaffolded only.
+
+## R interface
+
+- S3 methods: `print`, `summary`, `coef`, `confint`, `vcov`, `plot`,
+  plus `tidy`, `glance`, `augment` via `broom`.
+- Plot is base-R (no `ggplot2` dependency); event-study with stored CIs.
+- Diagnostic helpers: `didgpu_summarize_panel`, `didgpu_estimate_runtime`,
+  `didgpu_compare` (compare against the reference).
+
+## fect family (counterfactual-prediction estimators)
+
+- `didgpu_fect(method = "fe")` — two-way fixed effects, iterative
+  demeaning of the controls-only outcome matrix.
+- `didgpu_fect(method = "ife")` — Bai (2009) interactive fixed effects.
+  Alternating fe-step + rank-r SVD of the residual matrix until
+  convergence.
+- `didgpu_fect(method = "mc")` — Athey et al. (2021) matrix completion.
+  Iterative soft-thresholded SVD on the controls-only matrix.
+- All three reuse `didgpu()`'s checkpoint / resume / parallel bootstrap
+  infrastructure. Results are returned as `didgpu_fect_result` (extends
+  `didgpu_result`) so all the standard accessors (`coef`, `confint`,
+  `vcov`, `plot`, `tidy`, `glance`) work the same way.
+- CUDA kernels for fect live in `src/cuda_fect_fe.cu` and
+  `src/cuda_fect_svd.cu` (the latter uses cuSOLVER's
+  `cusolverDnDgesvdj` for the SVD primitive shared by `ife` and `mc`)
+  and are wired through R. **However**, they are size-gated: on the
+  small, tall-skinny matrices typical of fect panels the per-iteration
+  cuSOLVER SVD is 100–300× slower than R's LAPACK (cuSOLVER handle +
+  H2D/D2H overhead dwarfs the tiny SVD). `.fect_cuda_svd_worthwhile()`
+  only routes to the GPU for very large balanced panels
+  (`n_units ≥ 2000` and `n_units·n_periods ≥ 2e5`); below that
+  `backend = "cuda"` transparently uses R's `svd()`. See `BENCHMARKS.md`.
+
+## Testing
+
+- 300+ tests across 24 test files; `R CMD check` passes with only
+  pre-existing intentional WARN (CUDA `.cu` files in `src/`) and the
+  declared GNU make `SystemRequirements` NOTE.
+- Adversarial fuzz harness (`tests/testthat/test-fuzz.R`) covers 21
+  scenarios: vanilla / weight / controls / switchers / normalized /
+  placebos / trends_lin / only_never + same_switchers / kitchen sink /
+  trends_lin sink / multivalued / bootstrap-stability /
+  parallel-equals-sequential / checkpoint round-trip / degenerate /
+  very-small. Default `DIDGPU_FUZZ_N = 8` for fast CI; bump via env
+  var for deep local runs (validated at N = 200, no failures).

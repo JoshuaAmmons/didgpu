@@ -1,0 +1,238 @@
+---
+title: "Getting started with didgpu"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with didgpu}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6,
+  fig.height = 4
+)
+```
+
+`didgpu` is a checkpointed, GPU-capable reimplementation of the
+heterogeneity-robust dynamic difference-in-differences estimator of
+de Chaisemartin and D'Haultfoeuille (2024), with bit-for-bit numerical
+equivalence to the reference `DIDmultiplegtDYN` package across the
+features it supports.
+
+This vignette is a hands-on tour:
+
+1. Simulate a panel with a known treatment-effect profile.
+2. Estimate event-study effects with placebos and a bootstrap.
+3. Plot, summarise, and extract coefficients with standard R methods.
+4. Resume an interrupted run from a disk checkpoint.
+
+```{r}
+library(didgpu)
+```
+
+## 1. Simulate a panel
+
+`didgpu_simulate_panel()` produces a balanced panel with unit and time
+fixed effects, a staggered treatment onset (one-period switcher-in for
+each treated unit at a random period in `[min_treat_period,
+max_treat_period]`), and a known event-time effect profile.
+
+```{r}
+panel <- didgpu_simulate_panel(
+  n_units   = 100L,
+  n_periods = 20L,
+  frac_treated = 0.6,
+  tau_profile  = c(0.5, 1.0, 1.2, 1.0, 0.8),  # true ATT at k = 0..4
+  sigma = 0.4,
+  seed  = 17L
+)
+head(panel)
+```
+
+`attr(panel, "truth")` stores the underlying DGP for later validation:
+the realised `F_g` per unit and the requested `tau_profile`.
+
+## 2. Pre-flight panel summary
+
+Before committing to a long bootstrap, it is worth running
+`didgpu_summarize_panel()` to sanity-check the design:
+
+```{r}
+didgpu_summarize_panel(panel,
+                       outcome = "Y", group = "unit",
+                       time = "period", treatment = "D")
+```
+
+This prints baseline cohort sizes, the number of switchers in each
+direction, the F_g distribution, and the feasible event-time and
+placebo horizons.
+
+## 3. Estimate with a small bootstrap
+
+For interactive exploration, run a small bootstrap (e.g. 20 reps) to
+get a quick read on SEs and CIs:
+
+```{r}
+fit <- didgpu(
+  panel, outcome = "Y", group = "unit", time = "period", treatment = "D",
+  effects = 4L, placebo = 2L,
+  bootstrap_reps = 20L, seed = 1L,
+  backend = "r", verbose = FALSE
+)
+print(fit)
+```
+
+The `Effects` block shows per-event-time ATT estimates with bootstrap
+SE, normal-approximation CIs at the stored `ci_level`, and four sample-
+size columns (`N`, `Switchers`, `N.w`, `Switchers.w`) that match the
+reference `DIDmultiplegtDYN` output exactly. The `Placebos` block is
+the corresponding pre-treatment-only difference; jointly the placebos
+should be statistically indistinguishable from zero if the
+parallel-trends assumption holds. The `ATE` is the cumulative
+incidence-weighted average effect.
+
+## 4. Standard R accessors
+
+`didgpu_result` plays nicely with the standard model-extraction
+interface:
+
+```{r}
+coef(fit)            # named vector of estimates
+confint(fit)         # CI matrix at the stored ci_level
+diag(vcov(fit))      # bootstrap variances
+```
+
+For a quick base-R event-study plot:
+
+```{r, fig.alt = "Base-R event-study plot of the simulated fit."}
+plot(fit, main = "Simulated didgpu fit")
+```
+
+Pre-treatment placebos appear at negative horizons, post-treatment
+effects at positive horizons, with the stored CIs as vertical error
+bars and a dashed line at zero for visual reference.
+
+`broom` methods are also provided:
+
+```{r, eval = requireNamespace("broom", quietly = TRUE)}
+broom::tidy(fit)
+broom::glance(fit)
+```
+
+## 5. Long-running runs with disk checkpoints
+
+For real work, the bootstrap often runs for hours. `didgpu()` will
+write every completed iteration to disk if you pass
+`checkpoint_dir = ...`; a crash at any point keeps everything already
+done:
+
+```{r}
+cdir <- tempfile("didgpu_demo_")
+fit_ck <- didgpu(
+  panel, outcome = "Y", group = "unit", time = "period", treatment = "D",
+  effects = 4L, placebo = 2L,
+  bootstrap_reps = 10L, seed = 1L,
+  checkpoint_dir = cdir,
+  backend = "r", verbose = FALSE
+)
+list.files(file.path(cdir, "cells"))
+```
+
+If the process dies, resume with `didgpu_resume()`, which reads every
+argument back from `meta.json` so you only need to supply the
+checkpoint directory and the panel:
+
+```{r}
+fit_resumed <- didgpu_resume(cdir, df = panel)
+identical(
+  as.numeric(fit_ck$results$Effects[, "Estimate"]),
+  as.numeric(fit_resumed$results$Effects[, "Estimate"])
+)
+```
+
+To extend a finished run with additional bootstrap replications without
+redoing existing ones:
+
+```{r}
+fit_more <- suppressMessages(
+  didgpu_bootstrap_more(cdir, df = panel, extra_reps = 5L)
+)
+nrow(fit_more$results$Effects)  # same number of event-times
+fit_more$args$bootstrap_reps    # now 15
+```
+
+```{r cleanup, include = FALSE}
+unlink(cdir, recursive = TRUE)
+```
+
+## 6. Subgroup estimation
+
+`didgpu_by()` runs `didgpu()` separately for each level of a grouping
+variable, with each subgroup getting its own checkpoint subdirectory
+if `checkpoint_dir` is set:
+
+```{r}
+panel$region <- ifelse(panel$unit %% 2L == 0L, "north", "south")
+fit_by <- didgpu_by(
+  panel, by_var = "region",
+  outcome = "Y", group = "unit", time = "period", treatment = "D",
+  effects = 3L, bootstrap_reps = 0L,
+  backend = "r", verbose = FALSE
+)
+print(fit_by)
+```
+
+## 7. Choosing a backend
+
+```{r}
+didgpu_backend_info()
+```
+
+For the supported subset, the `"r"` backend (pure R via `data.table`)
+is bit-identical to `"reference"` (which delegates to
+`DIDmultiplegtDYN`) on point estimates, SEs, and sample-size columns,
+but is roughly 14-60x faster depending on panel size. Use
+`backend = "reference"` if you want to fall back to the canonical
+implementation explicitly.
+
+The `"cuda"` backend is scaffolded but requires an NVIDIA CUDA Toolkit
+install with full headers; see `inst/doc/cuda_setup.md` for the
+Windows install path. Once `nvcc` is on `PATH` and the package is
+reinstalled from source, `didgpu_backend_info()` will report it as
+available and `backend = "cuda"` will run the GPU kernels.
+
+## 8. Comparing against the reference
+
+If you have `DIDmultiplegtDYN` installed and want to verify that
+didgpu and the reference produce identical output on your panel:
+
+```{r, eval = requireNamespace("DIDmultiplegtDYN", quietly = TRUE)}
+report <- didgpu_compare(panel,
+                          outcome = "Y", group = "unit",
+                          time = "period", treatment = "D",
+                          effects = 4L, placebo = 2L)
+report$pass
+head(report$report)
+```
+
+A `pass = TRUE` result with all `max_abs_diff` near machine epsilon
+confirms bit-for-bit agreement on point estimates, ATE, and the four
+sample-size columns.
+
+## Further reading
+
+- `?didgpu` for the full argument reference.
+- `?didgpu_by`, `?didgpu_resume`, `?didgpu_bootstrap_more` for the
+  ergonomic helpers.
+- `inst/doc/reference_internals.md` (in the installed package) for the
+  algorithmic spec.
+
+## References
+
+de Chaisemartin, C. and X. D'Haultfoeuille (2024). "Difference-in-
+differences estimators of intertemporal treatment effects."
+*The Review of Economics and Statistics*, forthcoming. Preprint
+[arXiv:2007.04267](https://doi.org/10.48550/arXiv.2007.04267).
