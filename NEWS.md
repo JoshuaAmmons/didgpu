@@ -108,6 +108,13 @@ each with CUDA kernels for the hot paths.
   period-over-period outcome change to same-baseline stayers and averages
   over all switch events, with a cluster bootstrap SE. Native
   reimplementation; cross-checked against `DIDmultiplegt::did_multiplegt`.
+- `didgpu_freyaldenhoven()` — Freyaldenhoven, Hansen & Shapiro (2019)
+  pre-event panel event study. `estimator = "OLS"` is the two-way FE
+  event study; `estimator = "FHS"` adds an auxiliary proxy covariate as an
+  endogenous regressor and 2SLS-instruments it with a far policy lead to
+  purge a confound that generates pre-trends. Native reimplementation of
+  the first-difference parameterization; coefficients match
+  `eventstudyr::EventStudy` (OLS and FHS) to machine precision.
 
 ## Long-running workflow
 
