@@ -85,11 +85,12 @@ test_that("matches DIDmultiplegt::did_multiplegt DID_M when available", {
   d$Y <- rnorm(nU)[d$unit] + 0.1 * d$period + 0.8 * d$D + rnorm(nrow(d), 0, 0.4)
   ours <- didgpu_did_static(d, "Y", "unit", "period", "D",
                             bootstrap_reps = 0L, verbose = FALSE)$did
-  ref <- tryCatch({
-    f <- get("did_multiplegt", asNamespace("DIDmultiplegt"))
-    res <- f(d, "Y", "unit", "period", "D")
-    as.numeric(res$effect %||% res$est %||% res[["DID_M"]])
-  }, error = function(e) NA_real_)
-  skip_if(is.na(ref), "did_multiplegt return shape not recognized")
+  # Modern DIDmultiplegt: did_multiplegt(mode = "old", df, Y, G, T, D);
+  # the DID_M point estimate is $effect.
+  ref <- tryCatch(
+    as.numeric(DIDmultiplegt::did_multiplegt(
+      mode = "old", df = d, Y = "Y", G = "unit", T = "period", D = "D")$effect),
+    error = function(e) NA_real_)
+  skip_if(length(ref) != 1L || is.na(ref), "did_multiplegt return shape not recognized")
   expect_equal(ours, ref, tolerance = 1e-6)
 })
