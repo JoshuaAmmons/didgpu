@@ -51,11 +51,14 @@ ifeq ($(HAVE_NVCC),yes)
   # (passed via -Xcompiler).
   #
   # Compute capabilities to target:
-  #   7.5 = Turing (RTX 20xx, T4)
-  #   8.0 = Ampere data center (A100)
-  #   8.6 = Ampere desktop (RTX 30xx)
-  #   8.9 = Ada Lovelace (RTX 4000 Ada, RTX 40xx — this dev box)
-  #   9.0 = Hopper (H100)
+  #   7.5  = Turing (RTX 20xx, T4)
+  #   8.0  = Ampere data center (A100)
+  #   8.6  = Ampere desktop (RTX 30xx)
+  #   8.9  = Ada Lovelace (RTX 4000 Ada, RTX 40xx)
+  #   9.0  = Hopper (H100)
+  #   12.0 = Blackwell (RTX PRO Blackwell, RTX 50xx) — without it sm_120
+  #          parts have no device image and kernels silently no-op. The
+  #          trailing compute_120 PTX target keeps newer archs JIT-able.
   # IMPORTANT: pass -DHAS_CUDA=1 to nvcc as well as to g++. Several .cu
   # files (cuda_fect_fe, cuda_cs_inner, cuda_fect_svd,
   # cuda_testmechs_bootstrap) wrap their entire body in #ifdef HAS_CUDA
@@ -70,7 +73,9 @@ ifeq ($(HAVE_NVCC),yes)
                 -gencode=arch=compute_80,code=sm_80 \
                 -gencode=arch=compute_86,code=sm_86 \
                 -gencode=arch=compute_89,code=sm_89 \
-                -gencode=arch=compute_90,code=sm_90
+                -gencode=arch=compute_90,code=sm_90 \
+                -gencode=arch=compute_120,code=sm_120 \
+                -gencode=arch=compute_120,code=compute_120
 
   %.o: %.cu
 	@echo "  [nvcc] $<"

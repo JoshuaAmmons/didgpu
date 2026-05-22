@@ -1,3 +1,23 @@
+# didgpu 0.1.1
+
+## Bug fixes
+
+- **CUDA: support Blackwell (`sm_120`) GPUs.** The GPU build previously
+  targeted only Turing–Hopper (`sm_75`–`sm_90`) with no PTX fallback, so on
+  Blackwell parts (RTX PRO Blackwell, RTX 50xx) the kernels had no device
+  image and effect estimates silently came back as **all zeros** while the
+  CPU/R backends were correct. Added `compute_120,sm_120` plus a
+  `compute_120` PTX target to both `src/Makevars` and `src/Makevars.win`.
+  GPU effects are again bit-identical to the CPU/R backends on Blackwell
+  (verified on an RTX PRO 5000 Blackwell, CUDA 13.2).
+- **Windows build: ship `src/didgpu_cuda.def`.** The DLL export list was
+  git-ignored (`/src/*.def`), so clean checkouts — and the r-universe /
+  `install_github` source build — could not link `didgpu_cuda.dll`. It is
+  now tracked.
+- **Windows build: locate CUDA runtime DLLs under `bin/x64`.** CUDA 13
+  moved the redistributable DLLs from `bin/` to `bin/x64/`; the bundling
+  step now searches both so `didgpu_cuda.dll` loads at runtime.
+
 # didgpu 0.1.0
 
 First public release. Five estimator families plus a sensitivity layer,
