@@ -23,6 +23,11 @@
 /src/symbols.rds
 /src/*.cmd
 /src/*.def
+# ...except the hand-maintained DLL export list. It is real source, NOT a
+# build artifact, and is REQUIRED for the Windows two-DLL CUDA build — clean
+# checkouts (and the r-universe / install_github source build) cannot link
+# didgpu_cuda.dll without it.
+!/src/didgpu_cuda.def
 
 # R CMD check / build output
 *.Rcheck/
