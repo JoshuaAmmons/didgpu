@@ -1,0 +1,16 @@
+; didgpu_cuda.def — exported C-ABI symbols of didgpu_cuda.dll
+; Regenerated (the original is git-ignored via .gitignore `/src/*.def`).
+; These are the extern "C" entry points defined in src/cuda_*.cu and
+; imported by didgpu.dll across the pure-C ABI boundary.
+EXPORTS
+    didgpu_cuda_saxpy
+    didgpu_cuda_run_one_event_time
+    didgpu_cuda_fect_fe
+    didgpu_cuda_cs_inner_batched
+    didgpu_cuda_cs_inner_or
+    didgpu_cuda_cs_inner_logit
+    didgpu_cuda_fect_svd_truncated
+    didgpu_cuda_fect_svd_softthreshold
+    didgpu_cuda_testmechs_bootstrap
+    didgpu_cuda_cluster_bootstrap
+    didgpu_cuda_multiplier_bootstrap
