@@ -466,7 +466,7 @@
   } else NA_real_
 
   list(att = att,
-       N_inc = as.integer(N_inc),  # weighted switcher mass (Neyman/ATE weight) -- unchanged
+       N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
        N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
        N_sw_w   = N_sw_w,          # weighted   switchers -> Switchers.w col
        N_eff    = N_eff,           # unweighted obs       -> N col
@@ -759,7 +759,7 @@
   } else NA_real_
 
   list(att = att,
-       N_inc = as.integer(N_inc),  # weighted switcher mass (Neyman/ATE weight) -- unchanged
+       N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
        N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
        N_sw_w   = N_sw_w,          # weighted   switchers -> Switchers.w col
        N_eff    = N_eff,           # unweighted obs       -> N col
@@ -790,7 +790,7 @@
     prepped[, still_switcher_pl_XX := NULL]
   }
   out <- numeric(placebo)
-  n_inc <- integer(placebo)
+  n_inc <- numeric(placebo)        # EXACT weighted mass (pooling/ATE); fractional when weighted
   n_eff <- integer(placebo)        # unweighted obs -> N
   n_eff_w  <- numeric(placebo)     # weighted obs -> N.w
   n_sw_unw <- integer(placebo)     # unweighted switchers -> Switchers
@@ -870,7 +870,7 @@
                               same_switchers = FALSE,
                               normalized = FALSE) {
   out <- numeric(effects)
-  n_inc <- integer(effects)
+  n_inc <- numeric(effects)        # EXACT weighted mass (pooling/ATE); fractional when weighted
   n_eff <- integer(effects)        # unweighted obs -> N
   n_eff_w  <- numeric(effects)     # weighted obs -> N.w
   n_sw_unw <- integer(effects)     # unweighted switchers -> Switchers
@@ -978,7 +978,7 @@
                                           normalized = FALSE) {
   out     <- numeric(effects)
   out_raw <- numeric(effects)
-  n_inc   <- integer(effects)
+  n_inc   <- numeric(effects)      # EXACT weighted mass (pooling/ATE); fractional when weighted
   n_eff   <- integer(effects)        # unweighted obs -> N
   n_eff_w  <- numeric(effects)       # weighted obs -> N.w
   n_sw_unw <- integer(effects)       # unweighted switchers -> Switchers
@@ -1059,7 +1059,7 @@
                                   n_sw_w = numeric(0),
                                   delta_D = numeric(0)))
   out     <- numeric(placebo)
-  n_inc   <- integer(placebo)
+  n_inc   <- numeric(placebo)      # EXACT weighted mass (pooling/ATE); fractional when weighted
   n_eff   <- integer(placebo)        # unweighted obs -> N
   n_eff_w  <- numeric(placebo)       # weighted obs -> N.w
   n_sw_unw <- integer(placebo)       # unweighted switchers -> Switchers
@@ -1166,7 +1166,7 @@
                  delta_norm = NA_real_))
   }
   list(att = sum(cum_U) / G,
-       N_inc = as.integer(last_N_inc),
+       N_inc = last_N_inc,                 # EXACT weighted mass (Neyman pooling); never truncate
        N_eff = as.integer(last_N_eff),
        N_eff_w  = last_N_eff_w,
        N_sw_unw = last_N_sw_unw,
@@ -1220,7 +1220,7 @@
                  delta_norm = NA_real_))
   }
   list(att = sum(cum_U) / G,
-       N_inc = as.integer(last_N_inc),
+       N_inc = last_N_inc,                 # EXACT weighted mass (Neyman pooling); never truncate
        N_eff = as.integer(last_N_eff),
        N_eff_w  = last_N_eff_w,
        N_sw_unw = last_N_sw_unw,

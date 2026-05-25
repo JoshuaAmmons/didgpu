@@ -64,6 +64,15 @@ didgpu now tracks the current (fixed) behavior:
   weighted switcher mass that drives the Neyman pooling and ATE weights is
   unchanged; only the reported count columns moved. On unweighted panels all
   four columns coincide as before (bit-identical output).
+- **Weighted estimates: Neyman direction-pooling no longer truncates the
+  switcher mass.** On weighted panels with switchers in *both* directions, the
+  per-direction weighted switcher mass was floored to an integer before being
+  used as the Neyman pooling weight (`w_in = N_in / (N_in + N_out)`) and as the
+  across-horizon ATE weight, biasing the pooled event-study estimates by
+  ~1e-3. The exact (unfloored) mass is now used throughout the estimate path,
+  matching `did_multiplegt_dyn`. Single-direction (`switchers = "in"/"out"`)
+  and unweighted panels were never affected (the weight is 0/1 or the mass is
+  already integer). Found by randomized weighted×flag differential testing.
 
 # didgpu 0.1.0
 
