@@ -50,10 +50,10 @@ utils::globalVariables(c(
   "trends_np_XX",
   # per-event-time / per-placebo scratch columns built inside the core
   "diff_y_k_XX", "dist_k_XX", "never_change_k_XX",
-  "N_t_control", "N_t_switch", "ratio_XX", "kernel_XX", "contrib_XX",
+  "N_t_control", "N_t_switch", "ratio_XX", "kernel_XX", "contrib_mask_XX",
   "diff_y_pl_k_XX", "dist_k_pl_XX", "never_change_k_pl_XX",
   "N_t_control_pl", "N_t_switch_pl", "ratio_pl_XX", "kernel_pl_XX",
-  "contrib_pl_XX",
+  "contrib_pl_mask_XX",
   # normalized = TRUE scratch (cumulative treatment-change magnitude)
   "sum_temp_XX", "sum_treat_until_XX", "delta_cum_XX",
   "sum_temp_pl_XX", "sum_treat_until_pl_XX", "delta_cum_pl_XX",

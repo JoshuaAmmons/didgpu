@@ -102,33 +102,47 @@
   effect_names <- if (n_e > 0L) paste0("Effect_", seq_len(n_e)) else character(0)
   placebo_names <- if (n_p > 0L) paste0("Placebo_", seq_len(n_p)) else character(0)
 
-  # Switcher counts come from cell b=0 (the point estimate). With our
-  # binary, no-weights backend N_gt is always 0/1 so the weighted and
-  # unweighted counts are identical, hence the four count columns hold
-  # the same value. If/when weights are added these will diverge.
-  n_switchers_e <- cells[["0"]]$n_inc_effects %||% rep(NA_integer_, n_e)
-  n_switchers_p <- cells[["0"]]$n_inc_placebos %||% rep(NA_integer_, n_p)
-  n_eff_e <- cells[["0"]]$n_eff_effects %||% rep(NA_integer_, n_e)
-  n_eff_p <- cells[["0"]]$n_eff_placebos %||% rep(NA_integer_, n_p)
+  # Count columns come from cell b=0 (the point estimate). The reference
+  # reports FOUR distinct count columns:
+  #   N           = unweighted contributing observations
+  #   Switchers   = unweighted switcher cells
+  #   N.w         = weighted   contributing observations (sum of weights)
+  #   Switchers.w = weighted   switcher cells (sum of switcher weights)
+  # The r/reference backends populate dedicated fields for each; older
+  # backends (cpu/cuda/fect_*) only run on UNWEIGHTED panels where N_gt is
+  # 0/1, so the weighted and unweighted columns coincide -- we fall back to
+  # the unweighted field (and to n_inc for the switcher count, which equals
+  # the unweighted switcher count there). This keeps unweighted output
+  # bit-identical to the pre-weight-fix behavior.
+  c0 <- cells[["0"]]
+  n_eff_e    <- c0$n_eff_effects %||% rep(NA_integer_, n_e)              # N
+  n_eff_p    <- c0$n_eff_placebos %||% rep(NA_integer_, n_p)
+  n_sw_unw_e <- c0$n_sw_unw_effects %||% c0$n_inc_effects %||% rep(NA_integer_, n_e)   # Switchers
+  n_sw_unw_p <- c0$n_sw_unw_placebos %||% c0$n_inc_placebos %||% rep(NA_integer_, n_p)
+  n_eff_w_e  <- c0$n_eff_w_effects %||% n_eff_e                          # N.w
+  n_eff_w_p  <- c0$n_eff_w_placebos %||% n_eff_p
+  n_sw_w_e   <- c0$n_sw_w_effects %||% n_sw_unw_e                        # Switchers.w
+  n_sw_w_p   <- c0$n_sw_w_placebos %||% n_sw_unw_p
 
   # Effects matrix, shape (n_e x 8) matching DIDmultiplegtDYN.
   Effects <- cbind(
     Estimate = e0, SE = e_se, LB.CI = e_ci_lo, UB.CI = e_ci_hi,
-    N = n_eff_e, Switchers = n_switchers_e,
-    N.w = n_eff_e, Switchers.w = n_switchers_e
+    N = n_eff_e, Switchers = n_sw_unw_e,
+    N.w = n_eff_w_e, Switchers.w = n_sw_w_e
   )
   rownames(Effects) <- effect_names
 
   Placebos <- cbind(
     Estimate = p0, SE = p_se, LB.CI = p_ci_lo, UB.CI = p_ci_hi,
-    N = n_eff_p, Switchers = n_switchers_p,
-    N.w = n_eff_p, Switchers.w = n_switchers_p
+    N = n_eff_p, Switchers = n_sw_unw_p,
+    N.w = n_eff_w_p, Switchers.w = n_sw_w_p
   )
   if (n_p > 0L) rownames(Placebos) <- placebo_names
 
-  ate_n <- if (length(n_switchers_e) > 0L) sum(n_switchers_e, na.rm = TRUE) else NA_integer_
+  ate_n   <- if (length(n_sw_unw_e) > 0L) sum(n_sw_unw_e, na.rm = TRUE) else NA_integer_
+  ate_n_w <- if (length(n_sw_w_e)   > 0L) sum(n_sw_w_e,   na.rm = TRUE) else NA_integer_
   ATE <- matrix(c(ate0, ate_se, ate_ci_lo, ate_ci_hi,
-                  NA_integer_, ate_n, NA_integer_, ate_n),
+                  NA_integer_, ate_n, NA_integer_, ate_n_w),
                 nrow = 1L,
                 dimnames = list("ATE",
                                 c("Estimate", "SE", "LB.CI", "UB.CI",

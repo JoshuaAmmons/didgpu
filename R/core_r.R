@@ -274,7 +274,7 @@
   stopifnot(k >= 1L)
   # We operate directly on `d_in` (data.table by reference). Per-call
   # scratch columns (diff_y_k_XX, dist_k_XX, never_change_k_XX,
-  # N_t_control, N_t_switch, ratio_XX, kernel_XX, contrib_XX) are
+  # N_t_control, N_t_switch, ratio_XX, kernel_XX, contrib_mask_XX) are
   # overwritten on every call with the SAME column names, so successive
   # calls (different k or direction) don't see each other's residue.
   # Copying defensively was costing ~12% of total time at scale.
@@ -373,11 +373,20 @@
     by = cohort_cols]
 
   # Total incidence: total switcher contribution across all valid times.
+  # NB: N_inc stays the WEIGHTED switcher mass and continues to drive the
+  # Neyman direction-pooling and ATE weights (estimate path -- do not change).
   N_inc <- sum(d$N_gt_XX * d$dist_k_XX, na.rm = TRUE)
+  # Output-only reported switcher counts (separate from the estimate). The
+  # reference reports an unweighted Switchers column AND a weighted
+  # Switchers.w column; with no weights N_gt is 0/1 so they coincide.
+  N_sw_unw <- sum(d$dist_k_XX, na.rm = TRUE)              # -> Switchers
+  N_sw_w   <- sum(d$N_gt_XX * d$dist_k_XX, na.rm = TRUE)  # -> Switchers.w
 
   if (N_inc == 0) {
     # No switchers reach event-time k; ATT is undefined.
-    return(list(att = NA_real_, N_inc = 0L, U_g = numeric(G)))
+    return(list(att = NA_real_, N_inc = 0L,
+                N_sw_unw = 0L, N_sw_w = 0, N_eff = 0L, N_eff_w = 0,
+                U_g = numeric(G)))
   }
 
   # The U-statistic kernel. From section 3 of reference_internals.md:
@@ -412,15 +421,17 @@
   # cohort that has at least one switcher at this time and within the
   # post-window). For binary panels with no weights, N_gt is always
   # 0 or 1.
-  d[, contrib_XX := as.integer(
-        as.integer(time_XX >= (k + 1L) & time_XX <= T_g_XX) *
-        N_gt_XX *
-        ((dist_k_XX == 1L) |
-         (never_change_k_XX == 1L &
-          !is.na(N_t_switch) & N_t_switch > 0))
-      )]
-  d[is.na(contrib_XX), contrib_XX := 0L]
-  N_eff <- sum(d$contrib_XX, na.rm = TRUE)
+  # Contribution mask: switcher cell OR active control cell, within the
+  # post-window. Kept as a 0/1 mask so we can report BOTH the unweighted
+  # count and the weighted sum without per-cell rounding (the old code did
+  # sum(as.integer(N_gt * mask)), which floored each cell's weight before
+  # summing -> undercounted N.w on weighted panels).
+  d[, contrib_mask_XX := as.integer(time_XX >= (k + 1L) & time_XX <= T_g_XX) *
+        as.integer((dist_k_XX == 1L) |
+         (never_change_k_XX == 1L & !is.na(N_t_switch) & N_t_switch > 0))]
+  d[is.na(contrib_mask_XX), contrib_mask_XX := 0L]
+  N_eff   <- sum(d$contrib_mask_XX, na.rm = TRUE)              # -> N (unweighted obs)
+  N_eff_w <- sum(d$N_gt_XX * d$contrib_mask_XX, na.rm = TRUE)  # -> N.w (weighted obs)
 
   # delta_norm: average cumulative treatment-change magnitude for switchers
   # at event-time k in this direction. Reference: did_multiplegt_dyn_core.R
@@ -455,8 +466,11 @@
   } else NA_real_
 
   list(att = att,
-       N_inc = as.integer(N_inc),
-       N_eff = as.integer(N_eff),
+       N_inc = as.integer(N_inc),  # weighted switcher mass (Neyman/ATE weight) -- unchanged
+       N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
+       N_sw_w   = N_sw_w,          # weighted   switchers -> Switchers.w col
+       N_eff    = N_eff,           # unweighted obs       -> N col
+       N_eff_w  = N_eff_w,         # weighted   obs       -> N.w col
        U_g = U_g$U_g,
        delta_norm = delta_norm)
 }
@@ -691,8 +705,13 @@
     by = cohort_cols]
 
   N_inc <- sum(d$N_gt_XX * d$dist_k_pl_XX, na.rm = TRUE)
+  # Output-only reported switcher counts (see .core_one_event_time).
+  N_sw_unw <- sum(d$dist_k_pl_XX, na.rm = TRUE)              # -> Switchers
+  N_sw_w   <- sum(d$N_gt_XX * d$dist_k_pl_XX, na.rm = TRUE)  # -> Switchers.w
   if (N_inc == 0) {
-    return(list(att = NA_real_, N_inc = 0L, U_g = numeric(G)))
+    return(list(att = NA_real_, N_inc = 0L,
+                N_sw_unw = 0L, N_sw_w = 0, N_eff = 0L, N_eff_w = 0,
+                U_g = numeric(G)))
   }
 
   d[, ratio_pl_XX := ifelse(N_t_control_pl > 0,
@@ -707,15 +726,14 @@
   U_g <- d[, list(U_g = sum(kernel_pl_XX)), by = group_XX]
   att <- sum(U_g$U_g) / G
 
-  d[, contrib_pl_XX := as.integer(
-        as.integer(time_XX >= (k + 1L) & time_XX <= T_g_XX) *
-        N_gt_XX *
-        ((dist_k_pl_XX == 1L) |
-         (never_change_k_pl_XX == 1L &
-          !is.na(N_t_switch_pl) & N_t_switch_pl > 0))
-      )]
-  d[is.na(contrib_pl_XX), contrib_pl_XX := 0L]
-  N_eff <- sum(d$contrib_pl_XX, na.rm = TRUE)
+  # Contribution mask (0/1) -> report unweighted count and weighted sum
+  # without per-cell rounding (see .core_one_event_time).
+  d[, contrib_pl_mask_XX := as.integer(time_XX >= (k + 1L) & time_XX <= T_g_XX) *
+        as.integer((dist_k_pl_XX == 1L) |
+         (never_change_k_pl_XX == 1L & !is.na(N_t_switch_pl) & N_t_switch_pl > 0))]
+  d[is.na(contrib_pl_mask_XX), contrib_pl_mask_XX := 0L]
+  N_eff   <- sum(d$contrib_pl_mask_XX, na.rm = TRUE)              # -> N (unweighted obs)
+  N_eff_w <- sum(d$N_gt_XX * d$contrib_pl_mask_XX, na.rm = TRUE)  # -> N.w (weighted obs)
 
   # delta_norm for placebos. Same formula as effects (reference: did_multiplegt_dyn_core.R
   # lines 1234-1260; main.R:1238-1242 does the corresponding division).
@@ -741,8 +759,11 @@
   } else NA_real_
 
   list(att = att,
-       N_inc = as.integer(N_inc),
-       N_eff = as.integer(N_eff),
+       N_inc = as.integer(N_inc),  # weighted switcher mass (Neyman/ATE weight) -- unchanged
+       N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
+       N_sw_w   = N_sw_w,          # weighted   switchers -> Switchers.w col
+       N_eff    = N_eff,           # unweighted obs       -> N col
+       N_eff_w  = N_eff_w,         # weighted   obs       -> N.w col
        U_g = U_g$U_g,
        delta_norm = delta_norm)
 }
@@ -757,6 +778,8 @@
                                same_switchers_pl = FALSE) {
   if (placebo == 0L) return(list(placebos = numeric(0), n_inc = integer(0),
                                   n_eff = integer(0),
+                                  n_eff_w = numeric(0), n_sw_unw = integer(0),
+                                  n_sw_w = numeric(0),
                                   delta_D = numeric(0)))
   # same_switchers_pl: only switchers who have valid pre-period diff_y at
   # every placebo horizon q in 1..placebo contribute. Reference:
@@ -768,7 +791,10 @@
   }
   out <- numeric(placebo)
   n_inc <- integer(placebo)
-  n_eff <- integer(placebo)
+  n_eff <- integer(placebo)        # unweighted obs -> N
+  n_eff_w  <- numeric(placebo)     # weighted obs -> N.w
+  n_sw_unw <- integer(placebo)     # unweighted switchers -> Switchers
+  n_sw_w   <- numeric(placebo)     # weighted switchers -> Switchers.w
   delta_D <- numeric(placebo)
   both_dirs <- (switchers == "")
   for (k in seq_len(placebo)) {
@@ -782,6 +808,9 @@
       out[k]   <- NA_real_
       n_inc[k] <- 0L
       n_eff[k] <- 0L
+      n_eff_w[k]  <- 0
+      n_sw_unw[k] <- 0L
+      n_sw_w[k]   <- 0
       delta_D[k] <- NA_real_
       next
     }
@@ -799,7 +828,12 @@
     # the reference across in>out, out>in, and switchers="out" panels. (max
     # overcounts when out>in; sum double-counts shared controls; falling back
     # to the out count for switchers="out" was also wrong -> N=0 there.)
-    n_eff[k] <- res_in$N_eff %||% 0L
+    # Switchers / Switchers.w sum BOTH directions (the reference's Switchers
+    # column counts switchers regardless of direction).
+    n_eff[k]    <- res_in$N_eff   %||% 0L
+    n_eff_w[k]  <- res_in$N_eff_w %||% 0
+    n_sw_unw[k] <- (res_in$N_sw_unw %||% 0L) + (res_out$N_sw_unw %||% 0L)
+    n_sw_w[k]   <- (res_in$N_sw_w   %||% 0)  + (res_out$N_sw_w   %||% 0)
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
@@ -814,7 +848,9 @@
       }
     }
   }
-  list(placebos = out, n_inc = n_inc, n_eff = n_eff, delta_D = delta_D)
+  list(placebos = out, n_inc = n_inc, n_eff = n_eff,
+       n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
+       delta_D = delta_D)
 }
 
 
@@ -835,7 +871,10 @@
                               normalized = FALSE) {
   out <- numeric(effects)
   n_inc <- integer(effects)
-  n_eff <- integer(effects)
+  n_eff <- integer(effects)        # unweighted obs -> N
+  n_eff_w  <- numeric(effects)     # weighted obs -> N.w
+  n_sw_unw <- integer(effects)     # unweighted switchers -> Switchers
+  n_sw_w   <- numeric(effects)     # weighted switchers -> Switchers.w
   delta_D <- numeric(effects)
   # same_switchers gates dist on a per-group "still_switcher" indicator
   # that requires the switcher to qualify at EVERY event-time q in
@@ -871,6 +910,9 @@
       out_raw[k]  <- NA_real_
       n_inc[k]    <- 0L
       n_eff[k]    <- 0L
+      n_eff_w[k]  <- 0
+      n_sw_unw[k] <- 0L
+      n_sw_w[k]   <- 0
       delta_D[k]  <- NA_real_
       next
     }
@@ -880,7 +922,11 @@
     out[k]      <- w_in * att_in + (1 - w_in) * att_out_pool
     out_raw[k]  <- out[k]
     n_inc[k]    <- n_in + n_out
-    n_eff[k]    <- (res_in$N_eff %||% 0L) + (res_out$N_eff %||% 0L)
+    # Reported counts: Effects sum BOTH directions for all 4 columns.
+    n_eff[k]    <- (res_in$N_eff    %||% 0L) + (res_out$N_eff    %||% 0L)
+    n_eff_w[k]  <- (res_in$N_eff_w  %||% 0)  + (res_out$N_eff_w  %||% 0)
+    n_sw_unw[k] <- (res_in$N_sw_unw %||% 0L) + (res_out$N_sw_unw %||% 0L)
+    n_sw_w[k]   <- (res_in$N_sw_w   %||% 0)  + (res_out$N_sw_w   %||% 0)
     # Pool delta_norm across directions using the same Neyman weights, then
     # divide DID_k by it (reference: did_multiplegt_main.R:1086-1090 +
     # 1124-1126). Per-direction delta_norm is already a positive magnitude
@@ -904,7 +950,9 @@
     }
   }
   list(effects = out, effects_raw = out_raw,
-       n_inc = n_inc, n_eff = n_eff, delta_D = delta_D)
+       n_inc = n_inc, n_eff = n_eff,
+       n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
+       delta_D = delta_D)
 }
 
 
@@ -931,7 +979,10 @@
   out     <- numeric(effects)
   out_raw <- numeric(effects)
   n_inc   <- integer(effects)
-  n_eff   <- integer(effects)
+  n_eff   <- integer(effects)        # unweighted obs -> N
+  n_eff_w  <- numeric(effects)       # weighted obs -> N.w
+  n_sw_unw <- integer(effects)       # unweighted switchers -> Switchers
+  n_sw_w   <- numeric(effects)       # weighted switchers -> Switchers.w
   delta_D <- numeric(effects)
   G <- length(unique(prepped$group_XX))
 
@@ -954,6 +1005,7 @@
     if (n_in + n_out == 0L) {
       out[k] <- NA_real_; out_raw[k] <- NA_real_
       n_inc[k] <- 0L; n_eff[k] <- 0L
+      n_eff_w[k] <- 0; n_sw_unw[k] <- 0L; n_sw_w[k] <- 0
       delta_D[k] <- NA_real_
       next
     }
@@ -963,7 +1015,11 @@
     out[k]      <- w_in * att_in + (1 - w_in) * att_out_pool
     out_raw[k]  <- out[k]
     n_inc[k]    <- n_in + n_out
-    n_eff[k]    <- (res_in$N_eff %||% 0L) + (res_out$N_eff %||% 0L)
+    # Reported counts: Effects sum BOTH directions for all 4 columns.
+    n_eff[k]    <- (res_in$N_eff    %||% 0L) + (res_out$N_eff    %||% 0L)
+    n_eff_w[k]  <- (res_in$N_eff_w  %||% 0)  + (res_out$N_eff_w  %||% 0)
+    n_sw_unw[k] <- (res_in$N_sw_unw %||% 0L) + (res_out$N_sw_unw %||% 0L)
+    n_sw_w[k]   <- (res_in$N_sw_w   %||% 0)  + (res_out$N_sw_w   %||% 0)
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
@@ -979,7 +1035,9 @@
     }
   }
   list(effects = out, effects_raw = out_raw,
-       n_inc = n_inc, n_eff = n_eff, delta_D = delta_D)
+       n_inc = n_inc, n_eff = n_eff,
+       n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
+       delta_D = delta_D)
 }
 
 
@@ -997,10 +1055,15 @@
                                            normalized = FALSE) {
   if (placebo == 0L) return(list(placebos = numeric(0), n_inc = integer(0),
                                   n_eff = integer(0),
+                                  n_eff_w = numeric(0), n_sw_unw = integer(0),
+                                  n_sw_w = numeric(0),
                                   delta_D = numeric(0)))
   out     <- numeric(placebo)
   n_inc   <- integer(placebo)
-  n_eff   <- integer(placebo)
+  n_eff   <- integer(placebo)        # unweighted obs -> N
+  n_eff_w  <- numeric(placebo)       # weighted obs -> N.w
+  n_sw_unw <- integer(placebo)       # unweighted switchers -> Switchers
+  n_sw_w   <- numeric(placebo)       # weighted switchers -> Switchers.w
   delta_D <- numeric(placebo)
   G <- length(unique(prepped$group_XX))
 
@@ -1020,6 +1083,7 @@
     n_out <- res_out$N_inc
     if (n_in + n_out == 0L) {
       out[k] <- NA_real_; n_inc[k] <- 0L; n_eff[k] <- 0L
+      n_eff_w[k] <- 0; n_sw_unw[k] <- 0L; n_sw_w[k] <- 0
       delta_D[k] <- NA_real_
       next
     }
@@ -1036,7 +1100,12 @@
     # the reference across in>out, out>in, and switchers="out" panels. (max
     # overcounts when out>in; sum double-counts shared controls; falling back
     # to the out count for switchers="out" was also wrong -> N=0 there.)
-    n_eff[k] <- res_in$N_eff %||% 0L
+    # Switchers / Switchers.w sum BOTH directions (the reference's Switchers
+    # column counts switchers regardless of direction).
+    n_eff[k]    <- res_in$N_eff   %||% 0L
+    n_eff_w[k]  <- res_in$N_eff_w %||% 0
+    n_sw_unw[k] <- (res_in$N_sw_unw %||% 0L) + (res_out$N_sw_unw %||% 0L)
+    n_sw_w[k]   <- (res_in$N_sw_w   %||% 0)  + (res_out$N_sw_w   %||% 0)
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
@@ -1051,7 +1120,9 @@
       }
     }
   }
-  list(placebos = out, n_inc = n_inc, n_eff = n_eff, delta_D = delta_D)
+  list(placebos = out, n_inc = n_inc, n_eff = n_eff,
+       n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
+       delta_D = delta_D)
 }
 
 
@@ -1067,6 +1138,9 @@
   any_valid <- FALSE
   last_N_inc <- 0L
   last_N_eff <- 0L
+  last_N_eff_w  <- 0
+  last_N_sw_unw <- 0L
+  last_N_sw_w   <- 0
   last_delta_norm <- NA_real_
   for (j in seq_len(k_max)) {
     r <- .core_one_placebo(prepped, k = j, direction = direction,
@@ -1080,16 +1154,23 @@
     if (j == k_max) {
       last_N_inc <- r$N_inc %||% 0L
       last_N_eff <- r$N_eff %||% 0L
+      last_N_eff_w  <- r$N_eff_w  %||% 0
+      last_N_sw_unw <- r$N_sw_unw %||% 0L
+      last_N_sw_w   <- r$N_sw_w   %||% 0
       if (isTRUE(normalized)) last_delta_norm <- r$delta_norm
     }
   }
   if (!any_valid) {
     return(list(att = NA_real_, N_inc = 0L, N_eff = 0L,
+                 N_eff_w = 0, N_sw_unw = 0L, N_sw_w = 0,
                  delta_norm = NA_real_))
   }
   list(att = sum(cum_U) / G,
        N_inc = as.integer(last_N_inc),
        N_eff = as.integer(last_N_eff),
+       N_eff_w  = last_N_eff_w,
+       N_sw_unw = last_N_sw_unw,
+       N_sw_w   = last_N_sw_w,
        delta_norm = last_delta_norm)
 }
 
@@ -1111,6 +1192,9 @@
   # uses delta_norm_i_XX = delta_norm at j=i, not the sum across j).
   last_N_inc <- 0L
   last_N_eff <- 0L
+  last_N_eff_w  <- 0
+  last_N_sw_unw <- 0L
+  last_N_sw_w   <- 0
   last_delta_norm <- NA_real_
   for (j in seq_len(k_max)) {
     r <- .core_one_event_time(prepped, k = j, direction = direction,
@@ -1124,16 +1208,23 @@
     if (j == k_max) {
       last_N_inc <- r$N_inc %||% 0L
       last_N_eff <- r$N_eff %||% 0L
+      last_N_eff_w  <- r$N_eff_w  %||% 0
+      last_N_sw_unw <- r$N_sw_unw %||% 0L
+      last_N_sw_w   <- r$N_sw_w   %||% 0
       if (isTRUE(normalized)) last_delta_norm <- r$delta_norm
     }
   }
   if (!any_valid) {
     return(list(att = NA_real_, N_inc = 0L, N_eff = 0L,
+                 N_eff_w = 0, N_sw_unw = 0L, N_sw_w = 0,
                  delta_norm = NA_real_))
   }
   list(att = sum(cum_U) / G,
        N_inc = as.integer(last_N_inc),
        N_eff = as.integer(last_N_eff),
+       N_eff_w  = last_N_eff_w,
+       N_sw_unw = last_N_sw_unw,
+       N_sw_w   = last_N_sw_w,
        delta_norm = last_delta_norm)
 }
 
@@ -1297,6 +1388,17 @@
       n_inc_placebos = cp$n_inc,
       n_eff_effects  = ce$n_eff,
       n_eff_placebos = cp$n_eff,
+      # Weighted/unweighted reported-count breakdown (4 output columns):
+      #   n_eff_*  -> N        (unweighted obs)
+      #   n_eff_w_*  -> N.w    (weighted obs)
+      #   n_sw_unw_* -> Switchers      (unweighted switchers)
+      #   n_sw_w_*   -> Switchers.w    (weighted switchers)
+      n_eff_w_effects  = ce$n_eff_w,
+      n_eff_w_placebos = cp$n_eff_w,
+      n_sw_unw_effects  = ce$n_sw_unw,
+      n_sw_unw_placebos = cp$n_sw_unw,
+      n_sw_w_effects  = ce$n_sw_w,
+      n_sw_w_placebos = cp$n_sw_w,
       predict_het    = het_block,
       iter_seed      = as.integer(iter_seed),
       wall_seconds   = wall,

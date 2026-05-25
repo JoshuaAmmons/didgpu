@@ -164,15 +164,27 @@ didgpu_backend_info <- function() {
       as.numeric(res$results$Placebos[, 1])
     } else numeric(0)
 
-    # Sample sizes from reference's results matrix (cols 5..8).
-    n_eff_effects  <- if (ncol(res$results$Effects)  >= 5L)
-                       as.integer(res$results$Effects[,  5]) else rep(NA_integer_, length(effects))
-    n_inc_effects  <- if (ncol(res$results$Effects)  >= 6L)
-                       as.integer(res$results$Effects[,  6]) else rep(NA_integer_, length(effects))
-    n_eff_placebos <- if (length(placebos) > 0L && ncol(res$results$Placebos) >= 5L)
-                       as.integer(res$results$Placebos[, 5]) else rep(NA_integer_, length(placebos))
-    n_inc_placebos <- if (length(placebos) > 0L && ncol(res$results$Placebos) >= 6L)
-                       as.integer(res$results$Placebos[, 6]) else rep(NA_integer_, length(placebos))
+    # Sample sizes from reference's results matrix. The reference reports
+    # FOUR count columns: 5 = N (unweighted obs), 6 = Switchers (unweighted
+    # switchers), 7 = N.w (weighted obs), 8 = Switchers.w (weighted
+    # switchers). Forward all four so weighted reference runs stay faithful;
+    # on unweighted panels cols 7/8 coincide with 5/6.
+    col_or_na <- function(m, j, n) {
+      if (!is.null(m) && ncol(m) >= j) as.numeric(m[, j]) else rep(NA_real_, n)
+    }
+    n_eff_effects     <- col_or_na(res$results$Effects, 5L, length(effects))
+    n_sw_unw_effects  <- col_or_na(res$results$Effects, 6L, length(effects))
+    n_eff_w_effects   <- col_or_na(res$results$Effects, 7L, length(effects))
+    n_sw_w_effects    <- col_or_na(res$results$Effects, 8L, length(effects))
+    # n_inc_effects keeps the reference's Switchers column (col 6) -- it is
+    # only used downstream for ATE weighting / fallback, not the estimate.
+    n_inc_effects  <- n_sw_unw_effects
+    pl_mat <- if (length(placebos) > 0L) res$results$Placebos else NULL
+    n_eff_placebos    <- col_or_na(pl_mat, 5L, length(placebos))
+    n_sw_unw_placebos <- col_or_na(pl_mat, 6L, length(placebos))
+    n_eff_w_placebos  <- col_or_na(pl_mat, 7L, length(placebos))
+    n_sw_w_placebos   <- col_or_na(pl_mat, 8L, length(placebos))
+    n_inc_placebos <- n_sw_unw_placebos
 
     list(
       effects        = effects,
@@ -184,6 +196,12 @@ didgpu_backend_info <- function() {
       n_inc_placebos = n_inc_placebos,
       n_eff_effects  = n_eff_effects,
       n_eff_placebos = n_eff_placebos,
+      n_eff_w_effects   = n_eff_w_effects,
+      n_eff_w_placebos  = n_eff_w_placebos,
+      n_sw_unw_effects  = n_sw_unw_effects,
+      n_sw_unw_placebos = n_sw_unw_placebos,
+      n_sw_w_effects    = n_sw_w_effects,
+      n_sw_w_placebos   = n_sw_w_placebos,
       iter_seed      = as.integer(iter_seed),
       wall_seconds   = wall,
       backend        = "reference"

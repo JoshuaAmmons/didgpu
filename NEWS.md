@@ -52,6 +52,18 @@ didgpu now tracks the current (fixed) behavior:
   "length of 'dimnames' [1] not equal to array extent" (an unguarded
   row-name build on a 0-row table). It now returns an empty, no-estimable-
   effects result cleanly.
+- **Weighted `N` / `Switchers` columns now separate unweighted counts from
+  weighted sums.** On weighted panels (`weight =`) the four reported count
+  columns were all populated from the same (weighted, truncated) switcher
+  mass, so `N` / `Switchers` reported weighted sums instead of observation
+  counts, and `N.w` lost the fractional weight (each cell's weight was
+  floored before summing). The estimator now reports `N` and `Switchers` as
+  the true unweighted observation / switcher counts and `N.w` /
+  `Switchers.w` as the (unfloored) weighted sums, matching
+  `did_multiplegt_dyn` exactly. Point estimates were never affected — the
+  weighted switcher mass that drives the Neyman pooling and ATE weights is
+  unchanged; only the reported count columns moved. On unweighted panels all
+  four columns coincide as before (bit-identical output).
 
 # didgpu 0.1.0
 
