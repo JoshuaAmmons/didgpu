@@ -793,12 +793,13 @@
     n_inc[k] <- n_in + n_out
     # Reported placebo N: DIDmultiplegtDYN 2.3.x combines the two directions
     # with coalesce(count_plus=in, count_minus=out) per row, which at the
-    # aggregate equals the IN-direction count whenever the in-comparison ran.
-    # Verified vs the reference across both in>out AND out>in panels. (max is
-    # wrong: it overcounts when out>in; sum double-counts shared controls.)
-    # Fall back to the out direction only when there is no in-comparison
-    # (switchers == "out").
-    n_eff[k] <- if (switchers != "out") (res_in$N_eff %||% 0L) else (res_out$N_eff %||% 0L)
+    # aggregate equals the IN-direction count -- ALWAYS, including switchers=
+    # "out" (where the in count is 0, so the reference reports placebo N = 0
+    # while the Switchers column still counts the out switchers). Verified vs
+    # the reference across in>out, out>in, and switchers="out" panels. (max
+    # overcounts when out>in; sum double-counts shared controls; falling back
+    # to the out count for switchers="out" was also wrong -> N=0 there.)
+    n_eff[k] <- res_in$N_eff %||% 0L
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
@@ -1029,12 +1030,13 @@
     n_inc[k] <- n_in + n_out
     # Reported placebo N: DIDmultiplegtDYN 2.3.x combines the two directions
     # with coalesce(count_plus=in, count_minus=out) per row, which at the
-    # aggregate equals the IN-direction count whenever the in-comparison ran.
-    # Verified vs the reference across both in>out AND out>in panels. (max is
-    # wrong: it overcounts when out>in; sum double-counts shared controls.)
-    # Fall back to the out direction only when there is no in-comparison
-    # (switchers == "out").
-    n_eff[k] <- if (switchers != "out") (res_in$N_eff %||% 0L) else (res_out$N_eff %||% 0L)
+    # aggregate equals the IN-direction count -- ALWAYS, including switchers=
+    # "out" (where the in count is 0, so the reference reports placebo N = 0
+    # while the Switchers column still counts the out switchers). Verified vs
+    # the reference across in>out, out>in, and switchers="out" panels. (max
+    # overcounts when out>in; sum double-counts shared controls; falling back
+    # to the out count for switchers="out" was also wrong -> N=0 there.)
+    n_eff[k] <- res_in$N_eff %||% 0L
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
