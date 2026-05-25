@@ -28,6 +28,7 @@ Imports:
     jsonlite,
     MASS,
     Rcpp,
+    sandwich,
     stats,
     utils,
     tools

@@ -5,9 +5,17 @@
 #   prod_het_i = S_g_het * (Y_{F_g + i - 1} - Y_{F_g - 1})
 #                ~ covariate(s) + interaction(F_g, d_sq, S_g [, trends_nonparam])
 #
-# weighted by the user's weight column, with HC1 (heteroskedasticity-
-# robust) standard errors on the covariate coefficients and a joint
-# F-test across all covariates.
+# weighted by the user's weight column, with HC2 (heteroskedasticity-
+# robust, leverage-adjusted) standard errors on the covariate coefficients
+# and a joint F-test across all covariates.
+#
+# NOTE on the SE estimator: DIDmultiplegtDYN <= the version didgpu was
+# originally validated against used an HC1 (n/(n-k)) correction here. From
+# v2.3.1 the reference fixed predict_het to use HC2 (sandwich's
+# vcovHC(type = "HC2"), i.e. e_i^2 / (1 - h_ii)); see its commit
+# "Fixed ... predict_het: ... explicit CI formulas + fixed bug ...". We
+# match the FIXED behavior and call sandwich directly so the SE/t/CI/pF
+# columns agree bit-for-bit with did_multiplegt_dyn(predict_het = ...).
 #
 # One row in the returned data frame per (event-time x covariate).
 # Reference: did_multiplegt_main.R:1641-1745.
@@ -170,9 +178,9 @@
       next
     }
 
-    # HC1 robust covariance: V = (n / (n - k)) * (X'X)^-1 * sum(e_i^2 * X_i X_i') * (X'X)^-1
-    # for weighted regression we use the weighted X and residuals.
-    bread <- .hc1_vcov(fit)
+    # HC2 robust covariance (matches DIDmultiplegtDYN 2.3.x default:
+    # sandwich::vcovHC(model, type = "HC2")). Cascades into SE/t/LB/UB/pF.
+    bread <- .hc2_vcov(fit)
     coefs <- stats::coef(fit)
     # Identify rows in beta corresponding to het_vars.
     var_pos <- match(het_vars, names(coefs))
@@ -244,45 +252,50 @@
 }
 
 
-# HC1 robust variance for a weighted lm fit.
-# Reference formula: V = (n / (n - k)) * (X'WX)^-1 * X' diag(w^2 e^2) X * (X'WX)^-1
-# This matches sandwich::vcovHC(., type = "HC1") for weighted lm.
-#'
-#' Extracts X, residuals, and weights FROM THE FITTED MODEL so they all
-#' have the same length (post-NA-omission). Drops X columns whose
-#' coefficient is NA (collinear / dropped by lm).
+# HC2 robust variance for a (possibly weighted) lm fit.
+#
+# Matches DIDmultiplegtDYN 2.3.x, which computes the predict_het SEs with
+# `sandwich::vcovHC(model, type = "HC2")`. We call the SAME function so the
+# result agrees bit-for-bit, rather than re-deriving the leverage-adjusted
+# meat by hand (HC2's e_i^2 / (1 - h_ii) is fiddly for the weighted case).
+#
+# lm aliases collinear cohort-interaction columns (their coef is NA), and
+# sandwich needs a full-rank model. Since the fitted values / residuals /
+# column space are unchanged by reparametrisation, we refit on the
+# non-aliased basis (any basis of the same column space gives identical
+# HC2 SEs for the covariates of interest), call vcovHC there, then expand
+# back to the original coefficient layout with NA for the dropped columns.
 #'
 #' @keywords internal
 #' @noRd
-.hc1_vcov <- function(fit) {
-  X <- stats::model.matrix(fit)
-  # Drop columns lm dropped via aliasing (their coef is NA).
+.hc2_vcov <- function(fit) {
   coef_full <- stats::coef(fit)
   alive <- !is.na(coef_full)
-  X <- X[, alive, drop = FALSE]
-  n <- nrow(X); k <- ncol(X)
-  resid <- stats::residuals(fit)
-  w <- stats::weights(fit)
-  if (is.null(w)) w <- rep(1, n)
-  if (length(w) != n) {
-    # Defensive — shouldn't happen because residuals() and weights()
-    # both come from the same fitted object.
-    stop(".hc1_vcov: weights length (", length(w),
-         ") != model.matrix rows (", n, ")")
-  }
-  # Weighted X'X inverse (the "bread"). With lm weights, this is solve(X' W X).
-  XtWX <- crossprod(X, w * X)
-  XtWX_inv <- tryCatch(solve(XtWX),
-                        error = function(e) MASS::ginv(XtWX))
-  # Meat: sum_i w_i^2 e_i^2 X_i X_i' = X' diag(w^2 e^2) X.
-  meat <- crossprod(X, (w^2 * resid^2) * X)
-  V <- XtWX_inv %*% meat %*% XtWX_inv
-  # HC1 small-sample correction: n / (n - k).
-  V <- V * (n / max(1, n - k))
-  # Re-expand to the full coef vector with NA for dropped columns.
+  X  <- stats::model.matrix(fit)
+  Xr <- X[, alive, drop = FALSE]
+  y  <- as.numeric(stats::model.response(stats::model.frame(fit)))
+  w  <- stats::weights(fit)
+  if (is.null(w)) w <- rep(1, nrow(Xr))
+
+  # Rebuild a full-rank lm on the alive columns. model.matrix puts
+  # "(Intercept)" first; reformulate keeps the remaining predictors in
+  # order, so fitr's coefficients align positionally with colnames(Xr).
+  has_int <- "(Intercept)" %in% colnames(Xr)
+  cn      <- make.names(colnames(Xr), unique = TRUE)
+  dat     <- data.frame(.y_XX = y, .w_XX = as.numeric(w))
+  for (j in seq_len(ncol(Xr))) dat[[cn[j]]] <- Xr[, j]
+  preds <- cn[colnames(Xr) != "(Intercept)"]
+  fr <- stats::reformulate(if (length(preds)) preds else "1",
+                           response = ".y_XX", intercept = has_int)
+  fitr <- stats::lm(fr, data = dat, weights = dat$.w_XX)
+
+  Vr <- sandwich::vcovHC(fitr, type = "HC2")
+  # Vr is ordered like fitr's coefs == colnames(Xr); relabel to the
+  # original (alive) names so callers can index by coefficient name.
+  dimnames(Vr) <- list(colnames(Xr), colnames(Xr))
+
   V_full <- matrix(NA_real_, length(coef_full), length(coef_full),
-                    dimnames = list(names(coef_full),
-                                    names(coef_full)))
-  V_full[alive, alive] <- V
+                   dimnames = list(names(coef_full), names(coef_full)))
+  V_full[alive, alive] <- Vr
   V_full
 }

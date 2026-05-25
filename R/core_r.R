@@ -668,8 +668,21 @@
         !is.na(N_t_control_pl) & N_t_control_pl > 0
       )]
   d[is.na(dist_k_pl_XX), dist_k_pl_XX := 0L]
-  # same_switchers_pl gate: only switchers that qualify at EVERY placebo
-  # horizon q in 1..placebo contribute. Reference: did_multiplegt_dyn_core.R:177-215.
+  # same_switchers gate: the reference builds the placebo distribution FROM the
+  # same_switchers-restricted EFFECT distance -- did_multiplegt_dyn_core.R
+  # L399-435 define dist_to_switch_pl from distance_to_switch_i, which is gated
+  # by still_switcher_i = (F_g-1+effects <= T_g) & qualifies-at-all-effect-
+  # horizons. So under same_switchers the placebo must use ONLY switchers that
+  # qualify at every EFFECT horizon, exactly like the effects. still_switcher_XX
+  # is present on `prepped` iff same_switchers is on (set by .compute_effects,
+  # removed otherwise), so this gate is a no-op when same_switchers is off.
+  # (Previously the placebo ignored this, using more switchers than the
+  # reference -> larger placebo N and a biased placebo estimate.)
+  if ("still_switcher_XX" %in% names(d)) {
+    d[still_switcher_XX != 1L, dist_k_pl_XX := 0L]
+  }
+  # same_switchers_pl gate: additionally restrict to switchers that qualify at
+  # EVERY placebo horizon q in 1..placebo. Reference: core.R:333-390.
   if ("still_switcher_pl_XX" %in% names(d)) {
     d[still_switcher_pl_XX != 1L, dist_k_pl_XX := 0L]
   }
@@ -778,7 +791,14 @@
     w_in <- n_in / (n_in + n_out)
     out[k]   <- w_in * att_in + (1 - w_in) * att_out_pool
     n_inc[k] <- n_in + n_out
-    n_eff[k] <- (res_in$N_eff %||% 0L) + (res_out$N_eff %||% 0L)
+    # Reported placebo N: DIDmultiplegtDYN 2.3.x combines the two directions
+    # with coalesce(count_plus=in, count_minus=out) per row, which at the
+    # aggregate equals the IN-direction count whenever the in-comparison ran.
+    # Verified vs the reference across both in>out AND out>in panels. (max is
+    # wrong: it overcounts when out>in; sum double-counts shared controls.)
+    # Fall back to the out direction only when there is no in-comparison
+    # (switchers == "out").
+    n_eff[k] <- if (switchers != "out") (res_in$N_eff %||% 0L) else (res_out$N_eff %||% 0L)
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
@@ -1007,7 +1027,14 @@
     w_in <- n_in / (n_in + n_out)
     out[k]   <- w_in * att_in + (1 - w_in) * att_out_pool
     n_inc[k] <- n_in + n_out
-    n_eff[k] <- (res_in$N_eff %||% 0L) + (res_out$N_eff %||% 0L)
+    # Reported placebo N: DIDmultiplegtDYN 2.3.x combines the two directions
+    # with coalesce(count_plus=in, count_minus=out) per row, which at the
+    # aggregate equals the IN-direction count whenever the in-comparison ran.
+    # Verified vs the reference across both in>out AND out>in panels. (max is
+    # wrong: it overcounts when out>in; sum double-counts shared controls.)
+    # Fall back to the out direction only when there is no in-comparison
+    # (switchers == "out").
+    n_eff[k] <- if (switchers != "out") (res_in$N_eff %||% 0L) else (res_out$N_eff %||% 0L)
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_

@@ -94,7 +94,12 @@
   ate_ci_lo <- ate0 - z * ate_se
   ate_ci_hi <- ate0 + z * ate_se
 
-  effect_names <- paste0("Effect_", seq_len(n_e))
+  # NB: paste0("Effect_", seq_len(0)) returns the length-1 string "Effect_"
+  # (zero-length recycling), which then mismatches a 0-row Effects matrix and
+  # crashes rownames<-. Guard for n_e == 0 exactly as the placebo path does.
+  # n_e == 0 arises e.g. with trends_lin on panels where no group has the
+  # required F_g-2 pre-period, so no event-study effect is estimable.
+  effect_names <- if (n_e > 0L) paste0("Effect_", seq_len(n_e)) else character(0)
   placebo_names <- if (n_p > 0L) paste0("Placebo_", seq_len(n_p)) else character(0)
 
   # Switcher counts come from cell b=0 (the point estimate). With our

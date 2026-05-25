@@ -18,6 +18,41 @@
   moved the redistributable DLLs from `bin/` to `bin/x64/`; the bundling
   step now searches both so `didgpu_cuda.dll` loads at runtime.
 
+## Reference parity with `DIDmultiplegtDYN` 2.3.x
+
+didgpu was originally validated bit-for-bit against an older
+`DIDmultiplegtDYN`. Two of its outputs were deliberately changed upstream;
+didgpu now tracks the current (fixed) behavior:
+
+- **`predict_het` standard errors now use HC2.** The reference switched the
+  heterogeneity-regression variance from HC1 to HC2
+  (`sandwich::vcovHC(type = "HC2")`) in v2.3.1 ("explicit CI formulas"
+  fix). didgpu now does the same (new `sandwich` dependency), so the
+  predict_het `SE`/`t`/`LB`/`UB`/`pF` columns match again.
+- **Placebo `N` counts each contributing cell once.** For bidirectional
+  panels the reported placebo sample size was double-counting controls
+  shared between the switcher-in and switcher-out comparisons. It now uses
+  the in-direction count, matching the reference's per-row
+  `coalesce(in, out)` combiner across both `in>out` and `out>in` panels.
+  Point estimates were never affected.
+
+## Correctness fixes (found by randomized differential testing vs the reference)
+
+- **`same_switchers`: the placebo now uses the same restricted switcher set
+  as the effects.** Under `same_switchers = TRUE` the placebo block was
+  computed on the full switcher set rather than the consistent-switchers
+  subset, producing a biased placebo estimate (and inflated placebo `N`)
+  relative to `did_multiplegt_dyn`. The placebo distance now honours the
+  effects-based `still_switcher` restriction (the reference derives the
+  placebo distribution from the same_switchers-gated effect distance), so
+  placebo estimates and counts match again.
+- **`trends_lin`: no longer crashes on panels with zero estimable effects.**
+  On short panels where no group has the `F_g-2` pre-period that
+  `trends_lin` requires, result aggregation crashed with
+  "length of 'dimnames' [1] not equal to array extent" (an unguarded
+  row-name build on a 0-row table). It now returns an empty, no-estimable-
+  effects result cleanly.
+
 # didgpu 0.1.0
 
 First public release. Five estimator families plus a sensitivity layer,
