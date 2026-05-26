@@ -73,6 +73,17 @@ didgpu now tracks the current (fixed) behavior:
   matching `did_multiplegt_dyn`. Single-direction (`switchers = "in"/"out"`)
   and unweighted panels were never affected (the weight is 0/1 or the mass is
   already integer). Found by randomized weighted×flag differential testing.
+- **Reported effect/placebo count: drop trailing unestimable horizons.**
+  didgpu's horizon clamp uses each group's own data availability (`max L_g`),
+  which can be one step more permissive than `did_multiplegt_dyn`'s
+  cohort-level `T_g` clamp. When that extra horizon has no switcher reaching it
+  (NA estimate, zero switchers), the reference omits the row; didgpu now trims
+  the trailing block of such unestimable effect/placebo rows so the reported
+  horizon count matches. Estimable horizons, estimates, and all four count
+  columns are unchanged. Verified across 359 boundary-stress panels
+  (switchers in/out/both × effects 4–5 × weighted/unweighted): zero horizon
+  count mismatches and, importantly, no case where didgpu reported an extra
+  horizon with positive switchers. Found by overnight differential testing.
 
 # didgpu 0.1.0
 

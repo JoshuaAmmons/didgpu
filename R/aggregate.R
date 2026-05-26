@@ -76,6 +76,24 @@
   } else matrix(numeric(0), nrow = n_p, ncol = 0L)
   p_mat <- t(p_mat)
 
+  # ---- Match the reference's reported horizon count ----
+  # didgpu's data-availability horizon clamp (max L_g per group) can be one
+  # step more permissive than the reference's cohort-level T_g clamp, so it may
+  # attempt one extra horizon the reference deems infeasible. When that horizon
+  # has no switcher reaching it, the point estimate is NA (N_inc == 0) and the
+  # reference simply omits the row. Trim the trailing contiguous block of NA
+  # point estimates from effects and placebos so the reported horizon count
+  # matches did_multiplegt_dyn. Only TRAILING NAs are dropped (a single clamp
+  # cutoff, as the reference does); any interior NA is preserved. An all-NA
+  # vector is left intact (handled downstream as a zero-effect result).
+  .last_estimable <- function(v) { w <- which(!is.na(v)); if (length(w)) max(w) else length(v) }
+  ke <- .last_estimable(e0)
+  if (ke < n_e) { e0 <- e0[seq_len(ke)]; e_mat <- e_mat[, seq_len(ke), drop = FALSE]; n_e <- ke }
+  if (n_p > 0L) {
+    kp <- .last_estimable(p0)
+    if (kp < n_p) { p0 <- p0[seq_len(kp)]; p_mat <- p_mat[, seq_len(kp), drop = FALSE]; n_p <- kp }
+  }
+
   ate_vec <- if (length(boot_iters) > 0L) {
     vapply(as.character(boot_iters),
            function(i) cells[[i]]$ate %||% NA_real_,
@@ -114,15 +132,17 @@
   # the unweighted field (and to n_inc for the switcher count, which equals
   # the unweighted switcher count there). This keeps unweighted output
   # bit-identical to the pre-weight-fix behavior.
+  # Slice each count vector to the (possibly trimmed) horizon count seq_len(n_e)
+  # / seq_len(n_p); cell fields still carry the pre-trim length.
   c0 <- cells[["0"]]
-  n_eff_e    <- c0$n_eff_effects %||% rep(NA_integer_, n_e)              # N
-  n_eff_p    <- c0$n_eff_placebos %||% rep(NA_integer_, n_p)
-  n_sw_unw_e <- c0$n_sw_unw_effects %||% c0$n_inc_effects %||% rep(NA_integer_, n_e)   # Switchers
-  n_sw_unw_p <- c0$n_sw_unw_placebos %||% c0$n_inc_placebos %||% rep(NA_integer_, n_p)
-  n_eff_w_e  <- c0$n_eff_w_effects %||% n_eff_e                          # N.w
-  n_eff_w_p  <- c0$n_eff_w_placebos %||% n_eff_p
-  n_sw_w_e   <- c0$n_sw_w_effects %||% n_sw_unw_e                        # Switchers.w
-  n_sw_w_p   <- c0$n_sw_w_placebos %||% n_sw_unw_p
+  n_eff_e    <- (c0$n_eff_effects %||% rep(NA_integer_, n_e))[seq_len(n_e)]              # N
+  n_eff_p    <- (c0$n_eff_placebos %||% rep(NA_integer_, n_p))[seq_len(n_p)]
+  n_sw_unw_e <- (c0$n_sw_unw_effects %||% c0$n_inc_effects %||% rep(NA_integer_, n_e))[seq_len(n_e)]   # Switchers
+  n_sw_unw_p <- (c0$n_sw_unw_placebos %||% c0$n_inc_placebos %||% rep(NA_integer_, n_p))[seq_len(n_p)]
+  n_eff_w_e  <- (c0$n_eff_w_effects %||% n_eff_e)[seq_len(n_e)]                          # N.w
+  n_eff_w_p  <- (c0$n_eff_w_placebos %||% n_eff_p)[seq_len(n_p)]
+  n_sw_w_e   <- (c0$n_sw_w_effects %||% n_sw_unw_e)[seq_len(n_e)]                        # Switchers.w
+  n_sw_w_p   <- (c0$n_sw_w_placebos %||% n_sw_unw_p)[seq_len(n_p)]
 
   # Effects matrix, shape (n_e x 8) matching DIDmultiplegtDYN.
   Effects <- cbind(
