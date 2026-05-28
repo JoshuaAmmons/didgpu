@@ -1,0 +1,40 @@
+#!/bin/sh
+# Configure script for didgpu (Windows / Rtools).
+#
+# Same purpose as configure: detect CUDA, report what will be built.
+# All real build logic is in src/Makevars.win.
+
+echo ""
+echo "*** didgpu configure (Windows) ***"
+
+CUDA_DIR=""
+# 1. Honor CUDA_HOME / CUDA_PATH (Rtools shell exposes both as env vars
+#    if they are set in Windows).
+if [ -n "$CUDA_HOME" ] && [ -x "$CUDA_HOME/bin/nvcc.exe" ]; then
+  CUDA_DIR="$CUDA_HOME"
+elif [ -n "$CUDA_PATH" ] && [ -x "$CUDA_PATH/bin/nvcc.exe" ]; then
+  CUDA_DIR="$CUDA_PATH"
+else
+  # 2. Probe standard Program Files install location, newest version first.
+  for d in "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA"/v* ; do
+    if [ -x "$d/bin/nvcc.exe" ]; then
+      CUDA_DIR="$d"
+    fi
+  done
+fi
+
+if [ -n "$CUDA_DIR" ]; then
+  echo "  CUDA toolkit detected: $CUDA_DIR"
+  echo "  -> Building WITH GPU support."
+  echo "     backends available after install: 'r', 'cpu', 'cuda'"
+else
+  echo "  CUDA toolkit not found."
+  echo "  -> Building CPU-only. The package will install cleanly."
+  echo "     backends available after install: 'r', 'cpu'"
+  echo "     backend = 'cuda' will return an informative error."
+  echo "  -> To enable GPU support later, install NVIDIA CUDA Toolkit"
+  echo "     (>= 12.0) and reinstall with CUDA_HOME or CUDA_PATH set."
+fi
+echo ""
+
+exit 0

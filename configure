@@ -1,0 +1,54 @@
+#!/bin/sh
+# Configure script for didgpu (Linux / macOS).
+#
+# CUDA is an OPTIONAL system requirement: when the NVIDIA CUDA Toolkit
+# is present, didgpu builds GPU kernels for the "cuda" backend. When it
+# is absent, the package still builds and installs cleanly, with the
+# pure-R ("r") and Rcpp ("cpu") backends fully functional.
+#
+# All actual build logic lives in src/Makevars (which does the same
+# detection). This script's job is just to give the user a clear
+# install-time message about which backends will be available.
+
+echo ""
+echo "*** didgpu configure ***"
+
+# 1. Honor explicit CUDA_HOME / CUDA_PATH first.
+CUDA_DIR=""
+if [ -n "$CUDA_HOME" ] && [ -x "$CUDA_HOME/bin/nvcc" ]; then
+  CUDA_DIR="$CUDA_HOME"
+elif [ -n "$CUDA_PATH" ] && [ -x "$CUDA_PATH/bin/nvcc" ]; then
+  CUDA_DIR="$CUDA_PATH"
+else
+  # 2. Probe common install locations.
+  for cand in /usr/local/cuda \
+              /opt/cuda \
+              /usr/local/cuda-13.2 /usr/local/cuda-13.1 /usr/local/cuda-13.0 \
+              /usr/local/cuda-12.6 /usr/local/cuda-12.5 /usr/local/cuda-12.4 \
+              /usr/local/cuda-12.3 /usr/local/cuda-12.2 /usr/local/cuda-12.1 \
+              /usr/local/cuda-12.0; do
+    if [ -x "$cand/bin/nvcc" ]; then
+      CUDA_DIR="$cand"
+      break
+    fi
+  done
+fi
+
+if [ -n "$CUDA_DIR" ]; then
+  NVCC_VER=$("$CUDA_DIR/bin/nvcc" --version 2>/dev/null | tail -n 2 | head -n 1)
+  echo "  CUDA toolkit detected: $CUDA_DIR"
+  echo "  $NVCC_VER"
+  echo "  -> Building WITH GPU support."
+  echo "     backends available after install: 'r', 'cpu', 'cuda'"
+else
+  echo "  CUDA toolkit not found."
+  echo "  -> Building CPU-only. The package will install cleanly."
+  echo "     backends available after install: 'r', 'cpu'"
+  echo "     backend = 'cuda' will return an informative error."
+  echo "  -> To enable GPU support later, install NVIDIA CUDA Toolkit"
+  echo "     (>= 12.0) and reinstall the package with CUDA_HOME or"
+  echo "     CUDA_PATH set to the install root."
+fi
+echo ""
+
+exit 0

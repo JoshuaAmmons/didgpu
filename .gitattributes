@@ -1,0 +1,10 @@
+# Force LF line endings on shell scripts so they run correctly on Linux/macOS
+# (Rtools on Windows also accepts LF). Configure scripts MUST be LF or sh will
+# fail with "$'\r': command not found" type errors.
+configure          text eol=lf
+configure.win      text eol=lf
+*.sh               text eol=lf
+
+# CRLF is fine for native Windows files.
+*.bat              text eol=crlf
+*.ps1              text eol=crlf
