@@ -47,7 +47,7 @@
 #' @param verbose Logical. Print one line per leave-out fit.
 #' @return An object of class `didgpu_loo_result`: a data.frame with
 #'   columns `leave_out` (the entity dropped), `estimate` (the
-#'   headline under that drop), `delta` (estimate − full-sample
+#'   headline under that drop), `delta` (estimate - full-sample
 #'   estimate), `delta_pct` (delta as % of full-sample). Sorted by
 #'   `abs(delta)` descending. Plus `$full` attribute (the full-sample
 #'   estimate) and `$by` attribute.

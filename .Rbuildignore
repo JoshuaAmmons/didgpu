@@ -15,7 +15,15 @@
 ^ROADMAP\.md$
 ^STATUS-overnight\.md$
 ^WINDOWS_BUILD_STATUS\.md$
-^tools$
+# Exclude individual files in tools/ that aren't needed in the source
+# tarball, but KEEP tools/nvcc_wrapper.bat (referenced by src/Makevars.win).
+^tools/assemble-cuda-local\.ps1$
+^tools/bench-.*\.R$
+^tools/build-.*\.(ps1|sh)$
+^tools/finish-r-install\.sh$
+^tools/measure-.*\.R$
+^tools/setup-wsl-env\.sh$
+^tools/verify-.*\.R$
 ^src/.*\.o$
 ^src/.*\.dll$
 ^src/.*\.a$

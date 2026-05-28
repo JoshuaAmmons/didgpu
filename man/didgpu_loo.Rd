@@ -25,7 +25,7 @@ with.}
 \value{
 An object of class \code{didgpu_loo_result}: a data.frame with
 columns \code{leave_out} (the entity dropped), \code{estimate} (the
-headline under that drop), \code{delta} (estimate − full-sample
+headline under that drop), \code{delta} (estimate - full-sample
 estimate), \code{delta_pct} (delta as \% of full-sample). Sorted by
 \code{abs(delta)} descending. Plus \verb{$full} attribute (the full-sample
 estimate) and \verb{$by} attribute.

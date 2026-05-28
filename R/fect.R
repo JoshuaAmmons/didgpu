@@ -4,7 +4,7 @@
 # Companion family of estimators to the de Chaisemartin / D'Haultfoeuille
 # core in `didgpu()`. fect (Liu, Wang, Xu 2024) estimates Y(0) for
 # treated units using a model fit on controls only, then reports
-# ATT = mean over (group, time) treated cells of (Y_observed − Y_predicted).
+# ATT = mean over (group, time) treated cells of (Y_observed - Y_predicted).
 #
 # Three estimation methods:
 #   "fe"  — two-way fixed effects (iterative demeaning until convergence)
