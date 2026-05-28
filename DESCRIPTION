@@ -17,6 +17,8 @@ Description:
     'DIDmultiplegtDYN' package across binary, multivalued, and
     continuous treatments.
 License: MIT + file LICENSE
+URL: https://github.com/JoshuaAmmons/didgpu
+BugReports: https://github.com/JoshuaAmmons/didgpu/issues
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)

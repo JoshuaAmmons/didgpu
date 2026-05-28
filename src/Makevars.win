@@ -198,15 +198,16 @@ $(info Makevars.win: OBJECTS=$(OBJECTS))
 
 ifeq ($(HAVE_CUDA_BUILD),yes)
 # nvcc on Windows requires MSVC cl.exe AND its INCLUDE/LIB environment
-# populated by vcvars64.bat. We call nvcc_wrapper.bat (in src/) which
-# finds vcvars64.bat and forwards all args to nvcc, avoiding nested-
-# quote hell between make, cmd, and bash.
-NVCC_RUN  = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
+# populated by vcvars64.bat. We call nvcc_wrapper.bat (in ../tools/, kept
+# out of src/ for CRAN file-type hygiene) which finds vcvars64.bat and
+# forwards all args to nvcc, avoiding nested-quote hell between make, cmd,
+# and bash.
+NVCC_RUN  = cmd //C ..\\tools\\nvcc_wrapper.bat "$(NVCC)" $(NVCC_FLAGS) -c $< -o $@
 
 # nvcc --shared drives MSVC's link.exe, so it resolves MSVC's own C++
 # math/runtime symbols that MinGW ld cannot. /DEF exports exactly the
 # C-ABI functions. Links the CUDA runtime/libs (didgpu_cuda.dll's deps).
-NVCC_LINK = cmd //C .\\nvcc_wrapper.bat "$(NVCC)" -allow-unsupported-compiler \
+NVCC_LINK = cmd //C ..\\tools\\nvcc_wrapper.bat "$(NVCC)" -allow-unsupported-compiler \
             -shared -o didgpu_cuda.dll $(CUDA_OBJECTS) \
             -L"$(CUDA_HOME)/lib/x64" $(CUDA_LINK_LIBS) \
             -Xlinker //DEF:didgpu_cuda.def
