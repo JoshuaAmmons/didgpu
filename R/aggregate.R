@@ -90,7 +90,12 @@
   ke <- .last_estimable(e0)
   if (ke < n_e) { e0 <- e0[seq_len(ke)]; e_mat <- e_mat[, seq_len(ke), drop = FALSE]; n_e <- ke }
   if (n_p > 0L) {
-    kp <- .last_estimable(p0)
+    # If EVERY placebo is unestimable (all NA point estimates), drop the entire
+    # block to match did_multiplegt_dyn (which returns NULL Placebos in that
+    # case). Otherwise trim only the trailing contiguous NA block, as for
+    # effects. This handles weighted trends_lin / short-panel cases where no
+    # group has the F_g - q - 1 pre-period any placebo needs.
+    kp <- if (all(is.na(p0))) 0L else .last_estimable(p0)
     if (kp < n_p) { p0 <- p0[seq_len(kp)]; p_mat <- p_mat[, seq_len(kp), drop = FALSE]; n_p <- kp }
   }
 

@@ -84,6 +84,15 @@ didgpu now tracks the current (fixed) behavior:
   (switchers in/out/both × effects 4–5 × weighted/unweighted): zero horizon
   count mismatches and, importantly, no case where didgpu reported an extra
   horizon with positive switchers. Found by overnight differential testing.
+- **Placebos: drop the whole block when every horizon is unestimable.** On
+  weighted `trends_lin` (and other short-panel cases) the placebo block can
+  be entirely unestimable — no group has the `F_g - q - 1` pre-period any
+  placebo horizon needs. `did_multiplegt_dyn` returns `NULL` placebos in that
+  case; didgpu used to emit a placebo matrix of NAs. Aggregation now drops
+  the placebo block when every placebo point estimate is NA, matching the
+  reference. Found by extended weighted×flag differential testing
+  (4 of 4 affected panels now match; all other scenarios untouched —
+  verified 30 seeds × 14 scenarios = 420 weighted comparisons, 0 fails).
 
 # didgpu 0.1.0
 
