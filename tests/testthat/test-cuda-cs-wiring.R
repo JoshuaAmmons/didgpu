@@ -9,9 +9,7 @@
 #   - Future signature changes to .cs_inner_batched_cuda fail loudly.
 
 test_that("didgpu_cs(backend = 'cuda') falls back cleanly when kernel returns -1", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
 
   p <- didgpu_simulate_panel(n_units = 20L, n_periods = 6L,
                               tau_profile = c(0.5, 1.0), seed = 17L)
@@ -31,9 +29,7 @@ test_that("didgpu_cs(backend = 'cuda') falls back cleanly when kernel returns -1
 })
 
 test_that(".cs_inner_batched_cuda returns NULL while kernel is scaffolded", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   cells <- list(
     # Cell 1: 2 treated, 2 control. Y_t = (1.0, 3.0), Y_c = (2.0, 0.0).
     list(delta = c(1.0, 3.0, 2.0, 0.0), D_mask = c(TRUE, TRUE, FALSE, FALSE),
@@ -61,9 +57,7 @@ test_that(".cs_inner_batched_cuda returns NULL while kernel is scaffolded", {
 })
 
 test_that("Rcpp wrapper didgpu_cuda_cs_inner_batched_r computes ATT and IF for OR", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   # 2 cells, intercept-only design (p = 1). Cell 0: rows 0..2 with
   # treated row 0; Cell 1: rows 3..4 with treated row 3.
   result <- didgpu:::didgpu_cuda_cs_inner_batched_r(
@@ -85,9 +79,7 @@ test_that("Rcpp wrapper didgpu_cuda_cs_inner_batched_r computes ATT and IF for O
 })
 
 test_that("Rcpp wrapper computes IPW / DR (no-cov closed form)", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   # p = 1 (intercept only) -> IPW and DR both reduce to the simple
   # mean-difference with the SPECIAL no-cov influence function:
   #   att = mean(Y_t) - mean(Y_c)

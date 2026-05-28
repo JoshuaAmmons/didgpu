@@ -4,11 +4,8 @@
 # are exactly where off-by-one indexing or empty-reduction bugs hide.
 # These call the kernels directly so a regression surfaces immediately.
 
-cuda_ok <- function() isTRUE(tryCatch(didgpu_has_cuda_support(),
-                                       error = function(e) FALSE))
-
 test_that("cluster bootstrap: single cluster (n_clusters = 1) is well-defined", {
-  skip_if_not(cuda_ok(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # With one cluster, every replicate picks it n_clusters = 1 times, so
   # weight is always 1 and every replicate equals colSums(IF).
   IF <- matrix(c(1.0, 2.0, 3.0, -1.0, 0.5, 0.25), nrow = 3, byrow = TRUE)
@@ -23,7 +20,7 @@ test_that("cluster bootstrap: single cluster (n_clusters = 1) is well-defined", 
 })
 
 test_that("cluster bootstrap: single dim (n_dims = 1)", {
-  skip_if_not(cuda_ok(), "CUDA not compiled in")
+  skip_if_no_cuda()
   IF <- matrix(rnorm(20), ncol = 1)
   out <- didgpu:::didgpu_cuda_cluster_bootstrap_r(
     IF = IF, cluster_id = as.integer(0:19), n_clusters = 20L,
@@ -33,7 +30,7 @@ test_that("cluster bootstrap: single dim (n_dims = 1)", {
 })
 
 test_that("cluster bootstrap: B = 1 single replicate", {
-  skip_if_not(cuda_ok(), "CUDA not compiled in")
+  skip_if_no_cuda()
   IF <- matrix(rnorm(12), nrow = 4)
   out <- didgpu:::didgpu_cuda_cluster_bootstrap_r(
     IF = IF, cluster_id = as.integer(0:3), n_clusters = 4L,
@@ -43,7 +40,7 @@ test_that("cluster bootstrap: B = 1 single replicate", {
 })
 
 test_that("multiplier bootstrap: single dim and B = 1", {
-  skip_if_not(cuda_ok(), "CUDA not compiled in")
+  skip_if_no_cuda()
   IF <- matrix(rnorm(30), ncol = 1)
   out1 <- didgpu:::didgpu_cuda_multiplier_bootstrap_r(
     IF = IF, B = 1L, mult_kind = 0L, seed = 5L)
@@ -53,7 +50,7 @@ test_that("multiplier bootstrap: single dim and B = 1", {
 })
 
 test_that("multiplier bootstrap: normal weights have ~unit variance scaling", {
-  skip_if_not(cuda_ok(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # For N(0,1) multipliers, Var(sum_i xi_i * IF_i) = sum_i IF_i^2.
   # Check the empirical column variance matches sum(IF^2) within MC error.
   set.seed(1L)
@@ -67,7 +64,7 @@ test_that("multiplier bootstrap: normal weights have ~unit variance scaling", {
 })
 
 test_that("CS OR: single treated cohort still produces ATTs on GPU", {
-  skip_if_not(cuda_ok(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # Construct a panel with exactly one treated cohort.
   set.seed(2L)
   n_units <- 40L; n_periods <- 8L

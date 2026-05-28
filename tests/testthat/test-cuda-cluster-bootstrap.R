@@ -7,9 +7,7 @@
 # should still converge as B grows.
 
 test_that("didgpu_cuda_cluster_bootstrap_r returns the right shape", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(11L)
   n_units <- 30L; n_dims <- 5L
   IF <- matrix(rnorm(n_units * n_dims), nrow = n_units, ncol = n_dims)
@@ -25,9 +23,7 @@ test_that("didgpu_cuda_cluster_bootstrap_r returns the right shape", {
 })
 
 test_that("CUDA cluster bootstrap SEs agree with a CPU-side IF reference within MC error", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   # Build a reference IF-shortcut cluster bootstrap on the CPU using R's
   # MT19937, then compare to the CUDA kernel's columnwise SDs. Different
   # RNG, same algorithm — SDs should agree within ~2 / sqrt(B).
@@ -66,9 +62,7 @@ test_that("CUDA cluster bootstrap SEs agree with a CPU-side IF reference within 
 })
 
 test_that("didgpu_cs(backend='cuda', bootstrap_reps>0) populates SE columns", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   p <- didgpu_simulate_panel(n_units = 30L, n_periods = 6L,
                               tau_profile = c(0.5, 1.0), seed = 17L)
   p$D <- as.integer(p$D >= 0.5)

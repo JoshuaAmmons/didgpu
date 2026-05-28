@@ -51,9 +51,25 @@ small_panel <- function(seed = 17L) {
 # incompatible version). Keeps the suite green on machines/CI where the
 # reference cannot run, while still executing the comparison where it can.
 skip_if_no_reference <- function() {
+  # CRAN's machines don't have polars (the reference's required backend);
+  # skip there unconditionally to avoid spurious "not runnable" output.
+  testthat::skip_on_cran()
   testthat::skip_if_not_installed("DIDmultiplegtDYN")
   if (!.reference_runnable()) {
     testthat::skip(
       "DIDmultiplegtDYN installed but not runnable here (its optional 'polars' backend is missing or incompatible); skipping reference-parity check")
+  }
+}
+
+# Skip a CUDA-dependent test on CRAN (no GPU on the build farm) or when
+# CUDA was not compiled into this build. Use at the top of every test_that
+# block that touches GPU code. Wraps the call rather than evaluating
+# didgpu_has_cuda_support() unconditionally so the skip_on_cran path is
+# fast.
+skip_if_no_cuda <- function() {
+  testthat::skip_on_cran()
+  if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
+                       error = function(e) FALSE))) {
+    testthat::skip("CUDA support not compiled into this build")
   }
 }

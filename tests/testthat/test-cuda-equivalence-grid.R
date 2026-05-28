@@ -17,10 +17,6 @@
 #     covers the DETERMINISTIC point-estimate paths only.
 # ============================================================================
 
-cuda_available <- function() {
-  isTRUE(tryCatch(didgpu_has_cuda_support(), error = function(e) FALSE))
-}
-
 make_cs_panel <- function(n_units, n_periods, seed = 17L, with_cov = FALSE) {
   p <- didgpu_simulate_panel(n_units = n_units, n_periods = n_periods,
                               tau_profile = c(0.5, 1.0), seed = seed)
@@ -36,7 +32,7 @@ make_cs_panel <- function(n_units, n_periods, seed = 17L, with_cov = FALSE) {
 }
 
 test_that("CS OR point estimate (no covariates) is bit-exact CUDA vs R", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   for (nu in c(40L, 100L, 200L)) {
     for (np in c(8L, 12L)) {
       p <- make_cs_panel(nu, np)
@@ -58,7 +54,7 @@ test_that("CS OR point estimate (no covariates) is bit-exact CUDA vs R", {
 })
 
 test_that("CS OR point estimate (with covariates) matches CUDA vs R within 1e-6", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   for (nu in c(60L, 150L)) {
     for (np in c(8L, 12L)) {
       p <- make_cs_panel(nu, np, with_cov = TRUE)
@@ -80,7 +76,7 @@ test_that("CS OR point estimate (with covariates) matches CUDA vs R within 1e-6"
 })
 
 test_that("CS OR influence functions match CUDA vs R (no covariates)", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # The per-cell IF drives the bootstrap SEs, so its equivalence is
   # what makes the CUDA cluster/multiplier bootstrap trustworthy.
   p <- make_cs_panel(100L, 10L)
@@ -103,7 +99,7 @@ test_that("CS OR influence functions match CUDA vs R (no covariates)", {
 })
 
 test_that("CS IPW/DR point estimate matches CUDA vs R", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # IPW (est_method 1) and DR (est_method 2) now run on the GPU:
   #   * no covariates (p = 1): the kernel uses the exact mean-difference
   #     closed form -> agreement is to summation-order noise (1e-10).
@@ -147,7 +143,7 @@ test_that("CS IPW/DR point estimate matches CUDA vs R", {
 })
 
 test_that("CS cluster bootstrap SE is finite + positive under backend='cuda' for all methods", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # OR uses the GPU IF; IPW/DR fall back to R for the inner fit but
   # still exercise the bootstrap path. All should produce usable SEs.
   for (method in c("OR", "IPW", "DR")) {
@@ -164,7 +160,7 @@ test_that("CS cluster bootstrap SE is finite + positive under backend='cuda' for
 })
 
 test_that("SAXPY smoke kernel is exact CUDA vs R reference", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   for (n in c(1L, 5L, 100L, 1000L)) {
     a <- 2.5
     x <- as.numeric(seq_len(n))
@@ -177,7 +173,7 @@ test_that("SAXPY smoke kernel is exact CUDA vs R reference", {
 })
 
 test_that("fect size gate keeps CUDA == R for small panels (transparent fallback)", {
-  skip_if_not(cuda_available(), "CUDA not compiled in")
+  skip_if_no_cuda()
   # Below the .fect_cuda_svd_worthwhile threshold, backend = "cuda"
   # uses R svd(), so results must be identical to backend = "r".
   for (method in c("fe", "ife", "mc")) {

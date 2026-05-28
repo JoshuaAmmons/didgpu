@@ -12,9 +12,7 @@
 #       tolerance).
 
 test_that(".fect_svd_truncated_cuda returns a list(L, F, d) or NULL", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(1L)
   M <- matrix(rnorm(40), nrow = 8, ncol = 5)
   res <- didgpu:::.fect_svd_truncated_cuda(M, r = 2L)
@@ -27,9 +25,7 @@ test_that(".fect_svd_truncated_cuda returns a list(L, F, d) or NULL", {
 })
 
 test_that(".fect_svd_softthreshold_cuda returns Y_hat or NULL", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(2L)
   Y <- matrix(rnorm(60), nrow = 10, ncol = 6)
   res <- didgpu:::.fect_svd_softthreshold_cuda(Y, lambda = 0.5)
@@ -41,9 +37,7 @@ test_that(".fect_svd_softthreshold_cuda returns Y_hat or NULL", {
 })
 
 test_that("CUDA truncated SVD agrees with base svd() on a small matrix (loose tolerance)", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(3L)
   M <- matrix(rnorm(40), nrow = 8, ncol = 5)
   cuda_res <- didgpu:::.fect_svd_truncated_cuda(M, r = 3L)
@@ -56,9 +50,7 @@ test_that("CUDA truncated SVD agrees with base svd() on a small matrix (loose to
 })
 
 test_that("CUDA softthreshold agrees with R reconstruction on a small matrix", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(4L)
   Y <- matrix(rnorm(60), nrow = 10, ncol = 6)
   cuda_res <- didgpu:::.fect_svd_softthreshold_cuda(Y, lambda = 0.5)

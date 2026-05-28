@@ -11,9 +11,7 @@
 # a Monte-Carlo equivalence on the bootstrap means.
 
 test_that(".testmechs_bootstrap_cuda returns the right shape", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(7L)
   n <- 200L; K <- 2L; dy <- 3L
   d <- sample.int(2L, n, replace = TRUE) - 1L      # {0, 1}
@@ -35,9 +33,7 @@ test_that(".testmechs_bootstrap_cuda returns the right shape", {
 })
 
 test_that(".testmechs_bootstrap_cuda falls back for method = 'bayes'", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(8L)
   n <- 100L; K <- 2L; dy <- 2L
   d <- sample.int(2L, n, replace = TRUE) - 1L
@@ -53,9 +49,7 @@ test_that(".testmechs_bootstrap_cuda falls back for method = 'bayes'", {
 })
 
 test_that("CUDA bootstrap means agree with R bootstrap means within Monte-Carlo error", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   # Large-B Monte-Carlo equivalence. cuRAND and MT19937 give different
   # per-replicate values, but the empirical mean over B replicates is
   # an unbiased estimator of the same population proportion.

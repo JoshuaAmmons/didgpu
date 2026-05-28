@@ -1,9 +1,7 @@
 # Phase-2 #83 tests: GPU multiplier (wild) bootstrap.
 
 test_that("didgpu_cuda_multiplier_bootstrap_r returns the right shape", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(13L)
   n_units <- 40L; n_dims <- 6L
   IF <- matrix(rnorm(n_units * n_dims), nrow = n_units, ncol = n_dims)
@@ -14,9 +12,7 @@ test_that("didgpu_cuda_multiplier_bootstrap_r returns the right shape", {
 })
 
 test_that("Rademacher weights produce zero-mean bootstrap deviations on average", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   # E[xi] = 0 under Rademacher, so the cross-replicate MEAN of
   # bootstrap deviations should be ~0 for any fixed IF column.
   set.seed(21L)
@@ -34,9 +30,7 @@ test_that("Rademacher weights produce zero-mean bootstrap deviations on average"
 })
 
 test_that("N(0,1) variant returns finite values", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(27L)
   IF <- matrix(rnorm(60), nrow = 20, ncol = 3)
   out <- didgpu:::didgpu_cuda_multiplier_bootstrap_r(
@@ -46,9 +40,7 @@ test_that("N(0,1) variant returns finite values", {
 })
 
 test_that("GPU multiplier-bootstrap SDs match a CPU IF-shortcut reference within MC error", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   set.seed(33L)
   n_units <- 60L; n_dims <- 4L
   IF <- matrix(rnorm(n_units * n_dims), nrow = n_units, ncol = n_dims)
@@ -72,9 +64,7 @@ test_that("GPU multiplier-bootstrap SDs match a CPU IF-shortcut reference within
 })
 
 test_that("didgpu_cs(backend='cuda', bootstrap_kind='multiplier') populates SE", {
-  skip_if_not(isTRUE(tryCatch(didgpu_has_cuda_support(),
-                              error = function(e) FALSE)),
-              "CUDA support not compiled into this build")
+  skip_if_no_cuda()
   p <- didgpu_simulate_panel(n_units = 30L, n_periods = 6L,
                               tau_profile = c(0.5, 1.0), seed = 17L)
   p$D <- as.integer(p$D >= 0.5)
