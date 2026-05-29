@@ -74,7 +74,7 @@ fect note below), so `backend = "cuda"` is always safe.
 
 On Windows the GPU half ships as a separate `didgpu_cuda.dll` (built by
 nvcc/MSVC) that the R-facing `didgpu.dll` (Rtools/MinGW) calls across a
-pure-C ABI — see [`WINDOWS_BUILD_STATUS.md`](WINDOWS_BUILD_STATUS.md). A
+pure-C ABI — see [`WINDOWS_BUILD_STATUS.md`](https://github.com/JoshuaAmmons/didgpu/blob/main/WINDOWS_BUILD_STATUS.md). A
 prebuilt Windows binary (so end users skip the toolchain entirely) is in
 progress.
 
@@ -90,7 +90,7 @@ progress.
 | `didgpu_fect(method = "mc")` at scale | ✅ live | 3.6–7.9× | Full-SVD matrix completion; engages for large balanced panels (`n_units ≥ 2000`). Verified correct to 2.2e-10. |
 | `didgpu_fect()` (fe / ife / small mc) | 🔵 size-gated | ~1× (small panels) | GPU SVD only helps very large panels; below the gate it transparently uses R's LAPACK (far faster for small matrices). ife uses R at all sizes. |
 
-Full numbers and methodology in [`BENCHMARKS.md`](BENCHMARKS.md).
+Full numbers and methodology in [`BENCHMARKS.md`](https://github.com/JoshuaAmmons/didgpu/blob/main/BENCHMARKS.md).
 
 ### The headline
 
@@ -125,7 +125,7 @@ install.packages("didgpu", repos = "https://joshuaammons.r-universe.dev")
 
 **From source.** Linux/macOS pick up the GPU automatically when `nvcc` is on
 PATH. Windows source GPU builds use Rtools44 + VS Build Tools + a user-local
-CUDA toolkit (no admin) — see [`WINDOWS_BUILD_STATUS.md`](WINDOWS_BUILD_STATUS.md):
+CUDA toolkit (no admin) — see [`WINDOWS_BUILD_STATUS.md`](https://github.com/JoshuaAmmons/didgpu/blob/main/WINDOWS_BUILD_STATUS.md):
 
 ```r
 install.packages("didgpu", repos = NULL, type = "source",
@@ -296,8 +296,6 @@ This is enforced by a comprehensive test suite (300+ tests across 24 test files)
 ## Internals
 
 The package design (call graph, kernel formulas, where bugs would hide) is documented in [`inst/doc/reference_internals.md`](inst/doc/reference_internals.md). That document was derived from a careful read of every line of the reference package source; it doubles as the spec for any future backend port.
-
-The high-level architecture is in [`../NOTES_did_gpu_checkpointed.Rmd`](../NOTES_did_gpu_checkpointed.Rmd) ("as-built status" section).
 
 ## Citation
 

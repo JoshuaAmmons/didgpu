@@ -1,6 +1,6 @@
 Package: didgpu
 Title: GPU-Accelerated, Checkpointed Difference-in-Differences Estimator
-Version: 0.1.1
+Version: 0.1.2
 Authors@R:
     person(given = "Joshua",
            family = "Ammons",
@@ -12,7 +12,7 @@ Description:
     D'Haultfoeuille (2024) <doi:10.1162/rest_a_01414>, designed
     for long-running econometric work: per-cell checkpointing to disk,
     resumable runs after crash or out-of-memory, parallel cluster
-    bootstrap, configurable backends (pure R, optional Rcpp and CUDA),
+    bootstrap, configurable backends (pure R, optional 'Rcpp' and 'CUDA'),
     and bit-for-bit numerical equivalence with the reference
     'DIDmultiplegtDYN' package across binary, multivalued, and
     continuous treatments.

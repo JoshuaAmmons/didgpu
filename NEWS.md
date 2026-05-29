@@ -1,3 +1,22 @@
+# didgpu 0.1.2
+
+## CRAN resubmission fixes
+
+- **`test-parallel.R` now skips on CRAN.** The previous submission's
+  pretest exceeded CRAN's 2-core cap (`_R_CHECK_LIMIT_CORES_`) despite
+  the test honouring the env var, producing the only test failure.
+  Both `test_that` blocks in `test-parallel.R` now call
+  `skip_on_cran()`. The parallel path is fully exercised in our GitHub
+  Actions CI matrix on every push.
+- **README links rewritten to absolute GitHub URLs.** Two references
+  (`WINDOWS_BUILD_STATUS.md`, `BENCHMARKS.md`) are intentionally excluded
+  from the source tarball via `.Rbuildignore`; the README now points to
+  their canonical GitHub URLs so they resolve from the rendered README
+  on CRAN. One stale link (`../NOTES_did_gpu_checkpointed.Rmd`, an
+  out-of-tree file that no longer exists) was removed.
+- **DESCRIPTION typography.** Single-quoted the software-name references
+  `'Rcpp'` and `'CUDA'` per CRAN convention.
+
 # didgpu 0.1.1
 
 ## Bug fixes

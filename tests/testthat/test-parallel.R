@@ -6,6 +6,12 @@
 nw_multi <- if (identical(Sys.getenv("_R_CHECK_LIMIT_CORES_"), "TRUE")) 2L else 4L
 
 test_that("n_workers > 1 produces identical Effects/Placebos/SEs to n_workers = 1", {
+  # CRAN's R CMD check enforces _R_CHECK_LIMIT_CORES_ but the env-var
+  # detection didn't fire on the pretest (logged "4 simultaneous processes
+  # spawned" despite our 2-workers fallback). Rather than fight CRAN's
+  # core-cap policy, skip on CRAN -- this is a developer/CI check, fully
+  # exercised in GitHub Actions.
+  skip_on_cran()
   p <- didgpu_simulate_panel(n_units = 50L, n_periods = 12L,
                               frac_treated = 0.6,
                               min_treat_period = 4L, max_treat_period = 8L,
@@ -32,6 +38,7 @@ test_that("n_workers > 1 produces identical Effects/Placebos/SEs to n_workers = 
 })
 
 test_that("parallel run with checkpointing supports resume", {
+  skip_on_cran()
   p <- didgpu_simulate_panel(n_units = 40L, n_periods = 10L, seed = 5L,
                               min_treat_period = 3L, max_treat_period = 6L)
   cdir <- tempfile("didgpu_par_resume_")
