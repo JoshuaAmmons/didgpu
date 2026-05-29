@@ -1,0 +1,1207 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "didgpu",
+    "section": "",
+    "text": "Welcome to didgpu\ndidgpu is a single R package that gives you five published heterogeneity-robust difference-in-differences estimator families, each with:\nYou can use any of the estimators from a single, consistent interface, mix GPU and CPU backends per call, and resume any long-running fit after a crash, an OOM, or a reboot.",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#the-five-estimator-families",
+    "href": "index.html#the-five-estimator-families",
+    "title": "didgpu",
+    "section": "0.1 The five estimator families",
+    "text": "0.1 The five estimator families\n\n\n\n\n\n\n\n\nFamily\nFunction\nReference\n\n\n\n\nDynamic, heterogeneity-robust DiD\ndidgpu()\nde Chaisemartin & D’Haultfoeuille (2024)\n\n\nCallaway-Sant’Anna staggered DiD\ndidgpu_cs()\nCallaway & Sant’Anna (2021)\n\n\nFixed-effects counterfactual (FEct/IFEct/MC)\ndidgpu_fect()\nLiu, Wang & Xu (2024); Athey et al. (2021)\n\n\nInstantaneous DID_M (non-absorbing binary)\ndidgpu_did_static()\nde Chaisemartin & D’Haultfoeuille (2020)\n\n\nContinuous treatment, no stayers\ndidgpu_did_continuous()\nde Chaisemartin & D’Haultfoeuille (2024)\n\n\n\nEach one has a chapter in this book.",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#why-gpu",
+    "href": "index.html#why-gpu",
+    "title": "didgpu",
+    "section": "0.2 Why “GPU”?",
+    "text": "0.2 Why “GPU”?\nThe CUDA backend isn’t a gimmick — it is the difference between a bootstrap-CI workflow that’s iterated overnight and one you can re-run in the time it takes to refill a coffee mug. On a single RTX-class card the typical speedup is 10×–100× for the cluster bootstrap and 5×–30× for the per-cell DID kernel, depending on panel size.\nYou do not need a GPU to use didgpu. All five estimators have pure-R and Rcpp fallbacks; the GPU backend is optional and detected at install time. CRAN’s build farm does not have a GPU and the package still installs and runs correctly there.",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#why-checkpointed",
+    "href": "index.html#why-checkpointed",
+    "title": "didgpu",
+    "section": "0.3 Why “checkpointed”?",
+    "text": "0.3 Why “checkpointed”?\nLong bootstrap runs will die at some point — OOM, power outage, Windows update reboot, network blip on a slurm node. didgpu writes one small RDS file per bootstrap replicate. If the run dies, you re-launch exactly the same command and it picks up from where it stopped. No code changes, no tryCatch plumbing, no babysitting.",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-read-this-book",
+    "href": "index.html#how-to-read-this-book",
+    "title": "didgpu",
+    "section": "0.4 How to read this book",
+    "text": "0.4 How to read this book\n\nPart I (Getting Started) — install the package, run your first estimator. Start here if you’ve never used didgpu.\nPart II (Estimators) — one chapter per estimator family. Each chapter shows the math behind it, the function signature, common options, and an end-to-end worked example.\nPart III (Advanced) — GPU setup, sensitivity analysis, reproducibility/checkpointing, bootstrap variants. Reach for these once you’re comfortable with at least one estimator.\nPart IV (Reference) — methodology notes (the math), FAQ, and the changelog.",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#cite",
+    "href": "index.html#cite",
+    "title": "didgpu",
+    "section": "0.5 Cite",
+    "text": "0.5 Cite\nIf didgpu played a role in published work, please cite both this package and the relevant method papers:\n\ncitation(\"didgpu\")\n\n\n\n\n\n\n\nTip\n\n\n\nThe package print method always reminds you which method paper goes with the estimator you just ran. There is a one-line citation() for each estimator family.",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "index.html#status",
+    "href": "index.html#status",
+    "title": "didgpu",
+    "section": "0.6 Status",
+    "text": "0.6 Status\ndidgpu is actively maintained. Source and issue tracker: https://github.com/JoshuaAmmons/didgpu.\nThe package’s numerical correctness against the reference R packages is re-tested on every push via a large randomized differential testing suite. The current status badge:\n✅ Last full sweep: ~17,000 informative comparisons, 0 failures\n✅ Main 1285-case battery (all backends, all flags): clean\n✅ Bit-for-bit equivalence with DIDmultiplegtDYN 2.3.x across the\n   weighted x flag matrix",
+    "crumbs": [
+      "Get Started",
+      "<span class='chapter-number'>1</span>  <span class='chapter-title'>Welcome</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html",
+    "href": "chapters/01-installation.html",
+    "title": "2  Installation",
+    "section": "",
+    "text": "3 Installation\ndidgpu is on CRAN and on r-universe. Pick whichever lane you prefer.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html#from-cran-recommended",
+    "href": "chapters/01-installation.html#from-cran-recommended",
+    "title": "2  Installation",
+    "section": "3.1 From CRAN (recommended)",
+    "text": "3.1 From CRAN (recommended)\n\ninstall.packages(\"didgpu\")\n\nThis gets you the pure-R and Rcpp backends. They are sufficient for every estimator in this book; the chapters that follow do not require GPU.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html#from-r-universe-newest",
+    "href": "chapters/01-installation.html#from-r-universe-newest",
+    "title": "2  Installation",
+    "section": "3.2 From r-universe (newest)",
+    "text": "3.2 From r-universe (newest)\nIf you want the latest commit on main before it lands on CRAN:\n\ninstall.packages(\n  \"didgpu\",\n  repos = c(\"https://joshuaammons.r-universe.dev\", \"https://cloud.r-project.org\")\n)",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html#from-source-with-gpu-support",
+    "href": "chapters/01-installation.html#from-source-with-gpu-support",
+    "title": "2  Installation",
+    "section": "3.3 From source (with GPU support)",
+    "text": "3.3 From source (with GPU support)\nIf you have an NVIDIA GPU and the CUDA Toolkit installed, install from source to compile the GPU kernels:\n\n# (1) Set CUDA_HOME or CUDA_PATH to point at your CUDA install:\nSys.setenv(CUDA_HOME = \"/usr/local/cuda\")             # Linux\n# or\nSys.setenv(CUDA_PATH = \"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2\")  # Windows\n\n# (2) Then install from source:\ninstall.packages(\"didgpu\", type = \"source\")           # CRAN source\n# -- or --\nremotes::install_github(\"JoshuaAmmons/didgpu\")        # GitHub head\n\ndidgpu’s configure script will print a one-line confirmation at install time telling you whether it found CUDA:\n*** didgpu configure ***\n  CUDA toolkit detected: /usr/local/cuda\n  -&gt; Building WITH GPU support.\n     backends available after install: 'r', 'cpu', 'cuda'\nIf CUDA is not found, the install still succeeds — only the r and cpu backends are compiled and backend = \"cuda\" returns an informative error at runtime. There is no CRAN-style ERROR or WARNING during install in that case.\n\n\n\n\n\n\nNote“Did the GPU build actually work?”\n\n\n\nAfter install, the fastest way to check is:\n\nlibrary(didgpu)\ndidgpu_has_cuda_support()\n#&gt; [1] TRUE\n\nIf you see TRUE, you can pass backend = \"cuda\" to any of the estimator functions in this book. If you see FALSE, didgpu still works in pure-R / Rcpp; only the GPU acceleration is unavailable.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html#supported-gpus",
+    "href": "chapters/01-installation.html#supported-gpus",
+    "title": "2  Installation",
+    "section": "3.4 Supported GPUs",
+    "text": "3.4 Supported GPUs\ndidgpu compiles for compute capabilities sm_75 through sm_120, which covers:\n\n\n\nArchitecture\nCompute capability\nExample cards\n\n\n\n\nTuring\nsm_75\nRTX 20-series, T4, GTX 16-series\n\n\nAmpere (data center)\nsm_80\nA100\n\n\nAmpere (desktop)\nsm_86\nRTX 30-series\n\n\nAda Lovelace\nsm_89\nRTX 40-series, RTX 4000 Ada\n\n\nHopper\nsm_90\nH100\n\n\nBlackwell\nsm_120\nRTX PRO Blackwell, RTX 50-series\n\n\n\nThere is also a compute_120 PTX target so newer Blackwell-and-after cards JIT-compile from PTX cleanly.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html#system-requirements",
+    "href": "chapters/01-installation.html#system-requirements",
+    "title": "2  Installation",
+    "section": "3.5 System requirements",
+    "text": "3.5 System requirements\n\nR ≥ 4.1\nOn Linux/macOS: GNU make (already on most systems)\nOn Windows: Rtools45 (only when building from source)\nOptional for GPU: NVIDIA CUDA Toolkit ≥ 12.0 with cuBLAS, cuSOLVER, cuRAND\n\nCUDA is optional. The package builds, installs, and passes its full test suite without it.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/01-installation.html#what-didgpu-installs-alongside",
+    "href": "chapters/01-installation.html#what-didgpu-installs-alongside",
+    "title": "2  Installation",
+    "section": "3.6 What didgpu installs alongside",
+    "text": "3.6 What didgpu installs alongside\ndidgpu depends on a small, stable set of packages — data.table, Rcpp/RcppEigen, MASS, sandwich, jsonlite. It deliberately does not import polars or any of the reference packages it benchmarks against; those are in Suggests and only loaded when you ask for the backend = \"reference\" parity mode (used for testing).\nGo to the next chapter to fit your first model.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>2</span>  <span class='chapter-title'>Installation</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html",
+    "href": "chapters/02-quickstart.html",
+    "title": "3  Quick start",
+    "section": "",
+    "text": "4 Quick start\nFive minutes, one panel, one fit, one event-study plot. This chapter uses the simulator that ships with the package so you can run every line of code yourself without any extra data.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#generate-a-panel",
+    "href": "chapters/02-quickstart.html#generate-a-panel",
+    "title": "3  Quick start",
+    "section": "4.1 Generate a panel",
+    "text": "4.1 Generate a panel\n\nlibrary(didgpu)\n\npanel &lt;- didgpu_simulate_panel(\n  n_units          = 60,\n  n_periods        = 12,\n  frac_treated     = 0.6,\n  min_treat_period = 4,\n  max_treat_period = 9,\n  tau_profile      = c(0.5, 1.0, 1.2, 1.0, 0.8),\n  sigma            = 0.4,\n  seed             = 17\n)\n\nhead(panel)\n\npanel is a tidy long data frame with columns unit, period, Y, D. About 60% of the units switch from control to treated at some period between 4 and 9; the true event-study profile (relative to the switch period) is c(0.5, 1.0, 1.2, 1.0, 0.8).",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#fit-the-dynamic-did-estimator",
+    "href": "chapters/02-quickstart.html#fit-the-dynamic-did-estimator",
+    "title": "3  Quick start",
+    "section": "4.2 Fit the dynamic DiD estimator",
+    "text": "4.2 Fit the dynamic DiD estimator\nThe flagship estimator in didgpu is didgpu() — the heterogeneity- robust dynamic DiD of de Chaisemartin & D’Haultfoeuille (2024).\n\nfit &lt;- didgpu(\n  panel,\n  outcome    = \"Y\",\n  group      = \"unit\",\n  time       = \"period\",\n  treatment  = \"D\",\n  effects    = 4,\n  placebo    = 2,\n  backend    = \"r\",       # try \"cuda\" once you've checked didgpu_has_cuda_support()\n  verbose    = FALSE\n)\n\nfit\n\nYou get:\n\nEffects — a per-event-time matrix with the point estimate, SE, CI, and the four sample-size columns the reference reports (unweighted N, unweighted switchers, weighted N, weighted switchers).\nPlacebos — the pre-treatment falsification estimates at horizons \\(-1, -2, \\dots\\).\nATE — the cumulative incidence-weighted ATE across event-times.\nJoint tests — chi-square joint tests over the effects vector and over the placebos vector, using the bootstrap empirical covariance.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#add-a-bootstrap",
+    "href": "chapters/02-quickstart.html#add-a-bootstrap",
+    "title": "3  Quick start",
+    "section": "4.3 Add a bootstrap",
+    "text": "4.3 Add a bootstrap\nThe point estimate is essentially free; standard errors and CIs come from a cluster bootstrap. You opt in with bootstrap_reps:\n\nfit_boot &lt;- didgpu(\n  panel,\n  outcome   = \"Y\", group = \"unit\", time = \"period\", treatment = \"D\",\n  effects   = 4,\n  placebo   = 2,\n  bootstrap_reps = 500,\n  backend   = \"r\",\n  seed      = 42,\n  verbose   = TRUE\n)\n\nFor a panel this small the bootstrap is fast on CPU. For larger panels, this is where the GPU pays for itself — see Chapter 8 — GPU & Performance.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#plot-the-event-study",
+    "href": "chapters/02-quickstart.html#plot-the-event-study",
+    "title": "3  Quick start",
+    "section": "4.4 Plot the event study",
+    "text": "4.4 Plot the event study\n\nplot(fit)\n\nThe plot() method draws the placebos on negative horizons and the effects on positive horizons, with the stored CI as error bars and a horizontal dashed line at zero.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#pull-pieces-out-with-broom-style-helpers",
+    "href": "chapters/02-quickstart.html#pull-pieces-out-with-broom-style-helpers",
+    "title": "3  Quick start",
+    "section": "4.5 Pull pieces out with broom-style helpers",
+    "text": "4.5 Pull pieces out with broom-style helpers\n\nbroom::tidy(fit)           # one-row-per-coef data.frame\nbroom::glance(fit)         # one-row summary (N, n_switchers, joint p)\ncoef(fit)                  # named numeric of point estimates\nvcov(fit)                  # bootstrap empirical covariance\nconfint(fit, level = 0.95) # CIs at any level (re-fit if level differs)\n\nIf broom is not loaded, the equivalents didgpu_tidy() and didgpu_glance() work the same way without it.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#save-a-fitted-model",
+    "href": "chapters/02-quickstart.html#save-a-fitted-model",
+    "title": "3  Quick start",
+    "section": "4.6 Save a fitted model",
+    "text": "4.6 Save a fitted model\n\nsaveRDS(fit, \"did_fit.rds\")\nreadRDS(\"did_fit.rds\")\n\nA didgpu fit is a plain S3 object on top of a list of matrices — it survives saveRDS / readRDS round-trips and stays portable across machines.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/02-quickstart.html#where-to-go-next",
+    "href": "chapters/02-quickstart.html#where-to-go-next",
+    "title": "3  Quick start",
+    "section": "4.7 Where to go next",
+    "text": "4.7 Where to go next\n\nChapter 3 — Dynamic DID — every option of didgpu() with worked examples.\nChapter 8 — GPU & Performance — how to make this 50× faster.\nChapter 10 — Reproducibility & checkpointing — how to make a 12-hour bootstrap survive a crash.",
+    "crumbs": [
+      "Get Started",
+      "Getting Started",
+      "<span class='chapter-number'>3</span>  <span class='chapter-title'>Quick start</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/03-dynamic-did.html",
+    "href": "chapters/03-dynamic-did.html",
+    "title": "4  Dynamic DiD — didgpu()",
+    "section": "",
+    "text": "5 Dynamic difference-in-differences — didgpu()\ndidgpu() implements the heterogeneity-robust event-study DiD estimator of @dechaisemartin2024dynamic. It is the flagship estimator in this package and bit-for-bit numerically equivalent to the reference R package DIDmultiplegtDYN across every commonly-used option.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dynamic DiD — `didgpu()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/03-dynamic-did.html#what-it-estimates",
+    "href": "chapters/03-dynamic-did.html#what-it-estimates",
+    "title": "4  Dynamic DiD — didgpu()",
+    "section": "5.1 What it estimates",
+    "text": "5.1 What it estimates\nFor each event-time \\(k \\in \\{1, 2, \\dots, \\text{effects}\\}\\), the per-event-time DID is the average causal effect of being exposed to a strictly higher treatment dose for \\(k\\) periods relative to a clean, not-yet-switched comparison group within the same baseline-treatment cohort. The estimator pools across “switcher-in” (treatment goes up) and “switcher-out” (treatment goes down) directions via Neyman-weighted averaging.\nThe published Effects matrix has one row per event-time, with:\n\nEstimate, SE, LB.CI, UB.CI — the point estimate and its inference;\nN (unweighted observations), Switchers (unweighted switcher cells), N.w (weighted observation mass), Switchers.w (weighted switcher mass) — the four sample-size columns the reference reports.\n\nA parallel Placebos matrix reports pre-treatment falsification effects at horizons \\(-1, -2, \\dots, -\\text{placebo}\\).",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dynamic DiD — `didgpu()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/03-dynamic-did.html#function-signature",
+    "href": "chapters/03-dynamic-did.html#function-signature",
+    "title": "4  Dynamic DiD — didgpu()",
+    "section": "5.2 Function signature",
+    "text": "5.2 Function signature\n\ndidgpu(\n  df,\n  outcome, group, time, treatment,\n  effects               = 1L,\n  placebo               = 0L,\n  switchers             = \"\",                # \"\" / \"in\" / \"out\"\n  same_switchers        = FALSE,\n  same_switchers_pl     = FALSE,\n  normalized            = FALSE,\n  only_never_switchers  = FALSE,\n  dont_drop_larger_lower= FALSE,\n  trends_lin            = FALSE,\n  trends_nonparam       = NULL,\n  controls              = NULL,\n  weight                = NULL,\n  continuous            = NULL,\n  predict_het           = NULL,\n  bootstrap_reps        = 0L,\n  cluster               = NULL,\n  ci_level              = 95,\n  backend               = \"auto\",            # \"auto\"/\"r\"/\"cpu\"/\"cuda\"/\"reference\"\n  checkpoint_dir        = NULL,\n  seed                  = NULL,\n  n_workers             = NULL,\n  verbose               = TRUE\n)",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dynamic DiD — `didgpu()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/03-dynamic-did.html#common-option-recipes",
+    "href": "chapters/03-dynamic-did.html#common-option-recipes",
+    "title": "4  Dynamic DiD — didgpu()",
+    "section": "5.3 Common option recipes",
+    "text": "5.3 Common option recipes\n\n5.3.1 Heterogeneity by group covariate\n\n\n\n\n\n\nTip\n\n\n\nFull chapter content with worked examples is in progress. The options above each correspond to a section of the reference paper @dechaisemartin2024dynamic; this chapter will expand to a worked example per option. In the meantime, the function documentation (?didgpu) is complete and the package README links every option to the relevant section of the paper.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dynamic DiD — `didgpu()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/03-dynamic-did.html#see-also",
+    "href": "chapters/03-dynamic-did.html#see-also",
+    "title": "4  Dynamic DiD — didgpu()",
+    "section": "5.4 See also",
+    "text": "5.4 See also\n\n@dechaisemartin2024dynamic — the method paper.\nDIDmultiplegtDYN — the reference R implementation didgpu targets bit-for-bit.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dynamic DiD — `didgpu()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/03-dynamic-did.html#references",
+    "href": "chapters/03-dynamic-did.html#references",
+    "title": "4  Dynamic DiD — didgpu()",
+    "section": "5.5 References",
+    "text": "5.5 References",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>4</span>  <span class='chapter-title'>Dynamic DiD — `didgpu()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/04-callaway-santanna.html",
+    "href": "chapters/04-callaway-santanna.html",
+    "title": "5  Callaway-Sant’Anna — didgpu_cs()",
+    "section": "",
+    "text": "6 Callaway-Sant’Anna staggered DiD — didgpu_cs()\ndidgpu_cs() implements the staggered-adoption DiD estimator of @callaway2021difference, with all three inner estimators (OR, IPW, DR), all four aggregations (event / group / calendar / overall), and both bootstrap variants (cluster and multiplier).",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Callaway-Sant'Anna — `didgpu_cs()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/04-callaway-santanna.html#function-signature",
+    "href": "chapters/04-callaway-santanna.html#function-signature",
+    "title": "5  Callaway-Sant’Anna — didgpu_cs()",
+    "section": "6.1 Function signature",
+    "text": "6.1 Function signature\n\ndidgpu_cs(\n  df,\n  outcome, group, time, treatment,\n  est_method     = c(\"DR\", \"OR\", \"IPW\"),\n  control_group  = c(\"notyet\", \"never\"),\n  aggregation    = c(\"event\", \"group\", \"calendar\", \"overall\"),\n  covariates     = NULL,\n  weight         = NULL,\n  bootstrap_reps = 0L,\n  bootstrap_kind = c(\"cluster\", \"multiplier\"),\n  cluster        = NULL,\n  ci_level       = 95,\n  backend        = \"auto\",\n  seed           = NULL,\n  verbose        = TRUE\n)",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Callaway-Sant'Anna — `didgpu_cs()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/04-callaway-santanna.html#what-it-estimates",
+    "href": "chapters/04-callaway-santanna.html#what-it-estimates",
+    "title": "5  Callaway-Sant’Anna — didgpu_cs()",
+    "section": "6.2 What it estimates",
+    "text": "6.2 What it estimates\nFor each group-time \\((g, t)\\) with \\(g\\) = first-treated period and \\(t\\) = calendar period, the conditional ATT \\(ATT(g, t) = \\mathbb{E}\\bigl[Y_t(1) - Y_t(0) \\mid G_g = 1\\bigr]\\) is identified by a 2×2 DiD against either the not-yet-treated or the never-treated control group.\nThe package returns the full att_gt matrix, then aggregates it into the published event-study / group-time / calendar / overall quantities.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Callaway-Sant'Anna — `didgpu_cs()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/04-callaway-santanna.html#gpu-acceleration",
+    "href": "chapters/04-callaway-santanna.html#gpu-acceleration",
+    "title": "5  Callaway-Sant’Anna — didgpu_cs()",
+    "section": "6.3 GPU acceleration",
+    "text": "6.3 GPU acceleration\nAll three inner regressions (OR, IPW, DR) run on the GPU (src/cuda_cs_inner.cu) with per-row influence functions:\n\nOR uses an in-thread Cholesky per (g, t) cell;\nIPW / DR add a per-cell IRLS logistic propensity model that replicates stats::glm.fit to ~1e-8 (verified in tests/testthat/test-cuda-cs-wiring.R);\nDR layers on the outcome-regression augmentation.\n\nPer-cell influence functions also let the cluster and multiplier bootstrap SEs run entirely on the GPU.\n\n\n\n\n\n\nTip\n\n\n\nFull chapter with worked examples, covariates, and the four aggregation shapes is in progress. The function documentation (?didgpu_cs) is complete and the README’s “Method families” section sketches typical usage.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Callaway-Sant'Anna — `didgpu_cs()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/04-callaway-santanna.html#see-also",
+    "href": "chapters/04-callaway-santanna.html#see-also",
+    "title": "5  Callaway-Sant’Anna — didgpu_cs()",
+    "section": "6.4 See also",
+    "text": "6.4 See also\n\n@callaway2021difference — the method paper.\ndid — the reference R implementation didgpu_cs targets.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Callaway-Sant'Anna — `didgpu_cs()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/04-callaway-santanna.html#references",
+    "href": "chapters/04-callaway-santanna.html#references",
+    "title": "5  Callaway-Sant’Anna — didgpu_cs()",
+    "section": "6.5 References",
+    "text": "6.5 References",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>5</span>  <span class='chapter-title'>Callaway-Sant'Anna — `didgpu_cs()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/05-fect-ifect-mc.html",
+    "href": "chapters/05-fect-ifect-mc.html",
+    "title": "6  FEct / IFEct / MC — didgpu_fect()",
+    "section": "",
+    "text": "7 Fixed-effects counterfactual — didgpu_fect()\ndidgpu_fect() implements the three counterfactual estimators of @liu2024practical and @athey2021matrix:\ndidgpu_fect targets bit-for-bit numerical equivalence with the reference fect package.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>FEct / IFEct / MC — `didgpu_fect()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/05-fect-ifect-mc.html#function-signature",
+    "href": "chapters/05-fect-ifect-mc.html#function-signature",
+    "title": "6  FEct / IFEct / MC — didgpu_fect()",
+    "section": "7.1 Function signature",
+    "text": "7.1 Function signature\n\ndidgpu_fect(\n  df,\n  outcome, group, time, treatment,\n  method         = c(\"fe\", \"ife\", \"mc\"),\n  r              = 0L,            # factors for IFE\n  lambda         = NULL,          # MC regularisation\n  cv             = TRUE,\n  bootstrap_reps = 0L,\n  bootstrap_kind = c(\"cluster\", \"multiplier\"),\n  cluster        = NULL,\n  ci_level       = 95,\n  backend        = \"auto\",\n  seed           = NULL,\n  verbose        = TRUE\n)",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>FEct / IFEct / MC — `didgpu_fect()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/05-fect-ifect-mc.html#how-the-three-methods-relate",
+    "href": "chapters/05-fect-ifect-mc.html#how-the-three-methods-relate",
+    "title": "6  FEct / IFEct / MC — didgpu_fect()",
+    "section": "7.2 How the three methods relate",
+    "text": "7.2 How the three methods relate\n\n\n\n\n\n\n\n\nMethod\nCounterfactual model\nWhen you’d reach for it\n\n\n\n\nfe\n\\(Y_{it}(0) = \\alpha_i + \\xi_t + \\varepsilon\\)\nStandard TWFE world. Fastest.\n\n\nife\nadds \\(\\mathbf{\\lambda}_i^\\top \\mathbf{f}_t\\) (\\(r\\) factors)\nWhen you suspect unmodeled common time trends specific to units.\n\n\nmc\nlow-rank matrix completion via nuclear norm\nMany missing cells, or you want the methodology to choose rank for you.\n\n\n\nAll three are estimated on the unit × time outcome matrix with treated cells masked out; the missing cells are then imputed and the ATT is the average of (observed − imputed) over treated cells.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>FEct / IFEct / MC — `didgpu_fect()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/05-fect-ifect-mc.html#gpu-acceleration",
+    "href": "chapters/05-fect-ifect-mc.html#gpu-acceleration",
+    "title": "6  FEct / IFEct / MC — didgpu_fect()",
+    "section": "7.3 GPU acceleration",
+    "text": "7.3 GPU acceleration\nThe hot paths — the factor-update Gauss-Seidel sweep in IFE, the truncated SVD in MC, the cluster bootstrap on per-unit influence functions — all run on the GPU (src/cuda_fect_fe.cu, src/cuda_fect_svd.cu).\n\n\n\n\n\n\nTip\n\n\n\nFull chapter with rank-selection guidance, placebo / leave-one-out diagnostics, and worked examples on the EDR and simdata panels (from the fect package’s vignettes) is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>FEct / IFEct / MC — `didgpu_fect()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/05-fect-ifect-mc.html#see-also",
+    "href": "chapters/05-fect-ifect-mc.html#see-also",
+    "title": "6  FEct / IFEct / MC — didgpu_fect()",
+    "section": "7.4 See also",
+    "text": "7.4 See also\n\n@liu2024practical — FEct and IFEct.\n@athey2021matrix — Matrix Completion.\nfect — the reference R package didgpu_fect targets.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>FEct / IFEct / MC — `didgpu_fect()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/05-fect-ifect-mc.html#references",
+    "href": "chapters/05-fect-ifect-mc.html#references",
+    "title": "6  FEct / IFEct / MC — didgpu_fect()",
+    "section": "7.5 References",
+    "text": "7.5 References",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>6</span>  <span class='chapter-title'>FEct / IFEct / MC — `didgpu_fect()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/06-static-did.html",
+    "href": "chapters/06-static-did.html",
+    "title": "7  Static DID_M — didgpu_did_static()",
+    "section": "",
+    "text": "8 Instantaneous DID_M — didgpu_did_static()\ndidgpu_did_static() implements the instantaneous, non-absorbing DiD estimator of @dechaisemartin2020twoway. Unlike most staggered-adoption methods, it allows treatment to switch on and off (non-absorbing) and is identified period-by-period without imposing an event-study structure.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>7</span>  <span class='chapter-title'>Static DID_M — `didgpu_did_static()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/06-static-did.html#what-it-estimates",
+    "href": "chapters/06-static-did.html#what-it-estimates",
+    "title": "7  Static DID_M — didgpu_did_static()",
+    "section": "8.1 What it estimates",
+    "text": "8.1 What it estimates\nFor each unit-period \\((i, t)\\) where the unit switches between \\(t-1\\) and \\(t\\), the period-over-period outcome change \\(Y_{i,t} - Y_{i,t-1}\\) is compared against the analogous change of same-baseline stayers (units with the same treatment value at \\(t-1\\) that do not switch at \\(t\\)). Averaging over all switch events gives the unweighted DID_M; the cluster bootstrap provides SEs.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>7</span>  <span class='chapter-title'>Static DID_M — `didgpu_did_static()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/06-static-did.html#function-signature",
+    "href": "chapters/06-static-did.html#function-signature",
+    "title": "7  Static DID_M — didgpu_did_static()",
+    "section": "8.2 Function signature",
+    "text": "8.2 Function signature\n\ndidgpu_did_static(\n  df,\n  outcome, group, time, treatment,\n  bootstrap_reps = 0L,\n  cluster        = NULL,\n  ci_level       = 95,\n  backend        = \"auto\",\n  seed           = NULL,\n  verbose        = TRUE\n)",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>7</span>  <span class='chapter-title'>Static DID_M — `didgpu_did_static()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/06-static-did.html#bit-for-bit-equivalence-target",
+    "href": "chapters/06-static-did.html#bit-for-bit-equivalence-target",
+    "title": "7  Static DID_M — didgpu_did_static()",
+    "section": "8.3 Bit-for-bit equivalence target",
+    "text": "8.3 Bit-for-bit equivalence target\nMatches the DIDmultiplegt package’s did_multiplegt(robust_dynamic = FALSE) output.\n\n\n\n\n\n\nTip\n\n\n\nFull chapter with worked examples (including a non-absorbing toy panel where standard TWFE produces a wrong-sign coefficient) is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>7</span>  <span class='chapter-title'>Static DID_M — `didgpu_did_static()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/06-static-did.html#see-also",
+    "href": "chapters/06-static-did.html#see-also",
+    "title": "7  Static DID_M — didgpu_did_static()",
+    "section": "8.4 See also",
+    "text": "8.4 See also\n\n@dechaisemartin2020twoway — the method paper.\nDIDmultiplegt — the reference R implementation.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>7</span>  <span class='chapter-title'>Static DID_M — `didgpu_did_static()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/06-static-did.html#references",
+    "href": "chapters/06-static-did.html#references",
+    "title": "7  Static DID_M — didgpu_did_static()",
+    "section": "8.5 References",
+    "text": "8.5 References",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>7</span>  <span class='chapter-title'>Static DID_M — `didgpu_did_static()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/07-continuous-treatment.html",
+    "href": "chapters/07-continuous-treatment.html",
+    "title": "8  Continuous treatment — didgpu_did_continuous()",
+    "section": "",
+    "text": "9 Continuous DiD with no stayers — didgpu_did_continuous()\ndidgpu_did_continuous() implements the no-stayers continuous-treatment DiD of @dechaisemartin2024continuous. It is for the case where the treatment dose changes for nearly every unit between \\(t-1\\) and \\(t\\) — so there is no pure control group, and identification has to come from the first-difference regression interior.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>8</span>  <span class='chapter-title'>Continuous treatment — `didgpu_did_continuous()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/07-continuous-treatment.html#what-it-estimates",
+    "href": "chapters/07-continuous-treatment.html#what-it-estimates",
+    "title": "8  Continuous treatment — didgpu_did_continuous()",
+    "section": "9.1 What it estimates",
+    "text": "9.1 What it estimates\nTwo related quantities:\n\neffect(d) — the level effect of being exposed to dose \\(d\\) rather than the baseline dose, at first difference.\nACR(d) — the average causal response — i.e., the derivative of effect(d) with respect to \\(d\\) at the population dose-density.\n\nBoth are point-identified under the assumption that \\(\\mathbb{E}\\bigl[\\Delta Y \\mid \\Delta D = 0\\bigr]\\) is recoverable from “quasi-stayers” (units with \\(|\\Delta D| \\le h\\) for some bandwidth \\(h\\)).",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>8</span>  <span class='chapter-title'>Continuous treatment — `didgpu_did_continuous()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/07-continuous-treatment.html#two-estimator-flavours",
+    "href": "chapters/07-continuous-treatment.html#two-estimator-flavours",
+    "title": "8  Continuous treatment — didgpu_did_continuous()",
+    "section": "9.2 Two estimator flavours",
+    "text": "9.2 Two estimator flavours\n\ntype = \"parametric\" — polynomial spline in \\(d\\), \\(\\sqrt{n}\\)-rate estimator. Closed-form SEs.\ntype = \"nonparametric\" — local-linear smoother with bandwidth \\(h \\sim n^{-2/5}\\). Bootstrap SEs.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>8</span>  <span class='chapter-title'>Continuous treatment — `didgpu_did_continuous()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/07-continuous-treatment.html#function-signature",
+    "href": "chapters/07-continuous-treatment.html#function-signature",
+    "title": "8  Continuous treatment — didgpu_did_continuous()",
+    "section": "9.3 Function signature",
+    "text": "9.3 Function signature\n\ndidgpu_did_continuous(\n  df,\n  outcome, group, time, treatment,\n  type           = c(\"parametric\", \"nonparametric\"),\n  degree         = 3L,         # spline degree for \"parametric\"\n  bandwidth      = NULL,       # auto if NULL, for \"nonparametric\"\n  bootstrap_reps = 0L,\n  cluster        = NULL,\n  ci_level       = 95,\n  backend        = \"auto\",\n  seed           = NULL,\n  verbose        = TRUE\n)\n\n\n\n\n\n\n\nTip\n\n\n\nFull chapter with simulated dose-response examples and a comparison of the two estimator flavours is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>8</span>  <span class='chapter-title'>Continuous treatment — `didgpu_did_continuous()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/07-continuous-treatment.html#see-also",
+    "href": "chapters/07-continuous-treatment.html#see-also",
+    "title": "8  Continuous treatment — didgpu_did_continuous()",
+    "section": "9.4 See also",
+    "text": "9.4 See also\n\n@dechaisemartin2024continuous — the method paper.\ncontdid — the reference R implementation.",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>8</span>  <span class='chapter-title'>Continuous treatment — `didgpu_did_continuous()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/07-continuous-treatment.html#references",
+    "href": "chapters/07-continuous-treatment.html#references",
+    "title": "8  Continuous treatment — didgpu_did_continuous()",
+    "section": "9.5 References",
+    "text": "9.5 References",
+    "crumbs": [
+      "Get Started",
+      "Estimators",
+      "<span class='chapter-number'>8</span>  <span class='chapter-title'>Continuous treatment — `didgpu_did_continuous()`</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/08-gpu-and-performance.html",
+    "href": "chapters/08-gpu-and-performance.html",
+    "title": "9  GPU & performance",
+    "section": "",
+    "text": "10 GPU & performance\nThe CUDA backend isn’t a gimmick. On a typical event-study panel with a few hundred units, twelve periods, and 500 cluster-bootstrap reps, the speedups look roughly like:\n(Indicative numbers on an RTX PRO Blackwell with CUDA 13.2 and 60k-cell panels. Exact numbers depend on panel shape and bootstrap rep count. See tools/bench-*.R for the reproducible benchmark scripts.)",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>9</span>  <span class='chapter-title'>GPU & performance</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/08-gpu-and-performance.html#when-the-gpu-pays-for-itself",
+    "href": "chapters/08-gpu-and-performance.html#when-the-gpu-pays-for-itself",
+    "title": "9  GPU & performance",
+    "section": "10.1 When the GPU pays for itself",
+    "text": "10.1 When the GPU pays for itself\nThe fixed cost of a GPU call is non-trivial (~10 ms per kernel launch), so the breakeven point is around a few thousand panel cells or ~50 bootstrap reps, whichever comes first. Below that, the R backend is fine and sometimes faster. Above it, the GPU wins by an order of magnitude.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>9</span>  <span class='chapter-title'>GPU & performance</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/08-gpu-and-performance.html#setup",
+    "href": "chapters/08-gpu-and-performance.html#setup",
+    "title": "9  GPU & performance",
+    "section": "10.2 Setup",
+    "text": "10.2 Setup\nDetailed CUDA setup instructions (Windows + Linux, including the “DLL relocation” workaround for CUDA 13) live in inst/doc/cuda_setup.md. The short version:\n\nInstall the NVIDIA CUDA Toolkit (≥ 12.0).\nOn Linux: nothing else.\nOn Windows: install Rtools45 + the MSVC Build Tools (nvcc on Windows invokes cl.exe internally), then either set CUDA_PATH or rely on the default Program Files install location.\nReinstall didgpu from source. Verify with didgpu::didgpu_has_cuda_support().",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>9</span>  <span class='chapter-title'>GPU & performance</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/08-gpu-and-performance.html#picking-a-backend",
+    "href": "chapters/08-gpu-and-performance.html#picking-a-backend",
+    "title": "9  GPU & performance",
+    "section": "10.3 Picking a backend",
+    "text": "10.3 Picking a backend\n\nfit &lt;- didgpu(panel, ..., backend = \"auto\")\n\nbackend = \"auto\" does the right thing:\n\nIf CUDA is compiled in and the panel is large enough for the GPU to win, it uses CUDA;\notherwise it falls back to the Rcpp backend (cpu);\nand if that path doesn’t support a feature you asked for (controls, continuous treatment, normalized estimator), it falls back further to the pure-R backend.\n\nYou can force a backend explicitly with backend = \"r\", \"cpu\", or \"cuda\". The output of any backend is bit-for-bit identical on the deterministic point estimate; only the bootstrap RNG stream differs between the GPU and CPU bootstraps (the SEs converge as B → ∞).",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>9</span>  <span class='chapter-title'>GPU & performance</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/08-gpu-and-performance.html#bookkeeping-which-blackwell-card",
+    "href": "chapters/08-gpu-and-performance.html#bookkeeping-which-blackwell-card",
+    "title": "9  GPU & performance",
+    "section": "10.4 Bookkeeping: which Blackwell card?",
+    "text": "10.4 Bookkeeping: which Blackwell card?\nIf you have a current-generation Blackwell card (RTX PRO Blackwell, RTX 50-series), make sure you’re on didgpu ≥ 0.1.1 — earlier versions silently returned all-zero CUDA results on Blackwell because the kernels were compiled only for sm_75–sm_90. The fix added sm_120 and a compute_120 PTX fallback; this is in every release from 0.1.1 onward.\n\n\n\n\n\n\nTip\n\n\n\nA full benchmark chapter with reproducible bench scripts and per-method profiling output is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>9</span>  <span class='chapter-title'>GPU & performance</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/09-sensitivity-honestdid.html",
+    "href": "chapters/09-sensitivity-honestdid.html",
+    "title": "10  Sensitivity analysis",
+    "section": "",
+    "text": "11 Sensitivity analysis\ndidgpu ships with three sensitivity-analysis wrappers that take any fitted didgpu / didgpu_cs / didgpu_fect object and return the same robust-confidence-set output the underlying methodology papers do.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>10</span>  <span class='chapter-title'>Sensitivity analysis</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/09-sensitivity-honestdid.html#honestdid-relative-magnitudes-smoothness",
+    "href": "chapters/09-sensitivity-honestdid.html#honestdid-relative-magnitudes-smoothness",
+    "title": "10  Sensitivity analysis",
+    "section": "11.1 HonestDiD (relative magnitudes, smoothness)",
+    "text": "11.1 HonestDiD (relative magnitudes, smoothness)\n\nhd &lt;- didgpu_honest_did(fit, M_bar = c(0, 0.5, 1, 2))\nhd\nplot(hd)\n\nWraps [@rambachan2023more]’s HonestDiD package. The “smoothness” (\\(M\\)) and “relative magnitudes” (\\(\\bar{M}\\)) restrictions both work unchanged; the FLCI variant is also available.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>10</span>  <span class='chapter-title'>Sensitivity analysis</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/09-sensitivity-honestdid.html#rambachan-roth-equivalence-passes-at-delta",
+    "href": "chapters/09-sensitivity-honestdid.html#rambachan-roth-equivalence-passes-at-delta",
+    "title": "10  Sensitivity analysis",
+    "section": "11.2 Rambachan-Roth equivalence (passes-at-delta)",
+    "text": "11.2 Rambachan-Roth equivalence (passes-at-delta)\n\neq &lt;- didgpu_equivalence(fit, delta = 0.05, alpha = 0.05)\neq\n\nThe “equivalence-style” test reports passes_at_delta — whether the joint test rejects the null that every effect is within \\(\\pm\\delta\\) of zero.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>10</span>  <span class='chapter-title'>Sensitivity analysis</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/09-sensitivity-honestdid.html#freyaldenhoven-hansen-shapiro-pre-trend-correction",
+    "href": "chapters/09-sensitivity-honestdid.html#freyaldenhoven-hansen-shapiro-pre-trend-correction",
+    "title": "10  Sensitivity analysis",
+    "section": "11.3 Freyaldenhoven-Hansen-Shapiro pre-trend correction",
+    "text": "11.3 Freyaldenhoven-Hansen-Shapiro pre-trend correction\n\nfhs &lt;- didgpu_freyaldenhoven(fit, ...)\n\nWraps [@freyaldenhoven2019pretrends] for trend-stable confidence sets.\n\n\n\n\n\n\nTip\n\n\n\nA worked walkthrough — taking one fit through all three sensitivity-analysis methods and reading the output — is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>10</span>  <span class='chapter-title'>Sensitivity analysis</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/09-sensitivity-honestdid.html#references",
+    "href": "chapters/09-sensitivity-honestdid.html#references",
+    "title": "10  Sensitivity analysis",
+    "section": "11.4 References",
+    "text": "11.4 References",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>10</span>  <span class='chapter-title'>Sensitivity analysis</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/10-reproducibility-checkpointing.html",
+    "href": "chapters/10-reproducibility-checkpointing.html",
+    "title": "11  Reproducibility & checkpointing",
+    "section": "",
+    "text": "12 Reproducibility & checkpointing\ndidgpu’s checkpointing is the difference between a 12-hour bootstrap that resumes after a crash and a 12-hour bootstrap that has to start over.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>11</span>  <span class='chapter-title'>Reproducibility & checkpointing</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/10-reproducibility-checkpointing.html#turn-it-on",
+    "href": "chapters/10-reproducibility-checkpointing.html#turn-it-on",
+    "title": "11  Reproducibility & checkpointing",
+    "section": "12.1 Turn it on",
+    "text": "12.1 Turn it on\n\nfit &lt;- didgpu(\n  panel, ...,\n  bootstrap_reps = 2000,\n  checkpoint_dir = \"~/didgpu-runs/2026-05-28-fit\",\n  seed           = 17\n)\n\ndidgpu writes one small RDS file per bootstrap cell (the per-rep sufficient statistics, not the panel — usually a few KB each).",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>11</span>  <span class='chapter-title'>Reproducibility & checkpointing</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/10-reproducibility-checkpointing.html#resume-after-a-crash",
+    "href": "chapters/10-reproducibility-checkpointing.html#resume-after-a-crash",
+    "title": "11  Reproducibility & checkpointing",
+    "section": "12.2 Resume after a crash",
+    "text": "12.2 Resume after a crash\nJust rerun the same call with the same checkpoint_dir and seed. didgpu reads the existing cells, picks up at the next missing one, and finishes:\n\nfit &lt;- didgpu(\n  panel, ...,\n  bootstrap_reps = 2000,\n  checkpoint_dir = \"~/didgpu-runs/2026-05-28-fit\",  # same path\n  seed           = 17                                # same seed\n)\n\nNo tryCatch, no manual sharding, no “what was I up to?” archaeology.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>11</span>  <span class='chapter-title'>Reproducibility & checkpointing</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/10-reproducibility-checkpointing.html#how-same-seed-same-result-works",
+    "href": "chapters/10-reproducibility-checkpointing.html#how-same-seed-same-result-works",
+    "title": "11  Reproducibility & checkpointing",
+    "section": "12.3 How “same seed = same result” works",
+    "text": "12.3 How “same seed = same result” works\ndidgpu’s bootstrap uses a deterministic per-cell seed derived from (seed, replicate_index). So:\n\nCells produced before the crash are bit-identical to what the resumed run would produce.\nThe aggregator sees a complete cell set regardless of which run wrote each one.\nBootstrap point estimate, SE, CI, and joint p-values are reproducible across crashes.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>11</span>  <span class='chapter-title'>Reproducibility & checkpointing</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/10-reproducibility-checkpointing.html#aggregating-already-saved-cells",
+    "href": "chapters/10-reproducibility-checkpointing.html#aggregating-already-saved-cells",
+    "title": "11  Reproducibility & checkpointing",
+    "section": "12.4 Aggregating already-saved cells",
+    "text": "12.4 Aggregating already-saved cells\nIf you want to look at a partial run without re-fitting:\n\npartial &lt;- didgpu_aggregate_cells(\n  checkpoint_dir = \"~/didgpu-runs/2026-05-28-fit\"\n)\npartial\n\nReturns the aggregated fit using whatever cells exist on disk. Useful for sanity-checking convergence while a long run is still going.\n\n\n\n\n\n\nTip\n\n\n\nA worked example — deliberately interrupt a 1000-rep bootstrap, then resume it, then compare to a fresh run — is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>11</span>  <span class='chapter-title'>Reproducibility & checkpointing</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/11-bootstrap-and-clustering.html",
+    "href": "chapters/11-bootstrap-and-clustering.html",
+    "title": "12  Bootstrap variants & clustering",
+    "section": "",
+    "text": "13 Bootstrap variants & clustering\ndidgpu supports two bootstrap kinds for didgpu_cs() and didgpu_fect():\nFor didgpu() only the cluster bootstrap is supported (the dynamic estimator’s IFs require additional work that is on the roadmap).",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>12</span>  <span class='chapter-title'>Bootstrap variants & clustering</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/11-bootstrap-and-clustering.html#specifying-a-cluster",
+    "href": "chapters/11-bootstrap-and-clustering.html#specifying-a-cluster",
+    "title": "12  Bootstrap variants & clustering",
+    "section": "13.1 Specifying a cluster",
+    "text": "13.1 Specifying a cluster\nBy default the bootstrap clusters on the unit:\n\nfit &lt;- didgpu(..., bootstrap_reps = 500)\n\nIf your unit is not the natural cluster (panel of student outcomes where the policy varies at the school level, etc.), pass cluster:\n\nfit &lt;- didgpu(\n  panel, ...,\n  cluster        = \"school_id\",\n  bootstrap_reps = 500\n)",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>12</span>  <span class='chapter-title'>Bootstrap variants & clustering</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/11-bootstrap-and-clustering.html#resampling-at-multiple-levels",
+    "href": "chapters/11-bootstrap-and-clustering.html#resampling-at-multiple-levels",
+    "title": "12  Bootstrap variants & clustering",
+    "section": "13.2 Resampling at multiple levels",
+    "text": "13.2 Resampling at multiple levels\nFor multi-way clustering (e.g. classroom-within-school), use a composite cluster id:\n\npanel$cluster_composite &lt;- paste(panel$school_id, panel$classroom_id, sep = \":\")\nfit &lt;- didgpu(panel, ..., cluster = \"cluster_composite\", bootstrap_reps = 500)\n\ndidgpu’s resampler is a 1-pass random hash of clusters → reps, so it scales linearly in B.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>12</span>  <span class='chapter-title'>Bootstrap variants & clustering</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/11-bootstrap-and-clustering.html#multiplier-bootstrap",
+    "href": "chapters/11-bootstrap-and-clustering.html#multiplier-bootstrap",
+    "title": "12  Bootstrap variants & clustering",
+    "section": "13.3 Multiplier bootstrap",
+    "text": "13.3 Multiplier bootstrap\n\ncs &lt;- didgpu_cs(\n  panel, ...,\n  est_method     = \"DR\",\n  bootstrap_reps = 5000,\n  bootstrap_kind = \"multiplier\",\n  seed           = 17\n)\n\nThis is the fast variant. It uses per-unit influence functions \\(\\psi_i\\) and Rademacher / Mammen multipliers \\(\\xi_b\\):\n\\[\n\\hat\\theta^{(b)} - \\hat\\theta \\approx \\frac{1}{n} \\sum_i \\xi_b \\, \\psi_i\n\\]\nOn the GPU, all of this is a couple of GEMVs and a Cholesky per multiplier — vastly faster than refitting the inner estimator 5000 times.\n\n\n\n\n\n\nTip\n\n\n\nA worked example comparing cluster and multiplier bootstrap SEs on the same panel (they agree to ~1e-2 at B = 2000) is in progress.",
+    "crumbs": [
+      "Get Started",
+      "Advanced",
+      "<span class='chapter-number'>12</span>  <span class='chapter-title'>Bootstrap variants & clustering</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/12-methodology.html",
+    "href": "chapters/12-methodology.html",
+    "title": "13  Methodology notes",
+    "section": "",
+    "text": "14 Methodology notes\nThis chapter compiles the internal-implementation notes for each estimator family. It is mostly of interest to people verifying numerical equivalence with the reference packages, or porting didgpu’s algorithms to another language.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>13</span>  <span class='chapter-title'>Methodology notes</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/12-methodology.html#dynamic-did-didgpu",
+    "href": "chapters/12-methodology.html#dynamic-did-didgpu",
+    "title": "13  Methodology notes",
+    "section": "14.1 Dynamic DiD — didgpu()",
+    "text": "14.1 Dynamic DiD — didgpu()\nThe estimator is described in two papers. The current implementation follows the algorithm of @dechaisemartin2024dynamic verbatim, with the following implementation notes specific to this package:\n\nSame-switchers gate. The package’s same_switchers option applies a per-group still_switcher_XX indicator computed before the per-event-time loop. The placebo block uses the same gate (verified against DIDmultiplegtDYN 2.3.x).\nNeyman pooling weight. The pooling weight \\(w_\\text{in} = N_\\text{in}/(N_\\text{in} + N_\\text{out})\\) uses the exact (un-floored) weighted switcher mass.\nReported sample sizes. Per-event-time, four counts are reported: N (unweighted observations), Switchers (unweighted switcher cells), N.w (weighted observation mass), Switchers.w (weighted switcher mass).\nTrailing unestimable horizons. When the data-availability clamp \\(\\max L_g\\) permits a horizon that no switcher reaches with a valid control, didgpu drops the trailing NA row to match the reference’s reported horizon count.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>13</span>  <span class='chapter-title'>Methodology notes</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/12-methodology.html#callaway-santanna-didgpu_cs",
+    "href": "chapters/12-methodology.html#callaway-santanna-didgpu_cs",
+    "title": "13  Methodology notes",
+    "section": "14.2 Callaway-Sant’Anna — didgpu_cs()",
+    "text": "14.2 Callaway-Sant’Anna — didgpu_cs()\n\nInner estimators. OR uses an in-thread Cholesky per (g, t); IPW / DR add a per-cell IRLS logistic propensity model replicating stats::glm.fit to ~1e-8.\nInfluence functions. Computed per-row, then aggregated per the requested aggregation (event / group / calendar / overall).\nBootstrap. Cluster and multiplier variants both supported; the multiplier variant uses per-unit IFs and is the recommended inference for large B.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>13</span>  <span class='chapter-title'>Methodology notes</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/12-methodology.html#fect-ifect-mc-didgpu_fect",
+    "href": "chapters/12-methodology.html#fect-ifect-mc-didgpu_fect",
+    "title": "13  Methodology notes",
+    "section": "14.3 FEct / IFEct / MC — didgpu_fect()",
+    "text": "14.3 FEct / IFEct / MC — didgpu_fect()\n\nIFE. Two-pass Gauss-Seidel sweep on the factor matrix, then a truncated SVD via the GPU’s cuSOLVER. CV on rank selection.\nMC. Soft-impute via cuSolverDnDgesvd, with the nuclear-norm \\(\\lambda\\) chosen by CV from a log grid.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>13</span>  <span class='chapter-title'>Methodology notes</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/12-methodology.html#reproducibility-seeding",
+    "href": "chapters/12-methodology.html#reproducibility-seeding",
+    "title": "13  Methodology notes",
+    "section": "14.4 Reproducibility & seeding",
+    "text": "14.4 Reproducibility & seeding\ndidgpu’s bootstrap seed scheme is a deterministic hash(seed, replicate_index) per cell. This guarantees that:\n\nsame seed + same cells = same result\nacross crashes, resumed cells equal what a fresh run would produce\nGPU and CPU agree on the deterministic point estimate (only the bootstrap RNG stream differs).\n\n\n\n\n\n\n\nTip\n\n\n\nThe internal reference notes (inst/doc/reference_internals.md) have the full algorithmic pseudo-code for each estimator. Selected sections will be inlined into this chapter as the book matures.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>13</span>  <span class='chapter-title'>Methodology notes</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/12-methodology.html#references",
+    "href": "chapters/12-methodology.html#references",
+    "title": "13  Methodology notes",
+    "section": "14.5 References",
+    "text": "14.5 References",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>13</span>  <span class='chapter-title'>Methodology notes</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html",
+    "href": "chapters/13-faq.html",
+    "title": "14  FAQ",
+    "section": "",
+    "text": "15 FAQ",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#do-i-need-a-gpu-to-use-didgpu",
+    "href": "chapters/13-faq.html#do-i-need-a-gpu-to-use-didgpu",
+    "title": "14  FAQ",
+    "section": "15.1 Do I need a GPU to use didgpu?",
+    "text": "15.1 Do I need a GPU to use didgpu?\nNo. The pure-R and Rcpp backends are full citizens; everything in this book works on a laptop with no GPU. The CUDA backend is optional and detected at install time.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#my-cuda-build-returns-all-zeros-what-gives",
+    "href": "chapters/13-faq.html#my-cuda-build-returns-all-zeros-what-gives",
+    "title": "14  FAQ",
+    "section": "15.2 My CUDA build returns all zeros — what gives?",
+    "text": "15.2 My CUDA build returns all zeros — what gives?\nYou’re almost certainly on a Blackwell-class card (RTX PRO Blackwell, RTX 50-series) and an older didgpu (&lt; 0.1.1). Upgrade to didgpu ≥ 0.1.1 — those versions added sm_120 and a compute_120 PTX target.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#how-long-does-a-typical-bootstrap-run-take",
+    "href": "chapters/13-faq.html#how-long-does-a-typical-bootstrap-run-take",
+    "title": "14  FAQ",
+    "section": "15.3 How long does a typical bootstrap run take?",
+    "text": "15.3 How long does a typical bootstrap run take?\nFor a panel of 200 units × 12 periods × 500 bootstrap reps:\n\nbackend = \"r\" — minutes to ~30 min depending on estimator;\nbackend = \"cuda\" (Ampere or newer) — seconds to a couple of minutes.\n\nFor larger panels the gap widens. See Chapter 8 — GPU & Performance for indicative numbers.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#my-bootstrap-crashed-at-hour-11-of-12.-do-i-have-to-start-over",
+    "href": "chapters/13-faq.html#my-bootstrap-crashed-at-hour-11-of-12.-do-i-have-to-start-over",
+    "title": "14  FAQ",
+    "section": "15.4 My bootstrap crashed at hour 11 of 12. Do I have to start over?",
+    "text": "15.4 My bootstrap crashed at hour 11 of 12. Do I have to start over?\nNo. As long as you passed a checkpoint_dir and a seed, just rerun the same call. didgpu picks up at the first missing cell. See Chapter 10 — Reproducibility & checkpointing.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#does-didgpu-agree-with-didmultiplegtdyn-did-fect",
+    "href": "chapters/13-faq.html#does-didgpu-agree-with-didmultiplegtdyn-did-fect",
+    "title": "14  FAQ",
+    "section": "15.5 Does didgpu agree with DIDmultiplegtDYN / did / fect?",
+    "text": "15.5 Does didgpu agree with DIDmultiplegtDYN / did / fect?\nYes — by design and by continuous test. didgpu’s CI runs a randomized differential-test suite of tens of thousands of panels against each reference package on every push. Current status: bit-for-bit equivalence on the deterministic point estimates and within Monte Carlo error on the bootstrap SEs (which use independent RNG streams).\nThe few intentional differences (always cosmetic, never inferential) are documented in NEWS.md.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#can-i-use-didgpu-with-weighted-panels",
+    "href": "chapters/13-faq.html#can-i-use-didgpu-with-weighted-panels",
+    "title": "14  FAQ",
+    "section": "15.6 Can I use didgpu with weighted panels?",
+    "text": "15.6 Can I use didgpu with weighted panels?\nYes. Every estimator family accepts a weight = \"wt_col\" argument. The four sample-size columns (N, Switchers, N.w, Switchers.w) report both unweighted counts and weighted sums explicitly, so you know exactly what you’re being shown.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#how-do-i-cite-didgpu",
+    "href": "chapters/13-faq.html#how-do-i-cite-didgpu",
+    "title": "14  FAQ",
+    "section": "15.7 How do I cite didgpu?",
+    "text": "15.7 How do I cite didgpu?\ncitation(\"didgpu\"). didgpu also reminds you in its print output to cite the method paper for whichever estimator you ran (de Chaisemartin & D’Haultfoeuille, Callaway & Sant’Anna, Liu et al., Athey et al., as appropriate).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/13-faq.html#where-do-i-report-bugs",
+    "href": "chapters/13-faq.html#where-do-i-report-bugs",
+    "title": "14  FAQ",
+    "section": "15.8 Where do I report bugs?",
+    "text": "15.8 Where do I report bugs?\nhttps://github.com/JoshuaAmmons/didgpu/issues. Please include a reproducible example using didgpu_simulate_panel() or your own small panel; the package’s print methods and didgpu_glance() / didgpu_tidy() are useful for paste-into-issue summaries.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>14</span>  <span class='chapter-title'>FAQ</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html",
+    "href": "chapters/14-changelog.html",
+    "title": "15  Changelog",
+    "section": "",
+    "text": "16 Changelog\nThe changelog is maintained in NEWS.md in the package source. The chapter below is auto-rendered from that file on every build of the docs site.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#bug-fixes",
+    "href": "chapters/14-changelog.html#bug-fixes",
+    "title": "15  Changelog",
+    "section": "17.1 Bug fixes",
+    "text": "17.1 Bug fixes\n\nCUDA: support Blackwell (sm_120) GPUs. The GPU build previously targeted only Turing–Hopper (sm_75–sm_90) with no PTX fallback, so on Blackwell parts (RTX PRO Blackwell, RTX 50xx) the kernels had no device image and effect estimates silently came back as all zeros while the CPU/R backends were correct. Added compute_120,sm_120 plus a compute_120 PTX target to both src/Makevars and src/Makevars.win. GPU effects are again bit-identical to the CPU/R backends on Blackwell (verified on an RTX PRO 5000 Blackwell, CUDA 13.2).\nWindows build: ship src/didgpu_cuda.def. The DLL export list was git-ignored (/src/*.def), so clean checkouts — and the r-universe / install_github source build — could not link didgpu_cuda.dll. It is now tracked.\nWindows build: locate CUDA runtime DLLs under bin/x64. CUDA 13 moved the redistributable DLLs from bin/ to bin/x64/; the bundling step now searches both so didgpu_cuda.dll loads at runtime.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#reference-parity-with-didmultiplegtdyn-2.3.x",
+    "href": "chapters/14-changelog.html#reference-parity-with-didmultiplegtdyn-2.3.x",
+    "title": "15  Changelog",
+    "section": "17.2 Reference parity with DIDmultiplegtDYN 2.3.x",
+    "text": "17.2 Reference parity with DIDmultiplegtDYN 2.3.x\ndidgpu was originally validated bit-for-bit against an older DIDmultiplegtDYN. Two of its outputs were deliberately changed upstream; didgpu now tracks the current (fixed) behavior:\n\npredict_het standard errors now use HC2. The reference switched the heterogeneity-regression variance from HC1 to HC2 (sandwich::vcovHC(type = \"HC2\")) in v2.3.1 (“explicit CI formulas” fix). didgpu now does the same (new sandwich dependency), so the predict_het SE/t/LB/UB/pF columns match again.\nPlacebo N counts each contributing cell once. For bidirectional panels the reported placebo sample size was double-counting controls shared between the switcher-in and switcher-out comparisons. It now uses the in-direction count, matching the reference’s per-row coalesce(in, out) combiner across both in&gt;out and out&gt;in panels. Point estimates were never affected.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference",
+    "href": "chapters/14-changelog.html#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference",
+    "title": "15  Changelog",
+    "section": "17.3 Correctness fixes (found by randomized differential testing vs the reference)",
+    "text": "17.3 Correctness fixes (found by randomized differential testing vs the reference)\n\nsame_switchers: the placebo now uses the same restricted switcher set as the effects. Under same_switchers = TRUE the placebo block was computed on the full switcher set rather than the consistent-switchers subset, producing a biased placebo estimate (and inflated placebo N) relative to did_multiplegt_dyn. The placebo distance now honours the effects-based still_switcher restriction (the reference derives the placebo distribution from the same_switchers-gated effect distance), so placebo estimates and counts match again.\ntrends_lin: no longer crashes on panels with zero estimable effects. On short panels where no group has the F_g-2 pre-period that trends_lin requires, result aggregation crashed with “length of ‘dimnames’ [1] not equal to array extent” (an unguarded row-name build on a 0-row table). It now returns an empty, no-estimable- effects result cleanly.\nWeighted N / Switchers columns now separate unweighted counts from weighted sums. On weighted panels (weight =) the four reported count columns were all populated from the same (weighted, truncated) switcher mass, so N / Switchers reported weighted sums instead of observation counts, and N.w lost the fractional weight (each cell’s weight was floored before summing). The estimator now reports N and Switchers as the true unweighted observation / switcher counts and N.w / Switchers.w as the (unfloored) weighted sums, matching did_multiplegt_dyn exactly. Point estimates were never affected — the weighted switcher mass that drives the Neyman pooling and ATE weights is unchanged; only the reported count columns moved. On unweighted panels all four columns coincide as before (bit-identical output).\nWeighted estimates: Neyman direction-pooling no longer truncates the switcher mass. On weighted panels with switchers in both directions, the per-direction weighted switcher mass was floored to an integer before being used as the Neyman pooling weight (w_in = N_in / (N_in + N_out)) and as the across-horizon ATE weight, biasing the pooled event-study estimates by ~1e-3. The exact (unfloored) mass is now used throughout the estimate path, matching did_multiplegt_dyn. Single-direction (switchers = \"in\"/\"out\") and unweighted panels were never affected (the weight is 0/1 or the mass is already integer). Found by randomized weighted×flag differential testing.\nReported effect/placebo count: drop trailing unestimable horizons. didgpu’s horizon clamp uses each group’s own data availability (max L_g), which can be one step more permissive than did_multiplegt_dyn’s cohort-level T_g clamp. When that extra horizon has no switcher reaching it (NA estimate, zero switchers), the reference omits the row; didgpu now trims the trailing block of such unestimable effect/placebo rows so the reported horizon count matches. Estimable horizons, estimates, and all four count columns are unchanged. Verified across 359 boundary-stress panels (switchers in/out/both × effects 4–5 × weighted/unweighted): zero horizon count mismatches and, importantly, no case where didgpu reported an extra horizon with positive switchers. Found by overnight differential testing.\nPlacebos: drop the whole block when every horizon is unestimable. On weighted trends_lin (and other short-panel cases) the placebo block can be entirely unestimable — no group has the F_g - q - 1 pre-period any placebo horizon needs. did_multiplegt_dyn returns NULL placebos in that case; didgpu used to emit a placebo matrix of NAs. Aggregation now drops the placebo block when every placebo point estimate is NA, matching the reference. Found by extended weighted×flag differential testing (4 of 4 affected panels now match; all other scenarios untouched — verified 30 seeds × 14 scenarios = 420 weighted comparisons, 0 fails).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#callaway-santanna-2021-didgpu_cs",
+    "href": "chapters/14-changelog.html#callaway-santanna-2021-didgpu_cs",
+    "title": "15  Changelog",
+    "section": "18.1 Callaway-Sant’Anna (2021) — didgpu_cs()",
+    "text": "18.1 Callaway-Sant’Anna (2021) — didgpu_cs()\n\nest_method = c(\"OR\", \"IPW\", \"DR\") — all three inner estimators. DR is Sant’Anna-Zhao (2020) doubly-robust.\ncontrol_group = c(\"never\", \"notyet\") — never-treated OR not-yet-treated.\ncovariates = for OR/IPW/DR adjustment.\nPre-treatment placebos computed automatically; joint chi-square test on the placebo block via fit$placebo.\nFour aggregations (event / group / calendar / overall) with didgpu_cs_aggregate() for switching post-fit.\nbootstrap_kind = c(\"cluster\", \"multiplier\") — cluster bootstrap on units, or multiplier wild bootstrap on per-unit influence functions (much faster for large B).\nCUDA: all three inner regressions (OR / IPW / DR) run on the GPU (src/cuda_cs_inner.cu) with per-row influence functions. OR uses an in-thread Cholesky per cell; IPW/DR add a per-cell IRLS logistic propensity model replicating stats::glm.fit (ATT agrees with R to ~1e-8), and DR layers on the outcome-regression augmentation. With per-cell IFs, the cluster + multiplier bootstrap SEs all run on the GPU — the DR cluster bootstrap is ~192x faster than R.\nCross-validated against the reference did package on simulated panels (max abs diff &lt; 0.25 on event-study estimates).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#testmechs-kwon-roth-2026-didgpu_test_sharp_null",
+    "href": "chapters/14-changelog.html#testmechs-kwon-roth-2026-didgpu_test_sharp_null",
+    "title": "15  Changelog",
+    "section": "18.2 TestMechs (Kwon & Roth 2026) — didgpu_test_sharp_null()",
+    "text": "18.2 TestMechs (Kwon & Roth 2026) — didgpu_test_sharp_null()\n\nAll three test methods: \"CS\" (Cox-Shi 2023), \"ARP\" (Andrews-Roth-Pakes 2023), \"FSST\" (Fang-Santos-Shaikh-Torgovitsky 2023).\nBoth binary mediator (K = 2) and multi-level (K &gt;= 2) under no-defiers.\nGeneric CS engine .testmechs_cs_test(theta_hat, Sigma, A, A_eq, b_eq) is reusable for any moment-inequality test.\nNonparametric and Bayesian (Dirichlet) bootstrap of the partial-density vector beta.obs.\nCUDA bootstrap kernel src/cuda_testmechs_bootstrap.cu (cuRAND multinomial; the main acceleration target). Live on Linux/WSL and wired through .testmechs_bootstrap_cuda; the “nonparametric” method runs on the GPU, “bayes” uses the R path. cuRAND vs R’s MT19937 differ per-replicate, so bootstrap moments match within Monte-Carlo error rather than bit-for-bit.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#leave-one-out-robustness-didgpu_loo",
+    "href": "chapters/14-changelog.html#leave-one-out-robustness-didgpu_loo",
+    "title": "15  Changelog",
+    "section": "18.3 Leave-one-out robustness — didgpu_loo()",
+    "text": "18.3 Leave-one-out robustness — didgpu_loo()\n\nDrops one entity at a time (cohort / unit / cluster / arbitrary column level) and re-fits the estimator.\nWorks on all three estimator families: didgpu_result, didgpu_cs_result, didgpu_fect_result.\nReturns a didgpu_loo_result data.frame with leave_out, estimate, delta, and delta_pct columns, sorted by abs(delta) descending so the most-influential drop is on top.\nprint() shows the top-N most influential rows with an interpretation hint; plot() draws a tornado plot of deltas.\nDefault by = \"cohort\" (leave-one-cohort-out, the standard DiD diagnostic). Pass by = \"unit\", \"cluster\", or any column name to drop on a different key.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#honestdid-rambachan-roth-2023-didgpu_honest_did",
+    "href": "chapters/14-changelog.html#honestdid-rambachan-roth-2023-didgpu_honest_did",
+    "title": "15  Changelog",
+    "section": "18.4 HonestDiD (Rambachan & Roth 2023) — didgpu_honest_did()",
+    "text": "18.4 HonestDiD (Rambachan & Roth 2023) — didgpu_honest_did()\n\nSensitivity analysis on event-study DiD estimates.\nmethod = c(\"RM\", \"M\") — relative-magnitudes OR smoothness bounds.\nReports the breakdown parameter (smallest Mbar at which the CI includes zero) so users can read off how robust their conclusion is.\nWorks on both didgpu_result (DIDmultiplegtDYN-style) and didgpu_cs_result (Callaway-Sant’Anna) fits.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#fect-family-counterfactual-prediction-estimators-didgpu_fect",
+    "href": "chapters/14-changelog.html#fect-family-counterfactual-prediction-estimators-didgpu_fect",
+    "title": "15  Changelog",
+    "section": "18.5 fect family (counterfactual-prediction estimators) — didgpu_fect()",
+    "text": "18.5 fect family (counterfactual-prediction estimators) — didgpu_fect()",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn",
+    "href": "chapters/14-changelog.html#estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn",
+    "title": "15  Changelog",
+    "section": "18.6 Estimator (bit-identical to DIDmultiplegtDYN::did_multiplegt_dyn)",
+    "text": "18.6 Estimator (bit-identical to DIDmultiplegtDYN::did_multiplegt_dyn)\n\nBinary, multivalued, and continuous treatment.\neffects, placebo, switchers = \"\"/\"in\"/\"out\", ATE.\nweight, controls, trends_nonparam cohort extension.\nonly_never_switchers, same_switchers, dont_drop_larger_lower.\nnormalized = TRUE (per-unit-of-treatment), trends_lin = TRUE (linear cohort trends with cumulative-recovery placebos).\nsame_switchers_pl (placebo-side same-switchers gate; mirrors the reference’s constraint that it must be paired with same_switchers).\npredict_het (heterogeneity regression with HC1 robust SEs and joint F-test).\ndidgpu_by_path() for treatment-trajectory subgroup analysis (the equivalent of the reference’s by_path argument).\nSample-size columns (N, Switchers, N.w, Switchers.w) match the reference exactly.\ndidgpu_equivalence(fit, delta) — pre-trends equivalence (TOST) test on the placebo estimates. Instead of “failed to reject a zero pre-trend” (weak, and worst exactly when underpowered), it tests H0: |pre-trend| &gt;= delta and REJECTING is positive evidence the pre-trend is within +/- delta. Reports per-horizon and joint (intersection-union) verdicts plus the smallest defensible margin (breakdown_delta). Mirrors didgpu_fect_equivalence().\ndidgpu_joint_placebo(fit, horizons) — the joint chi-square placebo test (p_jointplacebo) restricted to a chosen pre-treatment window, reusing the stored bootstrap covariance. Test parallel trends only over the leads you care about; the full-window call reproduces the headline p_jointplacebo exactly.\ndidgpu_bacon() — Goodman-Bacon (2021) decomposition of the static TWFE DiD into its 2x2 timing-group comparisons, with the total weight on “forbidden” already-treated-control comparisons as the bias diagnostic. Validated by the exact identity (weighted 2x2 sum == the TWFE coefficient from didgpu_twfe()). Balanced, binary, absorbing panels.\ndidgpu_did_static() — de Chaisemartin & D’Haultfoeuille (2020) DID_M instantaneous estimator. Unlike the staggered-adoption methods it allows treatment to turn on AND off (non-absorbing): it compares each switcher’s period-over-period outcome change to same-baseline stayers and averages over all switch events, with a cluster bootstrap SE. Native reimplementation; cross-checked against DIDmultiplegt::did_multiplegt.\ndidgpu_freyaldenhoven() — Freyaldenhoven, Hansen & Shapiro (2019) pre-event panel event study. estimator = \"OLS\" is the two-way FE event study; estimator = \"FHS\" adds an auxiliary proxy covariate as an endogenous regressor and 2SLS-instruments it with a far policy lead to purge a confound that generates pre-trends. Native reimplementation of the first-difference parameterization; coefficients match eventstudyr::EventStudy (OLS and FHS) to machine precision.\ndidgpu_cs_continuous() — Callaway, Goodman-Bacon & Sant’Anna (2024) difference-in-differences with a CONTINUOUS treatment (dose). Estimates the dose-response curve: the level effect ATT(d) and the causal response ACRT(d) = ATT’(d), via a B-spline regression of the within-unit outcome change on the dose, vs a never-treated comparison; multiplier-bootstrap SEs. Native reimplementation (spline basis via splines2); ATT(d)/ACRT(d) match contdid::cont_did exactly.\ndidgpu_did_continuous() — de Chaisemartin & D’Haultfoeuille (2024) continuous treatment with NO STAYERS. When the dose changes for (almost) every unit there is no pure control group, so identification is in first differences: with dY, dD the within-unit changes, the common trend E[dY|dD=0] is recovered from quasi-stayers (dD near 0), giving the level effect effect(d) = E[dY|dD=d] - E[dY|dD=0] and the average causal response ACR(d). estimator = \"parametric\" fits a polynomial in dD (sqrt(n)); estimator = \"nonparametric\" is a local-linear (kernel) fit (n^2/5; flagged EXPERIMENTAL — no maintained R reference exists to bit-validate it). Multiplier-bootstrap SEs. Both estimators validated by simulation against a known dose-response.\nAll eight auxiliary estimators above were benchmarked to verify they belong on the CPU (none has a GPU-amenable hot path; see BENCHMARKS.md). The audit also caught and fixed two quadratic bootstraps: didgpu_did_static’s cluster bootstrap was O(n_units^2) per replicate (pre-splitting by cluster makes it O(n); 12-23x faster, bit-identical SEs), and didgpu_did_continuous no longer recomputes the O(n^2) overall-ACR on every bootstrap replicate (nonparametric bootstrap ~675x faster; reported effect(d)/ACR(d) unchanged).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#long-running-workflow",
+    "href": "chapters/14-changelog.html#long-running-workflow",
+    "title": "15  Changelog",
+    "section": "18.7 Long-running workflow",
+    "text": "18.7 Long-running workflow\n\nPer-cell checkpointing to disk with atomic writes (saveRDS tmp + rename) and append-only manifest.csv. Resumable on crash.\ndidgpu_resume(checkpoint_dir, df, ...) — re-invokes with every stored arg restored from meta.json.\ndidgpu_bootstrap_more(checkpoint_dir, df, extra_reps) — extend a finished run with more bootstrap reps without rework.\ndidgpu_by(df, by_var, ...) — per-subgroup fits, each with its own checkpoint subdirectory.\nn_workers &gt; 1L parallelises the bootstrap loop via parallel::makeCluster; bit-identical to sequential at the same seed.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#backends",
+    "href": "chapters/14-changelog.html#backends",
+    "title": "15  Changelog",
+    "section": "18.8 Backends",
+    "text": "18.8 Backends\n\n\"r\" — pure R via data.table. 60× faster than the reference at 200 K rows.\n\"reference\" — delegate to DIDmultiplegtDYN::did_multiplegt_dyn, used as the parity oracle.\n\"cuda\" — live on Windows and Linux/WSL2 (built + verified end-to-end on an NVIDIA RTX 4000 Ada, CUDA 12.6; bit-identical results on both). On Windows it needs no admin rights: a user-local CUDA toolkit plus a two-DLL split (didgpu_cuda.dll built by nvcc/MSVC, the R-facing didgpu.dll built by Rtools/MinGW, bridged by a pure-C ABI) sidesteps the MinGW↔︎MSVC link barrier — see WINDOWS_BUILD_STATUS.md. Live GPU paths: the CS cluster bootstrap (179–228× faster than R via the influence-function shortcut), the CS multiplier bootstrap, the CS OR point estimate (bit-exact vs R), and the TestMechs nonparametric bootstrap. The fect SVD path is size-gated — it only engages for very large balanced panels, since cuSOLVER loses to CPU LAPACK on the small matrices typical of fect. Every GPU path falls back transparently to R when CUDA is unavailable or would be slower, so backend = \"cuda\" is always safe. See BENCHMARKS.md and tests/testthat/test-cuda-equivalence-grid.R (142 lock-step assertions). Tests skip GPU paths when nvcc / a device is absent.\n\"cpu\" — Rcpp+Eigen, scaffolded only.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#r-interface",
+    "href": "chapters/14-changelog.html#r-interface",
+    "title": "15  Changelog",
+    "section": "18.9 R interface",
+    "text": "18.9 R interface\n\nS3 methods: print, summary, coef, confint, vcov, plot, plus tidy, glance, augment via broom.\nPlot is base-R (no ggplot2 dependency); event-study with stored CIs.\nDiagnostic helpers: didgpu_summarize_panel, didgpu_estimate_runtime, didgpu_compare (compare against the reference).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#fect-family-counterfactual-prediction-estimators",
+    "href": "chapters/14-changelog.html#fect-family-counterfactual-prediction-estimators",
+    "title": "15  Changelog",
+    "section": "18.10 fect family (counterfactual-prediction estimators)",
+    "text": "18.10 fect family (counterfactual-prediction estimators)\n\ndidgpu_fect(method = \"fe\") — two-way fixed effects, iterative demeaning of the controls-only outcome matrix.\ndidgpu_fect(method = \"ife\") — Bai (2009) interactive fixed effects. Alternating fe-step + rank-r SVD of the residual matrix until convergence.\ndidgpu_fect(method = \"mc\") — Athey et al. (2021) matrix completion. Iterative soft-thresholded SVD on the controls-only matrix.\nAll three reuse didgpu()’s checkpoint / resume / parallel bootstrap infrastructure. Results are returned as didgpu_fect_result (extends didgpu_result) so all the standard accessors (coef, confint, vcov, plot, tidy, glance) work the same way.\nCUDA kernels for fect live in src/cuda_fect_fe.cu and src/cuda_fect_svd.cu (the latter uses cuSOLVER’s cusolverDnDgesvdj for the SVD primitive shared by ife and mc) and are wired through R. However, they are size-gated: on the small, tall-skinny matrices typical of fect panels the per-iteration cuSOLVER SVD is 100–300× slower than R’s LAPACK (cuSOLVER handle + H2D/D2H overhead dwarfs the tiny SVD). .fect_cuda_svd_worthwhile() only routes to the GPU for very large balanced panels (n_units ≥ 2000 and n_units·n_periods ≥ 2e5); below that backend = \"cuda\" transparently uses R’s svd(). See BENCHMARKS.md.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#testing",
+    "href": "chapters/14-changelog.html#testing",
+    "title": "15  Changelog",
+    "section": "18.11 Testing",
+    "text": "18.11 Testing\n\n300+ tests across 24 test files; R CMD check passes with only pre-existing intentional WARN (CUDA .cu files in src/) and the declared GNU make SystemRequirements NOTE.\nAdversarial fuzz harness (tests/testthat/test-fuzz.R) covers 21 scenarios: vanilla / weight / controls / switchers / normalized / placebos / trends_lin / only_never + same_switchers / kitchen sink / trends_lin sink / multivalued / bootstrap-stability / parallel-equals-sequential / checkpoint round-trip / degenerate / very-small. Default DIDGPU_FUZZ_N = 8 for fast CI; bump via env var for deep local runs (validated at N = 200, no failures).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  }
+]
