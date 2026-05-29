@@ -1,0 +1,60 @@
+/*-- scss:defaults --*/
+// didgpu light theme — academic deep slate primary, warm accent.
+// Bootstrap variables get re-compiled by Quarto with these overrides.
+
+$primary:       #2c3e50;   // deep slate (sidebar accents, headings)
+$secondary:     #5d6d7e;   // muted slate
+$success:       #1e8449;   // muted green for "passing tests" callouts
+$info:          #2980b9;   // info-callout blue
+$warning:       #d68910;   // warm amber
+$danger:        #c0392b;   // muted red
+
+$link-color:    #2c3e50;
+$link-hover-color: #c0392b;
+
+// Typography
+$font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                          "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+$font-family-monospace:  "JetBrains Mono", "Fira Code", "SF Mono",
+                          Consolas, monospace;
+$headings-font-weight:   600;
+
+// Slightly tighter content width for readability
+$content-padding-top:    1.5rem;
+
+/*-- scss:rules --*/
+
+// Code block trim: subtle brand-color left border + soft bg
+pre.sourceCode {
+  border-left: 3px solid $primary !important;
+  background-color: #f7f9fb !important;
+  padding-left: 0.9rem !important;
+}
+
+// Inline code: brand color on light gray
+:not(pre) > code {
+  color: $primary;
+  background-color: #f4f6f8;
+  padding: 0.12em 0.32em;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+
+// Sidebar part headers ("Getting Started", "Estimators", ...) — uppercase
+// label-ish styling, matches academic-doc convention.
+.sidebar nav > ul > li > .sidebar-section-header {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  color: $primary;
+  margin-top: 1.2rem;
+  margin-bottom: 0.3rem;
+}
+
+// H1 underline keeps the page header visually separated
+h1 {
+  border-bottom: 3px solid $primary;
+  padding-bottom: 0.35rem;
+  margin-bottom: 1rem;
+}
