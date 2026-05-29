@@ -10,7 +10,7 @@ line of code yourself without any extra data.
 
 ## Generate a panel
 
-```{r setup}
+```{r setup, eval=FALSE}
 library(didgpu)
 
 panel <- didgpu_simulate_panel(
@@ -37,7 +37,7 @@ switch period) is `c(0.5, 1.0, 1.2, 1.0, 0.8)`.
 The flagship estimator in didgpu is `didgpu()` — the heterogeneity-
 robust dynamic DiD of de Chaisemartin & D'Haultfoeuille (2024).
 
-```{r fit}
+```{r fit, eval=FALSE}
 fit <- didgpu(
   panel,
   outcome    = "Y",
