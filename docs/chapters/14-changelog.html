@@ -39,14 +39,14 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-de63f62b328812d8e578a4d74e282472.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-6b6957c917596b414ec0b78690761e87.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-de63f62b328812d8e578a4d74e282472.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-31cb823a069fdaf454f4d3e38efd546a.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-ade7d03c17f22d7cbcaa6387c685beb8.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-31cb823a069fdaf454f4d3e38efd546a.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-d2393aa517941a07bd56fd3b20fec6b4.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-2ee698635036270fb0d1d21acf80a2eb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-d2393aa517941a07bd56fd3b20fec6b4.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-4257395e575bf34f6180e37031feeb58.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-c8f64023d7f39d4602f6592e5401752c.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-4257395e575bf34f6180e37031feeb58.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -479,25 +479,29 @@ ul.task-list li input[type="checkbox"] {
    
   <ul>
   <li><a href="#changelog" id="toc-changelog" class="nav-link active" data-scroll-target="#changelog"><span class="header-section-number">16</span> Changelog</a></li>
-  <li><a href="#didgpu-0.1.1" id="toc-didgpu-0.1.1" class="nav-link" data-scroll-target="#didgpu-0.1.1"><span class="header-section-number">17</span> didgpu 0.1.1</a>
+  <li><a href="#didgpu-0.1.2" id="toc-didgpu-0.1.2" class="nav-link" data-scroll-target="#didgpu-0.1.2"><span class="header-section-number">17</span> didgpu 0.1.2</a>
   <ul class="collapse">
-  <li><a href="#bug-fixes" id="toc-bug-fixes" class="nav-link" data-scroll-target="#bug-fixes"><span class="header-section-number">17.1</span> Bug fixes</a></li>
-  <li><a href="#reference-parity-with-didmultiplegtdyn-2.3.x" id="toc-reference-parity-with-didmultiplegtdyn-2.3.x" class="nav-link" data-scroll-target="#reference-parity-with-didmultiplegtdyn-2.3.x"><span class="header-section-number">17.2</span> Reference parity with <code>DIDmultiplegtDYN</code> 2.3.x</a></li>
-  <li><a href="#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" id="toc-correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" class="nav-link" data-scroll-target="#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference"><span class="header-section-number">17.3</span> Correctness fixes (found by randomized differential testing vs the reference)</a></li>
+  <li><a href="#cran-resubmission-fixes" id="toc-cran-resubmission-fixes" class="nav-link" data-scroll-target="#cran-resubmission-fixes"><span class="header-section-number">17.1</span> CRAN resubmission fixes</a></li>
   </ul></li>
-  <li><a href="#didgpu-0.1.0" id="toc-didgpu-0.1.0" class="nav-link" data-scroll-target="#didgpu-0.1.0"><span class="header-section-number">18</span> didgpu 0.1.0</a>
+  <li><a href="#didgpu-0.1.1" id="toc-didgpu-0.1.1" class="nav-link" data-scroll-target="#didgpu-0.1.1"><span class="header-section-number">18</span> didgpu 0.1.1</a>
   <ul class="collapse">
-  <li><a href="#callaway-santanna-2021-didgpu_cs" id="toc-callaway-santanna-2021-didgpu_cs" class="nav-link" data-scroll-target="#callaway-santanna-2021-didgpu_cs"><span class="header-section-number">18.1</span> Callaway-Sant’Anna (2021) — <code>didgpu_cs()</code></a></li>
-  <li><a href="#testmechs-kwon-roth-2026-didgpu_test_sharp_null" id="toc-testmechs-kwon-roth-2026-didgpu_test_sharp_null" class="nav-link" data-scroll-target="#testmechs-kwon-roth-2026-didgpu_test_sharp_null"><span class="header-section-number">18.2</span> TestMechs (Kwon &amp; Roth 2026) — <code>didgpu_test_sharp_null()</code></a></li>
-  <li><a href="#leave-one-out-robustness-didgpu_loo" id="toc-leave-one-out-robustness-didgpu_loo" class="nav-link" data-scroll-target="#leave-one-out-robustness-didgpu_loo"><span class="header-section-number">18.3</span> Leave-one-out robustness — <code>didgpu_loo()</code></a></li>
-  <li><a href="#honestdid-rambachan-roth-2023-didgpu_honest_did" id="toc-honestdid-rambachan-roth-2023-didgpu_honest_did" class="nav-link" data-scroll-target="#honestdid-rambachan-roth-2023-didgpu_honest_did"><span class="header-section-number">18.4</span> HonestDiD (Rambachan &amp; Roth 2023) — <code>didgpu_honest_did()</code></a></li>
-  <li><a href="#fect-family-counterfactual-prediction-estimators-didgpu_fect" id="toc-fect-family-counterfactual-prediction-estimators-didgpu_fect" class="nav-link" data-scroll-target="#fect-family-counterfactual-prediction-estimators-didgpu_fect"><span class="header-section-number">18.5</span> fect family (counterfactual-prediction estimators) — <code>didgpu_fect()</code></a></li>
-  <li><a href="#estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn" id="toc-estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn" class="nav-link" data-scroll-target="#estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn"><span class="header-section-number">18.6</span> Estimator (bit-identical to <code>DIDmultiplegtDYN::did_multiplegt_dyn</code>)</a></li>
-  <li><a href="#long-running-workflow" id="toc-long-running-workflow" class="nav-link" data-scroll-target="#long-running-workflow"><span class="header-section-number">18.7</span> Long-running workflow</a></li>
-  <li><a href="#backends" id="toc-backends" class="nav-link" data-scroll-target="#backends"><span class="header-section-number">18.8</span> Backends</a></li>
-  <li><a href="#r-interface" id="toc-r-interface" class="nav-link" data-scroll-target="#r-interface"><span class="header-section-number">18.9</span> R interface</a></li>
-  <li><a href="#fect-family-counterfactual-prediction-estimators" id="toc-fect-family-counterfactual-prediction-estimators" class="nav-link" data-scroll-target="#fect-family-counterfactual-prediction-estimators"><span class="header-section-number">18.10</span> fect family (counterfactual-prediction estimators)</a></li>
-  <li><a href="#testing" id="toc-testing" class="nav-link" data-scroll-target="#testing"><span class="header-section-number">18.11</span> Testing</a></li>
+  <li><a href="#bug-fixes" id="toc-bug-fixes" class="nav-link" data-scroll-target="#bug-fixes"><span class="header-section-number">18.1</span> Bug fixes</a></li>
+  <li><a href="#reference-parity-with-didmultiplegtdyn-2.3.x" id="toc-reference-parity-with-didmultiplegtdyn-2.3.x" class="nav-link" data-scroll-target="#reference-parity-with-didmultiplegtdyn-2.3.x"><span class="header-section-number">18.2</span> Reference parity with <code>DIDmultiplegtDYN</code> 2.3.x</a></li>
+  <li><a href="#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" id="toc-correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" class="nav-link" data-scroll-target="#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference"><span class="header-section-number">18.3</span> Correctness fixes (found by randomized differential testing vs the reference)</a></li>
+  </ul></li>
+  <li><a href="#didgpu-0.1.0" id="toc-didgpu-0.1.0" class="nav-link" data-scroll-target="#didgpu-0.1.0"><span class="header-section-number">19</span> didgpu 0.1.0</a>
+  <ul class="collapse">
+  <li><a href="#callaway-santanna-2021-didgpu_cs" id="toc-callaway-santanna-2021-didgpu_cs" class="nav-link" data-scroll-target="#callaway-santanna-2021-didgpu_cs"><span class="header-section-number">19.1</span> Callaway-Sant’Anna (2021) — <code>didgpu_cs()</code></a></li>
+  <li><a href="#testmechs-kwon-roth-2026-didgpu_test_sharp_null" id="toc-testmechs-kwon-roth-2026-didgpu_test_sharp_null" class="nav-link" data-scroll-target="#testmechs-kwon-roth-2026-didgpu_test_sharp_null"><span class="header-section-number">19.2</span> TestMechs (Kwon &amp; Roth 2026) — <code>didgpu_test_sharp_null()</code></a></li>
+  <li><a href="#leave-one-out-robustness-didgpu_loo" id="toc-leave-one-out-robustness-didgpu_loo" class="nav-link" data-scroll-target="#leave-one-out-robustness-didgpu_loo"><span class="header-section-number">19.3</span> Leave-one-out robustness — <code>didgpu_loo()</code></a></li>
+  <li><a href="#honestdid-rambachan-roth-2023-didgpu_honest_did" id="toc-honestdid-rambachan-roth-2023-didgpu_honest_did" class="nav-link" data-scroll-target="#honestdid-rambachan-roth-2023-didgpu_honest_did"><span class="header-section-number">19.4</span> HonestDiD (Rambachan &amp; Roth 2023) — <code>didgpu_honest_did()</code></a></li>
+  <li><a href="#fect-family-counterfactual-prediction-estimators-didgpu_fect" id="toc-fect-family-counterfactual-prediction-estimators-didgpu_fect" class="nav-link" data-scroll-target="#fect-family-counterfactual-prediction-estimators-didgpu_fect"><span class="header-section-number">19.5</span> fect family (counterfactual-prediction estimators) — <code>didgpu_fect()</code></a></li>
+  <li><a href="#estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn" id="toc-estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn" class="nav-link" data-scroll-target="#estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn"><span class="header-section-number">19.6</span> Estimator (bit-identical to <code>DIDmultiplegtDYN::did_multiplegt_dyn</code>)</a></li>
+  <li><a href="#long-running-workflow" id="toc-long-running-workflow" class="nav-link" data-scroll-target="#long-running-workflow"><span class="header-section-number">19.7</span> Long-running workflow</a></li>
+  <li><a href="#backends" id="toc-backends" class="nav-link" data-scroll-target="#backends"><span class="header-section-number">19.8</span> Backends</a></li>
+  <li><a href="#r-interface" id="toc-r-interface" class="nav-link" data-scroll-target="#r-interface"><span class="header-section-number">19.9</span> R interface</a></li>
+  <li><a href="#fect-family-counterfactual-prediction-estimators" id="toc-fect-family-counterfactual-prediction-estimators" class="nav-link" data-scroll-target="#fect-family-counterfactual-prediction-estimators"><span class="header-section-number">19.10</span> fect family (counterfactual-prediction estimators)</a></li>
+  <li><a href="#testing" id="toc-testing" class="nav-link" data-scroll-target="#testing"><span class="header-section-number">19.11</span> Testing</a></li>
   </ul></li>
   </ul>
 <div class="toc-actions"><ul><li><a href="https://github.com/JoshuaAmmons/didgpu/edit/main/chapters/14-changelog.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/JoshuaAmmons/didgpu/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
@@ -529,26 +533,37 @@ ul.task-list li input[type="checkbox"] {
 <h1 data-number="16"><span class="header-section-number">16</span> Changelog</h1>
 <p>The changelog is maintained in <a href="https://github.com/JoshuaAmmons/didgpu/blob/main/NEWS.md"><code>NEWS.md</code></a> in the package source. The chapter below is auto-rendered from that file on every build of the docs site.</p>
 </section>
-<section id="didgpu-0.1.1" class="level1" data-number="17">
-<h1 data-number="17"><span class="header-section-number">17</span> didgpu 0.1.1</h1>
-<section id="bug-fixes" class="level2" data-number="17.1">
-<h2 data-number="17.1" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">17.1</span> Bug fixes</h2>
+<section id="didgpu-0.1.2" class="level1" data-number="17">
+<h1 data-number="17"><span class="header-section-number">17</span> didgpu 0.1.2</h1>
+<section id="cran-resubmission-fixes" class="level2" data-number="17.1">
+<h2 data-number="17.1" class="anchored" data-anchor-id="cran-resubmission-fixes"><span class="header-section-number">17.1</span> CRAN resubmission fixes</h2>
+<ul>
+<li><strong><code>test-parallel.R</code> now skips on CRAN.</strong> The previous submission’s pretest exceeded CRAN’s 2-core cap (<code>_R_CHECK_LIMIT_CORES_</code>) despite the test honouring the env var, producing the only test failure. Both <code>test_that</code> blocks in <code>test-parallel.R</code> now call <code>skip_on_cran()</code>. The parallel path is fully exercised in our GitHub Actions CI matrix on every push.</li>
+<li><strong>README links rewritten to absolute GitHub URLs.</strong> Two references (<code>WINDOWS_BUILD_STATUS.md</code>, <code>BENCHMARKS.md</code>) are intentionally excluded from the source tarball via <code>.Rbuildignore</code>; the README now points to their canonical GitHub URLs so they resolve from the rendered README on CRAN. One stale link (<code>../NOTES_did_gpu_checkpointed.Rmd</code>, an out-of-tree file that no longer exists) was removed.</li>
+<li><strong>DESCRIPTION typography.</strong> Single-quoted the software-name references <code>'Rcpp'</code> and <code>'CUDA'</code> per CRAN convention.</li>
+</ul>
+</section>
+</section>
+<section id="didgpu-0.1.1" class="level1" data-number="18">
+<h1 data-number="18"><span class="header-section-number">18</span> didgpu 0.1.1</h1>
+<section id="bug-fixes" class="level2" data-number="18.1">
+<h2 data-number="18.1" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">18.1</span> Bug fixes</h2>
 <ul>
 <li><strong>CUDA: support Blackwell (<code>sm_120</code>) GPUs.</strong> The GPU build previously targeted only Turing–Hopper (<code>sm_75</code>–<code>sm_90</code>) with no PTX fallback, so on Blackwell parts (RTX PRO Blackwell, RTX 50xx) the kernels had no device image and effect estimates silently came back as <strong>all zeros</strong> while the CPU/R backends were correct. Added <code>compute_120,sm_120</code> plus a <code>compute_120</code> PTX target to both <code>src/Makevars</code> and <code>src/Makevars.win</code>. GPU effects are again bit-identical to the CPU/R backends on Blackwell (verified on an RTX PRO 5000 Blackwell, CUDA 13.2).</li>
 <li><strong>Windows build: ship <code>src/didgpu_cuda.def</code>.</strong> The DLL export list was git-ignored (<code>/src/*.def</code>), so clean checkouts — and the r-universe / <code>install_github</code> source build — could not link <code>didgpu_cuda.dll</code>. It is now tracked.</li>
 <li><strong>Windows build: locate CUDA runtime DLLs under <code>bin/x64</code>.</strong> CUDA 13 moved the redistributable DLLs from <code>bin/</code> to <code>bin/x64/</code>; the bundling step now searches both so <code>didgpu_cuda.dll</code> loads at runtime.</li>
 </ul>
 </section>
-<section id="reference-parity-with-didmultiplegtdyn-2.3.x" class="level2" data-number="17.2">
-<h2 data-number="17.2" class="anchored" data-anchor-id="reference-parity-with-didmultiplegtdyn-2.3.x"><span class="header-section-number">17.2</span> Reference parity with <code>DIDmultiplegtDYN</code> 2.3.x</h2>
+<section id="reference-parity-with-didmultiplegtdyn-2.3.x" class="level2" data-number="18.2">
+<h2 data-number="18.2" class="anchored" data-anchor-id="reference-parity-with-didmultiplegtdyn-2.3.x"><span class="header-section-number">18.2</span> Reference parity with <code>DIDmultiplegtDYN</code> 2.3.x</h2>
 <p>didgpu was originally validated bit-for-bit against an older <code>DIDmultiplegtDYN</code>. Two of its outputs were deliberately changed upstream; didgpu now tracks the current (fixed) behavior:</p>
 <ul>
 <li><strong><code>predict_het</code> standard errors now use HC2.</strong> The reference switched the heterogeneity-regression variance from HC1 to HC2 (<code>sandwich::vcovHC(type = "HC2")</code>) in v2.3.1 (“explicit CI formulas” fix). didgpu now does the same (new <code>sandwich</code> dependency), so the predict_het <code>SE</code>/<code>t</code>/<code>LB</code>/<code>UB</code>/<code>pF</code> columns match again.</li>
 <li><strong>Placebo <code>N</code> counts each contributing cell once.</strong> For bidirectional panels the reported placebo sample size was double-counting controls shared between the switcher-in and switcher-out comparisons. It now uses the in-direction count, matching the reference’s per-row <code>coalesce(in, out)</code> combiner across both <code>in&gt;out</code> and <code>out&gt;in</code> panels. Point estimates were never affected.</li>
 </ul>
 </section>
-<section id="correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" class="level2" data-number="17.3">
-<h2 data-number="17.3" class="anchored" data-anchor-id="correctness-fixes-found-by-randomized-differential-testing-vs-the-reference"><span class="header-section-number">17.3</span> Correctness fixes (found by randomized differential testing vs the reference)</h2>
+<section id="correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" class="level2" data-number="18.3">
+<h2 data-number="18.3" class="anchored" data-anchor-id="correctness-fixes-found-by-randomized-differential-testing-vs-the-reference"><span class="header-section-number">18.3</span> Correctness fixes (found by randomized differential testing vs the reference)</h2>
 <ul>
 <li><strong><code>same_switchers</code>: the placebo now uses the same restricted switcher set as the effects.</strong> Under <code>same_switchers = TRUE</code> the placebo block was computed on the full switcher set rather than the consistent-switchers subset, producing a biased placebo estimate (and inflated placebo <code>N</code>) relative to <code>did_multiplegt_dyn</code>. The placebo distance now honours the effects-based <code>still_switcher</code> restriction (the reference derives the placebo distribution from the same_switchers-gated effect distance), so placebo estimates and counts match again.</li>
 <li><strong><code>trends_lin</code>: no longer crashes on panels with zero estimable effects.</strong> On short panels where no group has the <code>F_g-2</code> pre-period that <code>trends_lin</code> requires, result aggregation crashed with “length of ‘dimnames’ [1] not equal to array extent” (an unguarded row-name build on a 0-row table). It now returns an empty, no-estimable- effects result cleanly.</li>
@@ -559,11 +574,11 @@ ul.task-list li input[type="checkbox"] {
 </ul>
 </section>
 </section>
-<section id="didgpu-0.1.0" class="level1" data-number="18">
-<h1 data-number="18"><span class="header-section-number">18</span> didgpu 0.1.0</h1>
+<section id="didgpu-0.1.0" class="level1" data-number="19">
+<h1 data-number="19"><span class="header-section-number">19</span> didgpu 0.1.0</h1>
 <p>First public release. Five estimator families plus a sensitivity layer, each with CUDA kernels for the hot paths.</p>
-<section id="callaway-santanna-2021-didgpu_cs" class="level2" data-number="18.1">
-<h2 data-number="18.1" class="anchored" data-anchor-id="callaway-santanna-2021-didgpu_cs"><span class="header-section-number">18.1</span> Callaway-Sant’Anna (2021) — <code>didgpu_cs()</code></h2>
+<section id="callaway-santanna-2021-didgpu_cs" class="level2" data-number="19.1">
+<h2 data-number="19.1" class="anchored" data-anchor-id="callaway-santanna-2021-didgpu_cs"><span class="header-section-number">19.1</span> Callaway-Sant’Anna (2021) — <code>didgpu_cs()</code></h2>
 <ul>
 <li><code>est_method = c("OR", "IPW", "DR")</code> — all three inner estimators. DR is Sant’Anna-Zhao (2020) doubly-robust.</li>
 <li><code>control_group = c("never", "notyet")</code> — never-treated OR not-yet-treated.</li>
@@ -575,8 +590,8 @@ ul.task-list li input[type="checkbox"] {
 <li>Cross-validated against the reference <code>did</code> package on simulated panels (max abs diff &lt; 0.25 on event-study estimates).</li>
 </ul>
 </section>
-<section id="testmechs-kwon-roth-2026-didgpu_test_sharp_null" class="level2" data-number="18.2">
-<h2 data-number="18.2" class="anchored" data-anchor-id="testmechs-kwon-roth-2026-didgpu_test_sharp_null"><span class="header-section-number">18.2</span> TestMechs (Kwon &amp; Roth 2026) — <code>didgpu_test_sharp_null()</code></h2>
+<section id="testmechs-kwon-roth-2026-didgpu_test_sharp_null" class="level2" data-number="19.2">
+<h2 data-number="19.2" class="anchored" data-anchor-id="testmechs-kwon-roth-2026-didgpu_test_sharp_null"><span class="header-section-number">19.2</span> TestMechs (Kwon &amp; Roth 2026) — <code>didgpu_test_sharp_null()</code></h2>
 <ul>
 <li>All three test methods: <code>"CS"</code> (Cox-Shi 2023), <code>"ARP"</code> (Andrews-Roth-Pakes 2023), <code>"FSST"</code> (Fang-Santos-Shaikh-Torgovitsky 2023).</li>
 <li>Both binary mediator (K = 2) and multi-level (K &gt;= 2) under no-defiers.</li>
@@ -585,8 +600,8 @@ ul.task-list li input[type="checkbox"] {
 <li>CUDA bootstrap kernel <code>src/cuda_testmechs_bootstrap.cu</code> (cuRAND multinomial; the main acceleration target). Live on Linux/WSL and wired through <code>.testmechs_bootstrap_cuda</code>; the “nonparametric” method runs on the GPU, “bayes” uses the R path. cuRAND vs R’s MT19937 differ per-replicate, so bootstrap moments match within Monte-Carlo error rather than bit-for-bit.</li>
 </ul>
 </section>
-<section id="leave-one-out-robustness-didgpu_loo" class="level2" data-number="18.3">
-<h2 data-number="18.3" class="anchored" data-anchor-id="leave-one-out-robustness-didgpu_loo"><span class="header-section-number">18.3</span> Leave-one-out robustness — <code>didgpu_loo()</code></h2>
+<section id="leave-one-out-robustness-didgpu_loo" class="level2" data-number="19.3">
+<h2 data-number="19.3" class="anchored" data-anchor-id="leave-one-out-robustness-didgpu_loo"><span class="header-section-number">19.3</span> Leave-one-out robustness — <code>didgpu_loo()</code></h2>
 <ul>
 <li>Drops one entity at a time (cohort / unit / cluster / arbitrary column level) and re-fits the estimator.</li>
 <li>Works on all three estimator families: <code>didgpu_result</code>, <code>didgpu_cs_result</code>, <code>didgpu_fect_result</code>.</li>
@@ -595,8 +610,8 @@ ul.task-list li input[type="checkbox"] {
 <li>Default <code>by = "cohort"</code> (leave-one-cohort-out, the standard DiD diagnostic). Pass <code>by = "unit"</code>, <code>"cluster"</code>, or any column name to drop on a different key.</li>
 </ul>
 </section>
-<section id="honestdid-rambachan-roth-2023-didgpu_honest_did" class="level2" data-number="18.4">
-<h2 data-number="18.4" class="anchored" data-anchor-id="honestdid-rambachan-roth-2023-didgpu_honest_did"><span class="header-section-number">18.4</span> HonestDiD (Rambachan &amp; Roth 2023) — <code>didgpu_honest_did()</code></h2>
+<section id="honestdid-rambachan-roth-2023-didgpu_honest_did" class="level2" data-number="19.4">
+<h2 data-number="19.4" class="anchored" data-anchor-id="honestdid-rambachan-roth-2023-didgpu_honest_did"><span class="header-section-number">19.4</span> HonestDiD (Rambachan &amp; Roth 2023) — <code>didgpu_honest_did()</code></h2>
 <ul>
 <li>Sensitivity analysis on event-study DiD estimates.</li>
 <li><code>method = c("RM", "M")</code> — relative-magnitudes OR smoothness bounds.</li>
@@ -604,11 +619,11 @@ ul.task-list li input[type="checkbox"] {
 <li>Works on both <code>didgpu_result</code> (DIDmultiplegtDYN-style) and <code>didgpu_cs_result</code> (Callaway-Sant’Anna) fits.</li>
 </ul>
 </section>
-<section id="fect-family-counterfactual-prediction-estimators-didgpu_fect" class="level2" data-number="18.5">
-<h2 data-number="18.5" class="anchored" data-anchor-id="fect-family-counterfactual-prediction-estimators-didgpu_fect"><span class="header-section-number">18.5</span> fect family (counterfactual-prediction estimators) — <code>didgpu_fect()</code></h2>
+<section id="fect-family-counterfactual-prediction-estimators-didgpu_fect" class="level2" data-number="19.5">
+<h2 data-number="19.5" class="anchored" data-anchor-id="fect-family-counterfactual-prediction-estimators-didgpu_fect"><span class="header-section-number">19.5</span> fect family (counterfactual-prediction estimators) — <code>didgpu_fect()</code></h2>
 </section>
-<section id="estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn" class="level2" data-number="18.6">
-<h2 data-number="18.6" class="anchored" data-anchor-id="estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn"><span class="header-section-number">18.6</span> Estimator (bit-identical to <code>DIDmultiplegtDYN::did_multiplegt_dyn</code>)</h2>
+<section id="estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn" class="level2" data-number="19.6">
+<h2 data-number="19.6" class="anchored" data-anchor-id="estimator-bit-identical-to-didmultiplegtdyndid_multiplegt_dyn"><span class="header-section-number">19.6</span> Estimator (bit-identical to <code>DIDmultiplegtDYN::did_multiplegt_dyn</code>)</h2>
 <ul>
 <li>Binary, multivalued, and continuous treatment.</li>
 <li><code>effects</code>, <code>placebo</code>, <code>switchers = ""/"in"/"out"</code>, ATE.</li>
@@ -629,8 +644,8 @@ ul.task-list li input[type="checkbox"] {
 <li>All eight auxiliary estimators above were benchmarked to verify they belong on the CPU (none has a GPU-amenable hot path; see <code>BENCHMARKS.md</code>). The audit also caught and fixed two quadratic bootstraps: <code>didgpu_did_static</code>’s cluster bootstrap was O(n_units^2) per replicate (pre-splitting by cluster makes it O(n); 12-23x faster, bit-identical SEs), and <code>didgpu_did_continuous</code> no longer recomputes the O(n^2) overall-ACR on every bootstrap replicate (nonparametric bootstrap ~675x faster; reported effect(d)/ACR(d) unchanged).</li>
 </ul>
 </section>
-<section id="long-running-workflow" class="level2" data-number="18.7">
-<h2 data-number="18.7" class="anchored" data-anchor-id="long-running-workflow"><span class="header-section-number">18.7</span> Long-running workflow</h2>
+<section id="long-running-workflow" class="level2" data-number="19.7">
+<h2 data-number="19.7" class="anchored" data-anchor-id="long-running-workflow"><span class="header-section-number">19.7</span> Long-running workflow</h2>
 <ul>
 <li>Per-cell checkpointing to disk with atomic writes (<code>saveRDS</code> tmp + rename) and append-only <code>manifest.csv</code>. Resumable on crash.</li>
 <li><code>didgpu_resume(checkpoint_dir, df, ...)</code> — re-invokes with every stored arg restored from <code>meta.json</code>.</li>
@@ -639,8 +654,8 @@ ul.task-list li input[type="checkbox"] {
 <li><code>n_workers &gt; 1L</code> parallelises the bootstrap loop via <code>parallel::makeCluster</code>; bit-identical to sequential at the same seed.</li>
 </ul>
 </section>
-<section id="backends" class="level2" data-number="18.8">
-<h2 data-number="18.8" class="anchored" data-anchor-id="backends"><span class="header-section-number">18.8</span> Backends</h2>
+<section id="backends" class="level2" data-number="19.8">
+<h2 data-number="19.8" class="anchored" data-anchor-id="backends"><span class="header-section-number">19.8</span> Backends</h2>
 <ul>
 <li><code>"r"</code> — pure R via <code>data.table</code>. 60× faster than the reference at 200 K rows.</li>
 <li><code>"reference"</code> — delegate to <code>DIDmultiplegtDYN::did_multiplegt_dyn</code>, used as the parity oracle.</li>
@@ -648,16 +663,16 @@ ul.task-list li input[type="checkbox"] {
 <li><code>"cpu"</code> — Rcpp+Eigen, scaffolded only.</li>
 </ul>
 </section>
-<section id="r-interface" class="level2" data-number="18.9">
-<h2 data-number="18.9" class="anchored" data-anchor-id="r-interface"><span class="header-section-number">18.9</span> R interface</h2>
+<section id="r-interface" class="level2" data-number="19.9">
+<h2 data-number="19.9" class="anchored" data-anchor-id="r-interface"><span class="header-section-number">19.9</span> R interface</h2>
 <ul>
 <li>S3 methods: <code>print</code>, <code>summary</code>, <code>coef</code>, <code>confint</code>, <code>vcov</code>, <code>plot</code>, plus <code>tidy</code>, <code>glance</code>, <code>augment</code> via <code>broom</code>.</li>
 <li>Plot is base-R (no <code>ggplot2</code> dependency); event-study with stored CIs.</li>
 <li>Diagnostic helpers: <code>didgpu_summarize_panel</code>, <code>didgpu_estimate_runtime</code>, <code>didgpu_compare</code> (compare against the reference).</li>
 </ul>
 </section>
-<section id="fect-family-counterfactual-prediction-estimators" class="level2" data-number="18.10">
-<h2 data-number="18.10" class="anchored" data-anchor-id="fect-family-counterfactual-prediction-estimators"><span class="header-section-number">18.10</span> fect family (counterfactual-prediction estimators)</h2>
+<section id="fect-family-counterfactual-prediction-estimators" class="level2" data-number="19.10">
+<h2 data-number="19.10" class="anchored" data-anchor-id="fect-family-counterfactual-prediction-estimators"><span class="header-section-number">19.10</span> fect family (counterfactual-prediction estimators)</h2>
 <ul>
 <li><code>didgpu_fect(method = "fe")</code> — two-way fixed effects, iterative demeaning of the controls-only outcome matrix.</li>
 <li><code>didgpu_fect(method = "ife")</code> — Bai (2009) interactive fixed effects. Alternating fe-step + rank-r SVD of the residual matrix until convergence.</li>
@@ -666,8 +681,8 @@ ul.task-list li input[type="checkbox"] {
 <li>CUDA kernels for fect live in <code>src/cuda_fect_fe.cu</code> and <code>src/cuda_fect_svd.cu</code> (the latter uses cuSOLVER’s <code>cusolverDnDgesvdj</code> for the SVD primitive shared by <code>ife</code> and <code>mc</code>) and are wired through R. <strong>However</strong>, they are size-gated: on the small, tall-skinny matrices typical of fect panels the per-iteration cuSOLVER SVD is 100–300× slower than R’s LAPACK (cuSOLVER handle + H2D/D2H overhead dwarfs the tiny SVD). <code>.fect_cuda_svd_worthwhile()</code> only routes to the GPU for very large balanced panels (<code>n_units ≥ 2000</code> and <code>n_units·n_periods ≥ 2e5</code>); below that <code>backend = "cuda"</code> transparently uses R’s <code>svd()</code>. See <code>BENCHMARKS.md</code>.</li>
 </ul>
 </section>
-<section id="testing" class="level2" data-number="18.11">
-<h2 data-number="18.11" class="anchored" data-anchor-id="testing"><span class="header-section-number">18.11</span> Testing</h2>
+<section id="testing" class="level2" data-number="19.11">
+<h2 data-number="19.11" class="anchored" data-anchor-id="testing"><span class="header-section-number">19.11</span> Testing</h2>
 <ul>
 <li>300+ tests across 24 test files; <code>R CMD check</code> passes with only pre-existing intentional WARN (CUDA <code>.cu</code> files in <code>src/</code>) and the declared GNU make <code>SystemRequirements</code> NOTE.</li>
 <li>Adversarial fuzz harness (<code>tests/testthat/test-fuzz.R</code>) covers 21 scenarios: vanilla / weight / controls / switchers / normalized / placebos / trends_lin / only_never + same_switchers / kitchen sink / trends_lin sink / multivalued / bootstrap-stability / parallel-equals-sequential / checkpoint round-trip / degenerate / very-small. Default <code>DIDGPU_FUZZ_N = 8</code> for fast CI; bump via env var for deep local runs (validated at N = 200, no failures).</li>
