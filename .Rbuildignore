@@ -15,8 +15,6 @@
 ^ROADMAP\.md$
 ^STATUS-overnight\.md$
 ^WINDOWS_BUILD_STATUS\.md$
-# Exclude individual files in tools/ that aren't needed in the source
-# tarball, but KEEP tools/nvcc_wrapper.bat (referenced by src/Makevars.win).
 ^tools/assemble-cuda-local\.ps1$
 ^tools/bench-.*\.R$
 ^tools/build-.*\.(ps1|sh)$
@@ -29,8 +27,6 @@
 ^src/.*\.a$
 ^src/.*\.exp$
 ^src/.*\.lib$
-# Quarto docs site (built site lives in /docs/; serves Vercel, not part of
-# the R package tarball)
 ^_quarto\.yml$
 ^index\.qmd$
 ^chapters$
