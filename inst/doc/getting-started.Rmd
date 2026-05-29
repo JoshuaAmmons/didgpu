@@ -234,5 +234,5 @@ sample-size columns.
 
 de Chaisemartin, C. and X. D'Haultfoeuille (2024). "Difference-in-
 differences estimators of intertemporal treatment effects."
-*The Review of Economics and Statistics*, forthcoming. Preprint
-[arXiv:2007.04267](https://doi.org/10.48550/arXiv.2007.04267).
+*The Review of Economics and Statistics*.
+[doi:10.1162/rest_a_01414](https://doi.org/10.1162/rest_a_01414).

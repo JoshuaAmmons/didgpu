@@ -9,7 +9,7 @@ Authors@R:
 Description:
     A clean-room reimplementation of the heterogeneity-robust dynamic
     difference-in-differences estimator of de Chaisemartin and
-    D'Haultfoeuille (2024) <doi:10.48550/arXiv.2007.04267>, designed
+    D'Haultfoeuille (2024) <doi:10.1162/rest_a_01414>, designed
     for long-running econometric work: per-cell checkpointing to disk,
     resumable runs after crash or out-of-memory, parallel cluster
     bootstrap, configurable backends (pure R, optional Rcpp and CUDA),
