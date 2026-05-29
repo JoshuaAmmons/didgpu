@@ -29,3 +29,18 @@
 ^src/.*\.a$
 ^src/.*\.exp$
 ^src/.*\.lib$
+# Quarto docs site (built site lives in /docs/; serves Vercel, not part of
+# the R package tarball)
+^_quarto\.yml$
+^index\.qmd$
+^chapters$
+^docs$
+^_freeze$
+^_book$
+^_site$
+^\.quarto$
+^references\.bib$
+^styles\.css$
+^custom\.scss$
+^custom-dark\.scss$
+^vercel\.json$

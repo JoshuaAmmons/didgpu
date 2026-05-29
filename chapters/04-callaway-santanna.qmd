@@ -1,0 +1,74 @@
+---
+title: "Callaway-Sant'Anna — `didgpu_cs()`"
+---
+
+# Callaway-Sant'Anna staggered DiD — `didgpu_cs()`
+
+`didgpu_cs()` implements the staggered-adoption DiD estimator of
+@callaway2021difference, with all three inner estimators (OR, IPW, DR),
+all four aggregations (event / group / calendar / overall), and both
+bootstrap variants (cluster and multiplier).
+
+## Function signature
+
+```{r sig, eval=FALSE}
+didgpu_cs(
+  df,
+  outcome, group, time, treatment,
+  est_method     = c("DR", "OR", "IPW"),
+  control_group  = c("notyet", "never"),
+  aggregation    = c("event", "group", "calendar", "overall"),
+  covariates     = NULL,
+  weight         = NULL,
+  bootstrap_reps = 0L,
+  bootstrap_kind = c("cluster", "multiplier"),
+  cluster        = NULL,
+  ci_level       = 95,
+  backend        = "auto",
+  seed           = NULL,
+  verbose        = TRUE
+)
+```
+
+## What it estimates
+
+For each *group-time* $(g, t)$ with $g$ = first-treated period and
+$t$ = calendar period, the conditional ATT
+$ATT(g, t) = \mathbb{E}\bigl[Y_t(1) - Y_t(0) \mid G_g = 1\bigr]$
+is identified by a 2×2 DiD against either the *not-yet-treated* or the
+*never-treated* control group.
+
+The package returns the full `att_gt` matrix, then aggregates it into
+the published event-study / group-time / calendar / overall
+quantities.
+
+## GPU acceleration
+
+All three inner regressions (OR, IPW, DR) run on the GPU
+(`src/cuda_cs_inner.cu`) with per-row influence functions:
+
+* OR uses an in-thread Cholesky per (g, t) cell;
+* IPW / DR add a per-cell IRLS logistic propensity model that replicates
+  `stats::glm.fit` to ~1e-8 (verified in `tests/testthat/test-cuda-cs-wiring.R`);
+* DR layers on the outcome-regression augmentation.
+
+Per-cell influence functions also let the **cluster** and **multiplier**
+bootstrap SEs run entirely on the GPU.
+
+::: {.callout-tip}
+Full chapter with worked examples, covariates, and the four aggregation
+shapes is in progress. The function documentation (`?didgpu_cs`) is
+complete and the README's "Method families" section sketches typical
+usage.
+:::
+
+## See also
+
+* @callaway2021difference — the method paper.
+* [`did`](https://cran.r-project.org/package=did) — the reference R
+  implementation didgpu_cs targets.
+
+## References
+
+::: {#refs}
+:::

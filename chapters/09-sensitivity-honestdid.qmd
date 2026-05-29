@@ -1,0 +1,50 @@
+---
+title: "Sensitivity analysis"
+---
+
+# Sensitivity analysis
+
+didgpu ships with three sensitivity-analysis wrappers that take any
+fitted didgpu / didgpu_cs / didgpu_fect object and return the same
+robust-confidence-set output the underlying methodology papers do.
+
+## HonestDiD (relative magnitudes, smoothness)
+
+```{r honest, eval=FALSE}
+hd <- didgpu_honest_did(fit, M_bar = c(0, 0.5, 1, 2))
+hd
+plot(hd)
+```
+
+Wraps [@rambachan2023more]'s HonestDiD package. The "smoothness"
+($M$) and "relative magnitudes" ($\bar{M}$) restrictions both work
+unchanged; the FLCI variant is also available.
+
+## Rambachan-Roth equivalence (passes-at-delta)
+
+```{r equiv, eval=FALSE}
+eq <- didgpu_equivalence(fit, delta = 0.05, alpha = 0.05)
+eq
+```
+
+The "equivalence-style" test reports `passes_at_delta` — whether the
+joint test rejects the null that *every* effect is within $\pm\delta$
+of zero.
+
+## Freyaldenhoven-Hansen-Shapiro pre-trend correction
+
+```{r fhs, eval=FALSE}
+fhs <- didgpu_freyaldenhoven(fit, ...)
+```
+
+Wraps [@freyaldenhoven2019pretrends] for trend-stable confidence sets.
+
+::: {.callout-tip}
+A worked walkthrough — taking one fit through all three
+sensitivity-analysis methods and reading the output — is in progress.
+:::
+
+## References
+
+::: {#refs}
+:::

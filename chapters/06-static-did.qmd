@@ -1,0 +1,58 @@
+---
+title: "Static DID_M — `didgpu_did_static()`"
+---
+
+# Instantaneous DID_M — `didgpu_did_static()`
+
+`didgpu_did_static()` implements the instantaneous, non-absorbing DiD
+estimator of @dechaisemartin2020twoway. Unlike most staggered-adoption
+methods, it allows treatment to switch **on and off** (non-absorbing)
+and is identified period-by-period without imposing an event-study
+structure.
+
+## What it estimates
+
+For each unit-period $(i, t)$ where the unit *switches* between
+$t-1$ and $t$, the period-over-period outcome change
+$Y_{i,t} - Y_{i,t-1}$ is compared against the analogous change of
+**same-baseline stayers** (units with the same treatment value at
+$t-1$ that do not switch at $t$). Averaging over all switch events
+gives the unweighted DID_M; the cluster bootstrap provides SEs.
+
+## Function signature
+
+```{r sig, eval=FALSE}
+didgpu_did_static(
+  df,
+  outcome, group, time, treatment,
+  bootstrap_reps = 0L,
+  cluster        = NULL,
+  ci_level       = 95,
+  backend        = "auto",
+  seed           = NULL,
+  verbose        = TRUE
+)
+```
+
+## Bit-for-bit equivalence target
+
+Matches the
+[`DIDmultiplegt`](https://cran.r-project.org/package=DIDmultiplegt)
+package's `did_multiplegt(robust_dynamic = FALSE)` output.
+
+::: {.callout-tip}
+Full chapter with worked examples (including a non-absorbing toy
+panel where standard TWFE produces a wrong-sign coefficient) is in
+progress.
+:::
+
+## See also
+
+* @dechaisemartin2020twoway — the method paper.
+* [`DIDmultiplegt`](https://cran.r-project.org/package=DIDmultiplegt) —
+  the reference R implementation.
+
+## References
+
+::: {#refs}
+:::

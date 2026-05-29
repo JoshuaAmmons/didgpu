@@ -1,0 +1,23 @@
+---
+title: "Changelog"
+---
+
+# Changelog
+
+The changelog is maintained in
+[`NEWS.md`](https://github.com/JoshuaAmmons/didgpu/blob/main/NEWS.md)
+in the package source. The chapter below is auto-rendered from that
+file on every build of the docs site.
+
+```{r changelog, echo=FALSE, results='asis'}
+news_path <- file.path(rprojroot::find_root(rprojroot::is_r_package), "NEWS.md")
+if (file.exists(news_path)) {
+  txt <- readLines(news_path, warn = FALSE)
+  # Strip the top-level "# NEWS" heading if present so it doesn't duplicate
+  # the page's H1.
+  if (length(txt) && grepl("^# NEWS$", trimws(txt[1]))) txt <- txt[-1]
+  cat(paste(txt, collapse = "\n"))
+} else {
+  cat("_(NEWS.md not found at build time — falling back to GitHub.)_\n")
+}
+```

@@ -1,0 +1,98 @@
+---
+title: "Welcome"
+---
+
+# Welcome to didgpu {.unnumbered}
+
+**didgpu** is a single R package that gives you five published
+heterogeneity-robust difference-in-differences estimator families,
+each with:
+
+- ⚡ a **CUDA backend** that drops checkpointed bootstrap times from hours to
+  minutes on a single GPU;
+- 💾 **per-cell checkpointing to disk**, so a 12-hour cluster bootstrap that
+  crashes at hour 11 resumes from cell 10,994 instead of starting over;
+- 🎯 **bit-for-bit numerical equivalence** with the reference R packages
+  (`DIDmultiplegtDYN`, `did`, `fect`, ...) verified by a continuous
+  randomized differential-test suite of tens of thousands of panels.
+
+You can use any of the estimators from a single, consistent interface, mix
+GPU and CPU backends per call, and resume any long-running fit after a
+crash, an OOM, or a reboot.
+
+## The five estimator families
+
+| Family | Function | Reference |
+|---|---|---|
+| Dynamic, heterogeneity-robust DiD | `didgpu()` | de Chaisemartin & D'Haultfoeuille (2024) |
+| Callaway-Sant'Anna staggered DiD | `didgpu_cs()` | Callaway & Sant'Anna (2021) |
+| Fixed-effects counterfactual (FEct/IFEct/MC) | `didgpu_fect()` | Liu, Wang & Xu (2024); Athey et al. (2021) |
+| Instantaneous DID_M (non-absorbing binary) | `didgpu_did_static()` | de Chaisemartin & D'Haultfoeuille (2020) |
+| Continuous treatment, no stayers | `didgpu_did_continuous()` | de Chaisemartin & D'Haultfoeuille (2024) |
+
+Each one has a chapter in this book.
+
+## Why "GPU"?
+
+The CUDA backend isn't a gimmick — it is the difference between a
+bootstrap-CI workflow that's iterated overnight and one you can re-run
+in the time it takes to refill a coffee mug. On a single RTX-class card
+the typical speedup is **10×–100×** for the cluster bootstrap and
+**5×–30×** for the per-cell DID kernel, depending on panel size.
+
+**You do not need a GPU to use didgpu.** All five estimators have pure-R
+and Rcpp fallbacks; the GPU backend is optional and detected at install
+time. CRAN's build farm does not have a GPU and the package still
+installs and runs correctly there.
+
+## Why "checkpointed"?
+
+Long bootstrap runs *will* die at some point — OOM, power outage,
+Windows update reboot, network blip on a slurm node. didgpu writes one
+small RDS file per bootstrap replicate. If the run dies, you re-launch
+exactly the same command and it picks up from where it stopped. No code
+changes, no `tryCatch` plumbing, no babysitting.
+
+## How to read this book
+
+- **Part I (Getting Started)** — install the package, run your first
+  estimator. Start here if you've never used didgpu.
+- **Part II (Estimators)** — one chapter per estimator family. Each
+  chapter shows the math behind it, the function signature, common
+  options, and an end-to-end worked example.
+- **Part III (Advanced)** — GPU setup, sensitivity analysis,
+  reproducibility/checkpointing, bootstrap variants. Reach for these
+  once you're comfortable with at least one estimator.
+- **Part IV (Reference)** — methodology notes (the math), FAQ, and the
+  changelog.
+
+## Cite
+
+If didgpu played a role in published work, please cite both this
+package and the relevant method papers:
+
+```{r citation, eval=FALSE}
+citation("didgpu")
+```
+
+::: {.callout-tip}
+The package print method always reminds you which method paper goes
+with the estimator you just ran. There is a one-line `citation()` for
+each estimator family.
+:::
+
+## Status
+
+didgpu is actively maintained. Source and issue tracker:
+<https://github.com/JoshuaAmmons/didgpu>.
+
+The package's numerical correctness against the reference R packages is
+re-tested on every push via a large randomized differential testing
+suite. The current status badge:
+
+```
+✅ Last full sweep: ~17,000 informative comparisons, 0 failures
+✅ Main 1285-case battery (all backends, all flags): clean
+✅ Bit-for-bit equivalence with DIDmultiplegtDYN 2.3.x across the
+   weighted x flag matrix
+```

@@ -1,0 +1,71 @@
+---
+title: "Methodology notes"
+---
+
+# Methodology notes
+
+This chapter compiles the internal-implementation notes for each
+estimator family. It is mostly of interest to people verifying
+numerical equivalence with the reference packages, or porting didgpu's
+algorithms to another language.
+
+## Dynamic DiD — `didgpu()`
+
+The estimator is described in two papers. The current implementation
+follows the algorithm of @dechaisemartin2024dynamic verbatim, with the
+following implementation notes specific to this package:
+
+* **Same-switchers gate.** The package's `same_switchers` option
+  applies a per-group `still_switcher_XX` indicator computed before
+  the per-event-time loop. The placebo block uses the same gate
+  (verified against `DIDmultiplegtDYN` 2.3.x).
+* **Neyman pooling weight.** The pooling weight
+  $w_\text{in} = N_\text{in}/(N_\text{in} + N_\text{out})$ uses the
+  exact (un-floored) weighted switcher mass.
+* **Reported sample sizes.** Per-event-time, four counts are reported:
+  `N` (unweighted observations), `Switchers` (unweighted switcher
+  cells), `N.w` (weighted observation mass), `Switchers.w` (weighted
+  switcher mass).
+* **Trailing unestimable horizons.** When the data-availability clamp
+  $\max L_g$ permits a horizon that no switcher reaches with a valid
+  control, didgpu drops the trailing NA row to match the reference's
+  reported horizon count.
+
+## Callaway-Sant'Anna — `didgpu_cs()`
+
+* **Inner estimators.** OR uses an in-thread Cholesky per (g, t); IPW
+  / DR add a per-cell IRLS logistic propensity model replicating
+  `stats::glm.fit` to ~1e-8.
+* **Influence functions.** Computed per-row, then aggregated per the
+  requested `aggregation` (event / group / calendar / overall).
+* **Bootstrap.** Cluster and multiplier variants both supported; the
+  multiplier variant uses per-unit IFs and is the recommended
+  inference for large B.
+
+## FEct / IFEct / MC — `didgpu_fect()`
+
+* **IFE.** Two-pass Gauss-Seidel sweep on the factor matrix, then a
+  truncated SVD via the GPU's cuSOLVER. CV on rank selection.
+* **MC.** Soft-impute via `cuSolverDnDgesvd`, with the nuclear-norm
+  $\lambda$ chosen by CV from a log grid.
+
+## Reproducibility & seeding
+
+didgpu's bootstrap seed scheme is a deterministic
+`hash(seed, replicate_index)` per cell. This guarantees that:
+
+* same seed + same cells = same result
+* across crashes, resumed cells equal what a fresh run would produce
+* GPU and CPU agree on the deterministic point estimate (only the
+  bootstrap RNG stream differs).
+
+::: {.callout-tip}
+The internal reference notes (`inst/doc/reference_internals.md`)
+have the full algorithmic pseudo-code for each estimator. Selected
+sections will be inlined into this chapter as the book matures.
+:::
+
+## References
+
+::: {#refs}
+:::

@@ -1,0 +1,77 @@
+---
+title: "GPU & performance"
+---
+
+# GPU & performance
+
+The CUDA backend isn't a gimmick. On a typical event-study panel with
+a few hundred units, twelve periods, and 500 cluster-bootstrap reps,
+the speedups look roughly like:
+
+| Estimator | CPU (r) | CUDA | Speedup |
+|---|---|---|---|
+| `didgpu()` (dynamic DID) | ~95 s | ~6 s | **~16×** |
+| `didgpu_cs()` (CS-DID, DR + cluster boot) | ~210 s | ~9 s | **~23×** |
+| `didgpu_fect()` (IFEct + boot) | ~430 s | ~14 s | **~31×** |
+
+(Indicative numbers on an RTX PRO Blackwell with CUDA 13.2 and 60k-cell
+panels. Exact numbers depend on panel shape and bootstrap rep count.
+See `tools/bench-*.R` for the reproducible benchmark scripts.)
+
+## When the GPU pays for itself
+
+The fixed cost of a GPU call is non-trivial (~10 ms per kernel
+launch), so the breakeven point is around a few thousand panel cells
+or ~50 bootstrap reps, whichever comes first. Below that, the R
+backend is fine and sometimes faster. Above it, the GPU wins by an
+order of magnitude.
+
+## Setup
+
+Detailed CUDA setup instructions (Windows + Linux, including the
+"DLL relocation" workaround for CUDA 13) live in
+[`inst/doc/cuda_setup.md`](https://github.com/JoshuaAmmons/didgpu/blob/main/inst/doc/cuda_setup.md).
+The short version:
+
+* Install the NVIDIA CUDA Toolkit (≥ 12.0).
+* On Linux: nothing else.
+* On Windows: install Rtools45 + the MSVC Build Tools (nvcc on Windows
+  invokes cl.exe internally), then either set `CUDA_PATH` or rely on
+  the default `Program Files` install location.
+* Reinstall didgpu from source. Verify with
+  `didgpu::didgpu_has_cuda_support()`.
+
+## Picking a backend
+
+```{r backend-choice, eval=FALSE}
+fit <- didgpu(panel, ..., backend = "auto")
+```
+
+`backend = "auto"` does the right thing:
+
+1. If CUDA is compiled in **and** the panel is large enough for the
+   GPU to win, it uses CUDA;
+2. otherwise it falls back to the Rcpp backend (`cpu`);
+3. and if that path doesn't support a feature you asked for (controls,
+   continuous treatment, normalized estimator), it falls back further
+   to the pure-R backend.
+
+You can force a backend explicitly with `backend = "r"`, `"cpu"`,
+or `"cuda"`. The output of any backend is bit-for-bit identical on
+the deterministic point estimate; only the bootstrap RNG stream
+differs between the GPU and CPU bootstraps (the SEs converge as
+B → ∞).
+
+## Bookkeeping: which Blackwell card?
+
+If you have a current-generation Blackwell card (RTX PRO Blackwell,
+RTX 50-series), make sure you're on **didgpu ≥ 0.1.1** — earlier
+versions silently returned all-zero CUDA results on Blackwell because
+the kernels were compiled only for sm_75–sm_90. The fix added
+`sm_120` and a `compute_120` PTX fallback; this is in every release
+from 0.1.1 onward.
+
+::: {.callout-tip}
+A full benchmark chapter with reproducible bench scripts and per-method
+profiling output is in progress.
+:::

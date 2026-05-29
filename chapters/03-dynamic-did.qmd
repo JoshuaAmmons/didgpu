@@ -1,0 +1,87 @@
+---
+title: "Dynamic DiD — `didgpu()`"
+---
+
+# Dynamic difference-in-differences — `didgpu()`
+
+`didgpu()` implements the heterogeneity-robust event-study DiD
+estimator of @dechaisemartin2024dynamic. It is the flagship estimator
+in this package and bit-for-bit numerically equivalent to the
+reference R package [`DIDmultiplegtDYN`](https://cran.r-project.org/package=DIDmultiplegtDYN)
+across every commonly-used option.
+
+## What it estimates
+
+For each event-time $k \in \{1, 2, \dots, \text{effects}\}$, the
+per-event-time DID is the average causal effect of being exposed to a
+strictly higher treatment dose for $k$ periods relative to a clean,
+not-yet-switched comparison group within the same baseline-treatment
+cohort. The estimator pools across "switcher-in" (treatment goes up)
+and "switcher-out" (treatment goes down) directions via Neyman-weighted
+averaging.
+
+The published Effects matrix has one row per event-time, with:
+
+* `Estimate`, `SE`, `LB.CI`, `UB.CI` — the point estimate and its
+  inference;
+* `N` (unweighted observations), `Switchers` (unweighted switcher
+  cells), `N.w` (weighted observation mass), `Switchers.w` (weighted
+  switcher mass) — the four sample-size columns the reference reports.
+
+A parallel Placebos matrix reports pre-treatment falsification effects
+at horizons $-1, -2, \dots, -\text{placebo}$.
+
+## Function signature
+
+```{r sig, eval=FALSE}
+didgpu(
+  df,
+  outcome, group, time, treatment,
+  effects               = 1L,
+  placebo               = 0L,
+  switchers             = "",                # "" / "in" / "out"
+  same_switchers        = FALSE,
+  same_switchers_pl     = FALSE,
+  normalized            = FALSE,
+  only_never_switchers  = FALSE,
+  dont_drop_larger_lower= FALSE,
+  trends_lin            = FALSE,
+  trends_nonparam       = NULL,
+  controls              = NULL,
+  weight                = NULL,
+  continuous            = NULL,
+  predict_het           = NULL,
+  bootstrap_reps        = 0L,
+  cluster               = NULL,
+  ci_level              = 95,
+  backend               = "auto",            # "auto"/"r"/"cpu"/"cuda"/"reference"
+  checkpoint_dir        = NULL,
+  seed                  = NULL,
+  n_workers             = NULL,
+  verbose               = TRUE
+)
+```
+
+## Common option recipes
+
+### Heterogeneity by group covariate
+
+::: {.callout-tip}
+**Full chapter content with worked examples is in progress.** The
+options above each correspond to a section of the reference paper
+@dechaisemartin2024dynamic; this chapter will expand to a worked
+example per option. In the meantime, the function documentation
+(`?didgpu`) is complete and the package README links every option to
+the relevant section of the paper.
+:::
+
+## See also
+
+* @dechaisemartin2024dynamic — the method paper.
+* [`DIDmultiplegtDYN`](https://cran.r-project.org/package=DIDmultiplegtDYN)
+  — the reference R implementation didgpu targets bit-for-bit.
+
+## References
+
+::: {#refs}
+:::

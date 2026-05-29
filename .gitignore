@@ -89,3 +89,11 @@ Thumbs.db
 *.zip
 *-archive/
 tests/testthat/testthat-problems.rds
+
+# ----------------------------------------------------------------------------
+# Quarto build artifacts (NOT /docs/ -- that is the published static site)
+# ----------------------------------------------------------------------------
+/_freeze/
+/_site/
+/_book/
+/.quarto/

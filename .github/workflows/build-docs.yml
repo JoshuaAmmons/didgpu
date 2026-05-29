@@ -1,0 +1,69 @@
+# Render the Quarto book + commit the built static site to /docs/ on `main`.
+# Vercel is configured to serve /docs/ as the site root, so this is the
+# trigger that publishes new content.
+
+name: Build docs site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "index.qmd"
+      - "_quarto.yml"
+      - "chapters/**"
+      - "styles.css"
+      - "references.bib"
+      - "NEWS.md"
+      - "README.md"
+      - "DESCRIPTION"
+      - ".github/workflows/build-docs.yml"
+  workflow_dispatch:
+
+# Allow only one concurrent docs build per branch.
+concurrency:
+  group: "docs-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # to push the built /docs/ back to main
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "release"
+          use-public-rspm: true
+
+      - name: Install R deps
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rprojroot
+            any::knitr
+            any::rmarkdown
+
+      - name: Render Quarto book
+        run: quarto render --to html
+
+      - name: Commit built site to /docs/
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Add the rendered output (Quarto writes to /docs/ per _quarto.yml).
+          git add docs
+          if git diff --cached --quiet; then
+            echo "No changes to docs/ — skipping commit."
+          else
+            git commit -m "Auto-render docs site [skip ci]"
+            git push origin HEAD:main
+          fi

@@ -1,0 +1,71 @@
+---
+title: "Reproducibility & checkpointing"
+---
+
+# Reproducibility & checkpointing
+
+didgpu's checkpointing is the difference between a 12-hour bootstrap
+that resumes after a crash and a 12-hour bootstrap that has to start
+over.
+
+## Turn it on
+
+```{r checkpoint, eval=FALSE}
+fit <- didgpu(
+  panel, ...,
+  bootstrap_reps = 2000,
+  checkpoint_dir = "~/didgpu-runs/2026-05-28-fit",
+  seed           = 17
+)
+```
+
+didgpu writes one small RDS file per bootstrap cell (the per-rep
+sufficient statistics, not the panel — usually a few KB each).
+
+## Resume after a crash
+
+Just rerun the **same call** with the **same** `checkpoint_dir` and
+`seed`. didgpu reads the existing cells, picks up at the next missing
+one, and finishes:
+
+```{r resume, eval=FALSE}
+fit <- didgpu(
+  panel, ...,
+  bootstrap_reps = 2000,
+  checkpoint_dir = "~/didgpu-runs/2026-05-28-fit",  # same path
+  seed           = 17                                # same seed
+)
+```
+
+No `tryCatch`, no manual sharding, no "what was I up to?" archaeology.
+
+## How "same seed = same result" works
+
+didgpu's bootstrap uses a deterministic per-cell seed derived from
+`(seed, replicate_index)`. So:
+
+* Cells produced before the crash are bit-identical to what the resumed
+  run would produce.
+* The aggregator sees a complete cell set regardless of which run
+  wrote each one.
+* Bootstrap point estimate, SE, CI, and joint p-values are
+  reproducible across crashes.
+
+## Aggregating already-saved cells
+
+If you want to look at a partial run without re-fitting:
+
+```{r aggregate, eval=FALSE}
+partial <- didgpu_aggregate_cells(
+  checkpoint_dir = "~/didgpu-runs/2026-05-28-fit"
+)
+partial
+```
+
+Returns the aggregated fit using whatever cells exist on disk. Useful
+for sanity-checking convergence while a long run is still going.
+
+::: {.callout-tip}
+A worked example — deliberately interrupt a 1000-rep bootstrap, then
+resume it, then compare to a fresh run — is in progress.
+:::

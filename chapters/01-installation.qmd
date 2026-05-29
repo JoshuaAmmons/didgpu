@@ -1,0 +1,115 @@
+---
+title: "Installation"
+---
+
+# Installation
+
+didgpu is on CRAN and on r-universe. Pick whichever lane you prefer.
+
+## From CRAN (recommended)
+
+```{r install-cran, eval=FALSE}
+install.packages("didgpu")
+```
+
+This gets you the pure-R and Rcpp backends. They are sufficient for
+every estimator in this book; the chapters that follow do not require
+GPU.
+
+## From r-universe (newest)
+
+If you want the latest commit on `main` before it lands on CRAN:
+
+```{r install-runiverse, eval=FALSE}
+install.packages(
+  "didgpu",
+  repos = c("https://joshuaammons.r-universe.dev", "https://cloud.r-project.org")
+)
+```
+
+## From source (with GPU support)
+
+If you have an NVIDIA GPU and the CUDA Toolkit installed, install from
+source to compile the GPU kernels:
+
+```{r install-source, eval=FALSE}
+# (1) Set CUDA_HOME or CUDA_PATH to point at your CUDA install:
+Sys.setenv(CUDA_HOME = "/usr/local/cuda")             # Linux
+# or
+Sys.setenv(CUDA_PATH = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2")  # Windows
+
+# (2) Then install from source:
+install.packages("didgpu", type = "source")           # CRAN source
+# -- or --
+remotes::install_github("JoshuaAmmons/didgpu")        # GitHub head
+```
+
+didgpu's configure script will print a one-line confirmation at install
+time telling you whether it found CUDA:
+
+```
+*** didgpu configure ***
+  CUDA toolkit detected: /usr/local/cuda
+  -> Building WITH GPU support.
+     backends available after install: 'r', 'cpu', 'cuda'
+```
+
+If CUDA is not found, the install still succeeds — only the `r` and
+`cpu` backends are compiled and `backend = "cuda"` returns an
+informative error at runtime. There is no CRAN-style ERROR or WARNING
+during install in that case.
+
+::: {.callout-note}
+## "Did the GPU build actually work?"
+
+After install, the fastest way to check is:
+
+```{r check-cuda, eval=FALSE}
+library(didgpu)
+didgpu_has_cuda_support()
+#> [1] TRUE
+```
+
+If you see `TRUE`, you can pass `backend = "cuda"` to any of the
+estimator functions in this book. If you see `FALSE`, didgpu still
+works in pure-R / Rcpp; only the GPU acceleration is unavailable.
+:::
+
+## Supported GPUs
+
+didgpu compiles for compute capabilities **sm_75** through **sm_120**,
+which covers:
+
+| Architecture | Compute capability | Example cards |
+|---|---|---|
+| Turing | sm_75 | RTX 20-series, T4, GTX 16-series |
+| Ampere (data center) | sm_80 | A100 |
+| Ampere (desktop) | sm_86 | RTX 30-series |
+| Ada Lovelace | sm_89 | RTX 40-series, RTX 4000 Ada |
+| Hopper | sm_90 | H100 |
+| Blackwell | sm_120 | RTX PRO Blackwell, RTX 50-series |
+
+There is also a `compute_120` PTX target so newer Blackwell-and-after
+cards JIT-compile from PTX cleanly.
+
+## System requirements
+
+* R ≥ 4.1
+* On Linux/macOS: GNU make (already on most systems)
+* On Windows: [Rtools45](https://cran.r-project.org/bin/windows/Rtools/)
+  (only when building from source)
+* **Optional** for GPU: NVIDIA CUDA Toolkit ≥ 12.0 with cuBLAS, cuSOLVER,
+  cuRAND
+
+CUDA is *optional*. The package builds, installs, and passes its full
+test suite without it.
+
+## What didgpu installs alongside
+
+didgpu depends on a small, stable set of packages — `data.table`,
+`Rcpp`/`RcppEigen`, `MASS`, `sandwich`, `jsonlite`. It deliberately does
+**not** import `polars` or any of the reference packages it benchmarks
+against; those are in `Suggests` and only loaded when you ask for the
+`backend = "reference"` parity mode (used for testing).
+
+Go to the next chapter to fit your first model.

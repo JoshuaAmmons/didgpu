@@ -1,0 +1,67 @@
+---
+title: "FAQ"
+---
+
+# FAQ
+
+## Do I need a GPU to use didgpu?
+
+No. The pure-R and Rcpp backends are full citizens; everything in this
+book works on a laptop with no GPU. The CUDA backend is *optional*
+and detected at install time.
+
+## My CUDA build returns all zeros — what gives?
+
+You're almost certainly on a Blackwell-class card (RTX PRO Blackwell,
+RTX 50-series) and an older didgpu (< 0.1.1). Upgrade to didgpu ≥
+0.1.1 — those versions added `sm_120` and a `compute_120` PTX target.
+
+## How long does a typical bootstrap run take?
+
+For a panel of 200 units × 12 periods × 500 bootstrap reps:
+
+* `backend = "r"` — minutes to ~30 min depending on estimator;
+* `backend = "cuda"` (Ampere or newer) — seconds to a couple of
+  minutes.
+
+For larger panels the gap widens. See
+[Chapter 8 — GPU & Performance](08-gpu-and-performance.qmd) for indicative
+numbers.
+
+## My bootstrap crashed at hour 11 of 12. Do I have to start over?
+
+No. As long as you passed a `checkpoint_dir` and a `seed`, just rerun
+the same call. didgpu picks up at the first missing cell. See
+[Chapter 10 — Reproducibility & checkpointing](10-reproducibility-checkpointing.qmd).
+
+## Does didgpu agree with DIDmultiplegtDYN / did / fect?
+
+Yes — by design and by continuous test. didgpu's CI runs a randomized
+differential-test suite of tens of thousands of panels against each
+reference package on every push. Current status: bit-for-bit
+equivalence on the deterministic point estimates and within Monte
+Carlo error on the bootstrap SEs (which use independent RNG streams).
+
+The few intentional differences (always cosmetic, never inferential)
+are documented in `NEWS.md`.
+
+## Can I use didgpu with weighted panels?
+
+Yes. Every estimator family accepts a `weight = "wt_col"` argument.
+The four sample-size columns (`N`, `Switchers`, `N.w`, `Switchers.w`)
+report both unweighted counts and weighted sums explicitly, so you
+know exactly what you're being shown.
+
+## How do I cite didgpu?
+
+`citation("didgpu")`. didgpu also reminds you in its print output to
+cite the *method* paper for whichever estimator you ran (de
+Chaisemartin & D'Haultfoeuille, Callaway & Sant'Anna, Liu et al.,
+Athey et al., as appropriate).
+
+## Where do I report bugs?
+
+<https://github.com/JoshuaAmmons/didgpu/issues>. Please include a
+reproducible example using `didgpu_simulate_panel()` or your own
+small panel; the package's print methods and `didgpu_glance()` /
+`didgpu_tidy()` are useful for paste-into-issue summaries.

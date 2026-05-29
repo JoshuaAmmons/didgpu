@@ -1,0 +1,97 @@
+project:
+  type: book
+  output-dir: docs
+
+book:
+  title: "didgpu"
+  subtitle: "GPU-accelerated, checkpointed difference-in-differences for econometric scale"
+  author: "Joshua D. Ammons"
+  date: today
+  date-format: "MMMM YYYY"
+  search: true
+  reader-mode: true
+  repo-url: https://github.com/JoshuaAmmons/didgpu
+  repo-actions: [edit, issue]
+  page-navigation: true
+  back-to-top-navigation: true
+
+  sidebar:
+    style: docked
+    background: light
+    collapse-level: 2
+
+  chapters:
+    - index.qmd
+    - part: "Getting Started"
+      chapters:
+        - chapters/01-installation.qmd
+        - chapters/02-quickstart.qmd
+    - part: "Estimators"
+      chapters:
+        - chapters/03-dynamic-did.qmd
+        - chapters/04-callaway-santanna.qmd
+        - chapters/05-fect-ifect-mc.qmd
+        - chapters/06-static-did.qmd
+        - chapters/07-continuous-treatment.qmd
+    - part: "Advanced"
+      chapters:
+        - chapters/08-gpu-and-performance.qmd
+        - chapters/09-sensitivity-honestdid.qmd
+        - chapters/10-reproducibility-checkpointing.qmd
+        - chapters/11-bootstrap-and-clustering.qmd
+    - part: "Reference"
+      chapters:
+        - chapters/12-methodology.qmd
+        - chapters/13-faq.qmd
+        - chapters/14-changelog.qmd
+
+  navbar:
+    background: primary
+    pinned: true
+    left:
+      - text: "Get Started"
+        href: chapters/01-installation.qmd
+      - text: "Estimators"
+        menu:
+          - text: "Dynamic DID (didgpu)"
+            href: chapters/03-dynamic-did.qmd
+          - text: "Callaway-Sant'Anna (didgpu_cs)"
+            href: chapters/04-callaway-santanna.qmd
+          - text: "FEct / IFEct / MC (didgpu_fect)"
+            href: chapters/05-fect-ifect-mc.qmd
+          - text: "Static DID_M (didgpu_did_static)"
+            href: chapters/06-static-did.qmd
+          - text: "Continuous (didgpu_did_continuous)"
+            href: chapters/07-continuous-treatment.qmd
+      - text: "GPU"
+        href: chapters/08-gpu-and-performance.qmd
+      - text: "FAQ"
+        href: chapters/13-faq.qmd
+    right:
+      - icon: github
+        href: https://github.com/JoshuaAmmons/didgpu
+        aria-label: GitHub repo
+
+format:
+  html:
+    theme:
+      light: [cosmo, custom.scss]
+      dark: [cosmo, custom-dark.scss]
+    code-link: true
+    code-copy: true
+    code-fold: false
+    code-overflow: wrap
+    code-block-bg: true
+    code-block-border-left: "#2c3e50"
+    highlight-style: github
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    fig-cap-location: bottom
+    css: styles.css
+
+execute:
+  freeze: auto
+  echo: true
+  warning: false
+  message: false

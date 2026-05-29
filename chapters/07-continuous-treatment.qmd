@@ -1,0 +1,65 @@
+---
+title: "Continuous treatment — `didgpu_did_continuous()`"
+---
+
+# Continuous DiD with no stayers — `didgpu_did_continuous()`
+
+`didgpu_did_continuous()` implements the no-stayers continuous-treatment
+DiD of @dechaisemartin2024continuous. It is for the case where the
+treatment **dose** changes for nearly every unit between $t-1$ and $t$
+— so there is no pure control group, and identification has to come
+from the *first-difference* regression interior.
+
+## What it estimates
+
+Two related quantities:
+
+* **effect(d)** — the *level* effect of being exposed to dose $d$
+  rather than the baseline dose, at first difference.
+* **ACR(d)** — the average causal response — i.e., the derivative
+  of `effect(d)` with respect to $d$ at the population dose-density.
+
+Both are point-identified under the assumption that
+$\mathbb{E}\bigl[\Delta Y \mid \Delta D = 0\bigr]$ is recoverable from
+"quasi-stayers" (units with $|\Delta D| \le h$ for some bandwidth $h$).
+
+## Two estimator flavours
+
+* **`type = "parametric"`** — polynomial spline in $d$, $\sqrt{n}$-rate
+  estimator. Closed-form SEs.
+* **`type = "nonparametric"`** — local-linear smoother with bandwidth
+  $h \sim n^{-2/5}$. Bootstrap SEs.
+
+## Function signature
+
+```{r sig, eval=FALSE}
+didgpu_did_continuous(
+  df,
+  outcome, group, time, treatment,
+  type           = c("parametric", "nonparametric"),
+  degree         = 3L,         # spline degree for "parametric"
+  bandwidth      = NULL,       # auto if NULL, for "nonparametric"
+  bootstrap_reps = 0L,
+  cluster        = NULL,
+  ci_level       = 95,
+  backend        = "auto",
+  seed           = NULL,
+  verbose        = TRUE
+)
+```
+
+::: {.callout-tip}
+Full chapter with simulated dose-response examples and a comparison of
+the two estimator flavours is in progress.
+:::
+
+## See also
+
+* @dechaisemartin2024continuous — the method paper.
+* [`contdid`](https://github.com/chaisemartinPackages/contdid) —
+  the reference R implementation.
+
+## References
+
+::: {#refs}
+:::

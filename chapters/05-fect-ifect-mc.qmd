@@ -1,0 +1,73 @@
+---
+title: "FEct / IFEct / MC — `didgpu_fect()`"
+---
+
+# Fixed-effects counterfactual — `didgpu_fect()`
+
+`didgpu_fect()` implements the three counterfactual estimators of
+@liu2024practical and @athey2021matrix:
+
+* **`method = "fe"`** — two-way fixed effects counterfactual (FEct);
+* **`method = "ife"`** — interactive fixed effects (factor-augmented);
+* **`method = "mc"`** — matrix completion via nuclear-norm regularisation
+  (Athey et al. 2021).
+
+didgpu_fect targets bit-for-bit numerical equivalence with the
+reference [`fect`](https://yiqingxu.org/packages/fect/) package.
+
+## Function signature
+
+```{r sig, eval=FALSE}
+didgpu_fect(
+  df,
+  outcome, group, time, treatment,
+  method         = c("fe", "ife", "mc"),
+  r              = 0L,            # factors for IFE
+  lambda         = NULL,          # MC regularisation
+  cv             = TRUE,
+  bootstrap_reps = 0L,
+  bootstrap_kind = c("cluster", "multiplier"),
+  cluster        = NULL,
+  ci_level       = 95,
+  backend        = "auto",
+  seed           = NULL,
+  verbose        = TRUE
+)
+```
+
+## How the three methods relate
+
+| Method | Counterfactual model | When you'd reach for it |
+|---|---|---|
+| `fe` | $Y_{it}(0) = \alpha_i + \xi_t + \varepsilon$ | Standard TWFE world. Fastest. |
+| `ife` | adds $\mathbf{\lambda}_i^\top \mathbf{f}_t$ ($r$ factors) | When you suspect unmodeled common time trends specific to units. |
+| `mc` | low-rank matrix completion via nuclear norm | Many missing cells, or you want the methodology to choose rank for you. |
+
+All three are estimated on the unit × time outcome matrix with
+treated cells masked out; the missing cells are then imputed and the
+ATT is the average of (observed − imputed) over treated cells.
+
+## GPU acceleration
+
+The hot paths — the factor-update Gauss-Seidel sweep in IFE, the
+truncated SVD in MC, the cluster bootstrap on per-unit influence
+functions — all run on the GPU
+(`src/cuda_fect_fe.cu`, `src/cuda_fect_svd.cu`).
+
+::: {.callout-tip}
+Full chapter with rank-selection guidance, placebo / leave-one-out
+diagnostics, and worked examples on the EDR and `simdata` panels (from
+the fect package's vignettes) is in progress.
+:::
+
+## See also
+
+* @liu2024practical — FEct and IFEct.
+* @athey2021matrix — Matrix Completion.
+* [`fect`](https://yiqingxu.org/packages/fect/) — the reference R
+  package didgpu_fect targets.
+
+## References
+
+::: {#refs}
+:::

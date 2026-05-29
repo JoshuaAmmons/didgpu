@@ -1,0 +1,75 @@
+---
+title: "Bootstrap variants & clustering"
+---
+
+# Bootstrap variants & clustering
+
+didgpu supports two bootstrap kinds for `didgpu_cs()` and `didgpu_fect()`:
+
+| Kind | Description | When to use |
+|---|---|---|
+| `"cluster"` | unit-level resampling, fit refit per replicate | classical, agnostic about the inference. Slow at large B. |
+| `"multiplier"` | influence-function multiplier on per-unit IFs | much faster (no refit per replicate). Requires the IF representation, which all estimators in didgpu have. |
+
+For `didgpu()` only the cluster bootstrap is supported (the dynamic
+estimator's IFs require additional work that is on the roadmap).
+
+## Specifying a cluster
+
+By default the bootstrap clusters on the unit:
+
+```{r cluster-default, eval=FALSE}
+fit <- didgpu(..., bootstrap_reps = 500)
+```
+
+If your unit is *not* the natural cluster (panel of student outcomes
+where the policy varies at the school level, etc.), pass `cluster`:
+
+```{r cluster-explicit, eval=FALSE}
+fit <- didgpu(
+  panel, ...,
+  cluster        = "school_id",
+  bootstrap_reps = 500
+)
+```
+
+## Resampling at multiple levels
+
+For multi-way clustering (e.g. classroom-within-school), use a
+composite cluster id:
+
+```{r multi-way, eval=FALSE}
+panel$cluster_composite <- paste(panel$school_id, panel$classroom_id, sep = ":")
+fit <- didgpu(panel, ..., cluster = "cluster_composite", bootstrap_reps = 500)
+```
+
+didgpu's resampler is a 1-pass random hash of clusters → reps, so it
+scales linearly in B.
+
+## Multiplier bootstrap
+
+```{r multiplier, eval=FALSE}
+cs <- didgpu_cs(
+  panel, ...,
+  est_method     = "DR",
+  bootstrap_reps = 5000,
+  bootstrap_kind = "multiplier",
+  seed           = 17
+)
+```
+
+This is the fast variant. It uses per-unit influence functions
+$\psi_i$ and Rademacher / Mammen multipliers $\xi_b$:
+
+$$
+\hat\theta^{(b)} - \hat\theta \approx \frac{1}{n} \sum_i \xi_b \, \psi_i
+$$
+
+On the GPU, all of this is a couple of GEMVs and a Cholesky per
+multiplier — vastly faster than refitting the inner estimator 5000
+times.
+
+::: {.callout-tip}
+A worked example comparing cluster and multiplier bootstrap SEs on
+the same panel (they agree to ~1e-2 at B = 2000) is in progress.
+:::

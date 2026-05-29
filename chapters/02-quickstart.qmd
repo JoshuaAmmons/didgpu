@@ -1,0 +1,131 @@
+---
+title: "Quick start"
+---
+
+# Quick start
+
+Five minutes, one panel, one fit, one event-study plot. This chapter
+uses the simulator that ships with the package so you can run every
+line of code yourself without any extra data.
+
+## Generate a panel
+
+```{r setup}
+library(didgpu)
+
+panel <- didgpu_simulate_panel(
+  n_units          = 60,
+  n_periods        = 12,
+  frac_treated     = 0.6,
+  min_treat_period = 4,
+  max_treat_period = 9,
+  tau_profile      = c(0.5, 1.0, 1.2, 1.0, 0.8),
+  sigma            = 0.4,
+  seed             = 17
+)
+
+head(panel)
+```
+
+`panel` is a tidy long data frame with columns `unit`, `period`, `Y`,
+`D`. About 60% of the units switch from control to treated at some
+period between 4 and 9; the true event-study profile (relative to the
+switch period) is `c(0.5, 1.0, 1.2, 1.0, 0.8)`.
+
+## Fit the dynamic DiD estimator
+
+The flagship estimator in didgpu is `didgpu()` — the heterogeneity-
+robust dynamic DiD of de Chaisemartin & D'Haultfoeuille (2024).
+
+```{r fit}
+fit <- didgpu(
+  panel,
+  outcome    = "Y",
+  group      = "unit",
+  time       = "period",
+  treatment  = "D",
+  effects    = 4,
+  placebo    = 2,
+  backend    = "r",       # try "cuda" once you've checked didgpu_has_cuda_support()
+  verbose    = FALSE
+)
+
+fit
+```
+
+You get:
+
+* **Effects** — a per-event-time matrix with the point estimate, SE,
+  CI, and the four sample-size columns the reference reports
+  (unweighted N, unweighted switchers, weighted N, weighted switchers).
+* **Placebos** — the pre-treatment falsification estimates at horizons
+  $-1, -2, \dots$.
+* **ATE** — the cumulative incidence-weighted ATE across event-times.
+* **Joint tests** — chi-square joint tests over the effects vector
+  and over the placebos vector, using the bootstrap empirical
+  covariance.
+
+## Add a bootstrap
+
+The point estimate is essentially free; standard errors and CIs come
+from a cluster bootstrap. You opt in with `bootstrap_reps`:
+
+```{r fit-boot, eval=FALSE}
+fit_boot <- didgpu(
+  panel,
+  outcome   = "Y", group = "unit", time = "period", treatment = "D",
+  effects   = 4,
+  placebo   = 2,
+  bootstrap_reps = 500,
+  backend   = "r",
+  seed      = 42,
+  verbose   = TRUE
+)
+```
+
+For a panel this small the bootstrap is fast on CPU. For larger panels,
+this is where the GPU pays for itself — see
+[Chapter 8 — GPU & Performance](08-gpu-and-performance.qmd).
+
+## Plot the event study
+
+```{r plot, eval=FALSE}
+plot(fit)
+```
+
+The `plot()` method draws the placebos on negative horizons and the
+effects on positive horizons, with the stored CI as error bars and a
+horizontal dashed line at zero.
+
+## Pull pieces out with broom-style helpers
+
+```{r tidy-glance, eval=FALSE}
+broom::tidy(fit)           # one-row-per-coef data.frame
+broom::glance(fit)         # one-row summary (N, n_switchers, joint p)
+coef(fit)                  # named numeric of point estimates
+vcov(fit)                  # bootstrap empirical covariance
+confint(fit, level = 0.95) # CIs at any level (re-fit if level differs)
+```
+
+If broom is not loaded, the equivalents `didgpu_tidy()` and
+`didgpu_glance()` work the same way without it.
+
+## Save a fitted model
+
+```{r save, eval=FALSE}
+saveRDS(fit, "did_fit.rds")
+readRDS("did_fit.rds")
+```
+
+A didgpu fit is a plain S3 object on top of a list of matrices — it
+survives `saveRDS` / `readRDS` round-trips and stays portable across
+machines.
+
+## Where to go next
+
+* **[Chapter 3 — Dynamic DID](03-dynamic-did.qmd)** — every option of
+  `didgpu()` with worked examples.
+* **[Chapter 8 — GPU & Performance](08-gpu-and-performance.qmd)** —
+  how to make this 50× faster.
+* **[Chapter 10 — Reproducibility & checkpointing](10-reproducibility-checkpointing.qmd)** —
+  how to make a 12-hour bootstrap survive a crash.
