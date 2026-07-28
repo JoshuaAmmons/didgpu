@@ -2,6 +2,22 @@
 
 ## Bug fixes
 
+- **CUDA: unbalanced panels with late-entrant groups no longer crash with
+  error 700.** Groups unobserved at the global first period have NA
+  baseline treatment (`d_sq`); on the CPU path they fall out of every
+  cohort mask and contribute zero, but on the CUDA path the NA flowed
+  through `match()` into `cohort_key` as `NA_integer_`, which reaches the
+  kernels as `INT_MIN` and caused an illegal memory access
+  (`CUDA DID kernel failed with code 700`) in
+  `k_finalize_dist_and_kernel` — and error 700 poisons the CUDA context,
+  so every subsequent didgpu call in the process failed too. Any
+  real-world unbalanced panel (units entering the sample over time) hit
+  this immediately. NA-key rows are now parked in a padding cohort whose
+  kernel contribution is identically zero, matching CPU semantics
+  bit-for-bit. Diagnosed with `compute-sanitizer` (invalid 8-byte global
+  read at `base + INT_MIN * 8`); regression-tested in
+  `test-cuda-late-entrants.R`, including a context-not-poisoned check.
+
 - **Bootstrap aggregation no longer crashes on degenerate resamples.**
   Under sparse-switching treatments (few clean switchers), a bootstrap
   resample can contain no valid switcher cell at some horizon, yielding a

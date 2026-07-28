@@ -51,12 +51,30 @@
   row_to_t <- as.integer(d$time_XX)
 
   # Cohort key: flatten (time, d_sq) -> single 0-based int.
-  dsq_levels <- sort(unique(d$d_sq_XX))
+  dsq_levels <- sort(unique(d$d_sq_XX))   # sort() drops NA: NA is not a level
   n_dsq <- length(dsq_levels)
   dsq_idx <- match(d$d_sq_XX, dsq_levels) - 1L  # 0-based
   t_idx <- as.integer(d$time_XX - min(d$time_XX))  # 0-based
   n_cohorts <- as.integer((max(t_idx) + 1L) * n_dsq)
   cohort_key <- as.integer(t_idx * n_dsq + dsq_idx)
+
+  # Groups unobserved at the global first period have d_sq_XX == NA (see
+  # core_r.R, "Baseline (period-1) treatment"), so match() yields NA and
+  # cohort_key would be NA_integer_ -- which reaches the CUDA kernels as
+  # INT_MIN and causes an illegal memory access (CUDA error 700) the
+  # moment k_finalize_dist_and_kernel reads N_t_control[cohort_key[r]].
+  # On the CPU path these rows fall out of every cohort mask
+  # (`d_sq_XX == l` is NA, never TRUE) and contribute exactly zero.
+  # Reproduce that here: park them in a dedicated padding cohort. Their
+  # kernel contribution is identically zero -- candidate_dist is 0 for
+  # them (S_g is the -1 never-switcher sentinel, never == direction) and
+  # the padding cohort's switcher mass is therefore 0, so ratio == 0 and
+  # kernel_val == 0 -- but the reads are now in bounds.
+  na_key <- is.na(cohort_key)
+  if (any(na_key)) {
+    cohort_key[na_key] <- n_cohorts
+    n_cohorts <- n_cohorts + 1L
+  }
 
   # First compute N_inc on the host (we need it for G_over_Ninc; the
   # CUDA kernel takes it as a scalar). N_inc = sum(N_gt * gated dist).
