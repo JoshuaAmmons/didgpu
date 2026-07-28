@@ -70,6 +70,7 @@
   # Dropping failed resamples is standard bootstrap practice; SEs and the
   # bootstrap covariance are computed from the surviving iterations, and a
   # warning reports how many were dropped.
+  n_boot_dropped <- 0L
   if (length(boot_iters) > 0L) {
     ok <- vapply(as.character(boot_iters), function(i) {
       ce <- cells[[i]]$effects
@@ -77,11 +78,12 @@
       length(ce) == n_e && (n_p == 0L || length(cp) == n_p) && !all(is.na(ce))
     }, logical(1))
     if (any(!ok)) {
+      n_boot_dropped <- sum(!ok)
       warning(sprintf(
         paste0("didgpu: dropped %d of %d bootstrap iteration(s) whose resample ",
                "produced degenerate cells (no valid switchers at some horizon); ",
                "SEs/covariance use the remaining %d iterations."),
-        sum(!ok), length(boot_iters), sum(ok)), call. = FALSE)
+        n_boot_dropped, length(boot_iters), sum(ok)), call. = FALSE)
       boot_iters <- boot_iters[ok]
     }
   }
@@ -227,7 +229,8 @@
     Placebos       = Placebos,
     p_jointeffects = p_joint_e,
     p_jointplacebo = p_joint_p,
-    n_boot         = length(boot_iters)
+    n_boot         = length(boot_iters),
+    n_boot_dropped = n_boot_dropped
   )
   if (!is.null(het_block)) results_list$predict_het <- het_block
 
