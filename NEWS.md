@@ -2,6 +2,25 @@
 
 ## Bug fixes
 
+- **Bootstrap SEs survive partial-NA iterations.** A kept bootstrap
+  iteration can carry NA at some horizons (its resample has switchers
+  overall but none reaching horizon j). Plain `sd()`/`cov()` then
+  returned NA — with few switchers this silently wiped out EVERY SE, CI
+  and joint p-value while the point estimates looked fine. Per-horizon
+  SEs are now computed from the finite draws with a minimum bootstrap
+  support of 30 finite draws per horizon (below that the SE stays NA,
+  honestly), and the stored `$coef$vcov` uses a pairwise-complete
+  covariance.
+
+- **Joint tests: near-singular covariance now warns.** With many horizons
+  and few switchers, the bootstrap covariance behind the omnibus
+  joint-effects/placebo chi-square can be near-singular; the statistic is
+  then numerically unstable (tiny eigenvalues amplify arbitrary linear
+  combinations). `.joint_pvalue()` now excludes horizons with inadequate
+  bootstrap support and emits a warning when `rcond(V) < 1e-10`, advising
+  a low-dimensional prespecified test (e.g. the leads nearest treatment)
+  instead of the omnibus p.
+
 - **CUDA: unbalanced panels with late-entrant groups no longer crash with
   error 700.** Groups unobserved at the global first period have NA
   baseline treatment (`d_sq`); on the CPU path they fall out of every

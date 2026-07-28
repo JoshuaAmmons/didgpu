@@ -135,11 +135,26 @@
            numeric(1))
   } else numeric(0)
 
-  # SEs and CIs.
+  # SEs and CIs. A kept bootstrap iteration can still carry NA at SOME
+  # horizons (its resample has switchers overall but none reaching horizon
+  # j). Plain sd()/cov() would then return NA for every affected column --
+  # with few switchers this wiped out ALL SEs. Compute per-horizon SEs
+  # from the finite draws, requiring a minimum bootstrap support of
+  # MIN_BOOT_SUPPORT finite draws per horizon (below that the SE is
+  # genuinely not estimable and stays NA).
+  MIN_BOOT_SUPPORT <- 30L
+  .col_sd <- function(m) {
+    if (nrow(m) < 2L) return(rep(NA_real_, ncol(m)))
+    apply(m, 2L, function(col) {
+      v <- col[is.finite(col)]
+      if (length(v) >= max(2L, MIN_BOOT_SUPPORT)) stats::sd(v) else NA_real_
+    })
+  }
   z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
-  e_se <- if (nrow(e_mat) >= 2L) apply(e_mat, 2L, stats::sd) else rep(NA_real_, n_e)
-  p_se <- if (nrow(p_mat) >= 2L) apply(p_mat, 2L, stats::sd) else rep(NA_real_, n_p)
-  ate_se <- if (length(ate_vec) >= 2L) stats::sd(ate_vec) else NA_real_
+  e_se <- if (nrow(e_mat) >= 2L) .col_sd(e_mat) else rep(NA_real_, n_e)
+  p_se <- if (nrow(p_mat) >= 2L) .col_sd(p_mat) else rep(NA_real_, n_p)
+  ate_ok <- ate_vec[is.finite(ate_vec)]
+  ate_se <- if (length(ate_ok) >= max(2L, MIN_BOOT_SUPPORT)) stats::sd(ate_ok) else NA_real_
 
   e_ci_lo <- e0 - z * e_se;  e_ci_hi <- e0 + z * e_se
   p_ci_lo <- p0 - z * p_se;  p_ci_hi <- p0 + z * p_se
@@ -213,7 +228,7 @@
   names(b) <- c(effect_names, placebo_names)
   V <- if (nrow(e_mat) >= 2L) {
     full <- if (n_p > 0L) cbind(e_mat, p_mat) else e_mat
-    stats::cov(full)
+    stats::cov(full, use = "pairwise.complete.obs")
   } else matrix(NA_real_, nrow = length(b), ncol = length(b))
   dimnames(V) <- list(names(b), names(b))
 
@@ -245,16 +260,41 @@
 
 # Joint chi-square p-value: theta0' V^-1 theta0 ~ chi2(k) under H0:
 # theta = 0. V is the bootstrap covariance.
+#
+# Two robustness rules (0.1.2):
+#  - Horizons with fewer than 30 finite bootstrap draws are excluded from
+#    the joint test (their variance is not estimable), and NA draws at
+#    kept horizons are handled with a pairwise-complete covariance.
+#  - When the covariance of a high-dimensional coefficient block is
+#    near-singular (rcond < 1e-10, common with many horizons and few
+#    switchers), the chi-square statistic is numerically unstable: a
+#    warning tells the user to prefer a low-dimensional prespecified
+#    test (e.g. the leads nearest treatment) over this omnibus p.
 .joint_pvalue <- function(theta0, boot_mat) {
-  if (nrow(boot_mat) < length(theta0) + 1L) return(NA_real_)
-  V <- stats::cov(boot_mat)
+  if (nrow(boot_mat) < 2L) return(NA_real_)
+  support <- colSums(is.finite(boot_mat))
+  keep <- is.finite(theta0) & support >= 30L
+  if (!any(keep)) return(NA_real_)
+  th <- theta0[keep]
+  bm <- boot_mat[, keep, drop = FALSE]
+  if (nrow(bm) < length(th) + 1L) return(NA_real_)
+  V <- stats::cov(bm, use = "pairwise.complete.obs")
+  if (any(!is.finite(V))) return(NA_real_)
+  rc <- suppressWarnings(tryCatch(rcond(V), error = function(e) NA_real_))
+  if (is.finite(rc) && rc < 1e-10) {
+    warning(sprintf(
+      paste0("didgpu: the %d-dimensional bootstrap covariance behind a joint ",
+             "test is near-singular (rcond = %.1e); the omnibus chi-square ",
+             "p-value is numerically unreliable. Prefer a low-dimensional ",
+             "prespecified test (e.g. the leads nearest treatment)."),
+      length(th), rc), call. = FALSE)
+  }
   inv <- try(solve(V), silent = TRUE)
   if (inherits(inv, "try-error")) {
     inv <- MASS::ginv(V)
   }
-  q <- as.numeric(t(theta0) %*% inv %*% theta0)
-  k <- length(theta0)
-  stats::pchisq(q, df = k, lower.tail = FALSE)
+  q <- as.numeric(t(th) %*% inv %*% th)
+  stats::pchisq(q, df = length(th), lower.tail = FALSE)
 }
 
 
