@@ -56,6 +56,36 @@
   # Effects matrix : boot_iters x n_effects (point goes in $coef$b).
   e0 <- cells[["0"]]$effects
   n_e <- length(e0)
+  p0 <- cells[["0"]]$placebos
+  n_p <- length(p0)
+
+  # Drop degenerate bootstrap iterations instead of crashing. Under
+  # sparse-switching treatments a resample can contain no valid switcher
+  # cell at some horizon, yielding an effects/placebos vector of the wrong
+  # length (typically length 0). The vapply() calls below hard-require
+  # exact lengths, so a single such iteration used to abort the whole
+  # aggregation ("values must be length K ... result is length 0") -- and
+  # the failure probability grows with bootstrap_reps, so exactly the
+  # large-rep runs users want for final inference were the ones crashing.
+  # Dropping failed resamples is standard bootstrap practice; SEs and the
+  # bootstrap covariance are computed from the surviving iterations, and a
+  # warning reports how many were dropped.
+  if (length(boot_iters) > 0L) {
+    ok <- vapply(as.character(boot_iters), function(i) {
+      ce <- cells[[i]]$effects
+      cp <- cells[[i]]$placebos
+      length(ce) == n_e && (n_p == 0L || length(cp) == n_p) && !all(is.na(ce))
+    }, logical(1))
+    if (any(!ok)) {
+      warning(sprintf(
+        paste0("didgpu: dropped %d of %d bootstrap iteration(s) whose resample ",
+               "produced degenerate cells (no valid switchers at some horizon); ",
+               "SEs/covariance use the remaining %d iterations."),
+        sum(!ok), length(boot_iters), sum(ok)), call. = FALSE)
+      boot_iters <- boot_iters[ok]
+    }
+  }
+
   e_mat <- if (length(boot_iters) > 0L) {
     m <- vapply(as.character(boot_iters),
                 function(i) cells[[i]]$effects,
@@ -65,8 +95,6 @@
   } else matrix(numeric(0), nrow = n_e, ncol = 0L)
   e_mat <- t(e_mat)   # iter x effect
 
-  p0 <- cells[["0"]]$placebos
-  n_p <- length(p0)
   p_mat <- if (length(boot_iters) > 0L && n_p > 0L) {
     m <- vapply(as.character(boot_iters),
                 function(i) cells[[i]]$placebos,

@@ -1,5 +1,21 @@
 # didgpu 0.1.2
 
+## Bug fixes
+
+- **Bootstrap aggregation no longer crashes on degenerate resamples.**
+  Under sparse-switching treatments (few clean switchers), a bootstrap
+  resample can contain no valid switcher cell at some horizon, yielding a
+  zero-length effects vector. `.aggregate_to_result()`'s `vapply()` calls
+  hard-required full-length vectors, so a single such iteration aborted
+  the entire estimation with `values must be length K ... result is
+  length 0` — and because the failure probability grows with
+  `bootstrap_reps`, exactly the large-rep runs users want for final
+  inference were the ones crashing. Degenerate iterations are now dropped
+  with a warning that reports the count; SEs and the bootstrap covariance
+  use the surviving iterations (standard failed-resample practice).
+  Found while re-estimating thin subsamples at 2,000 reps; e.g. a
+  78-DAO/4-switcher spec had 103/2,000 degenerate resamples.
+
 ## CRAN resubmission fixes
 
 - **`test-parallel.R` now skips on CRAN.** The previous submission's
