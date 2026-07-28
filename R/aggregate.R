@@ -142,19 +142,23 @@
   # from the finite draws, requiring a minimum bootstrap support of
   # MIN_BOOT_SUPPORT finite draws per horizon (below that the SE is
   # genuinely not estimable and stays NA).
-  MIN_BOOT_SUPPORT <- 30L
+  # The support floor scales with the requested rep count: users running
+  # quick small-rep fits (e.g. 16 reps, all finite) still get SEs; large
+  # runs require at least 30 finite draws per horizon.
   .col_sd <- function(m) {
     if (nrow(m) < 2L) return(rep(NA_real_, ncol(m)))
+    floor_n <- max(2L, min(30L, as.integer(nrow(m) %/% 2L)))
     apply(m, 2L, function(col) {
       v <- col[is.finite(col)]
-      if (length(v) >= max(2L, MIN_BOOT_SUPPORT)) stats::sd(v) else NA_real_
+      if (length(v) >= floor_n) stats::sd(v) else NA_real_
     })
   }
   z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
   e_se <- if (nrow(e_mat) >= 2L) .col_sd(e_mat) else rep(NA_real_, n_e)
   p_se <- if (nrow(p_mat) >= 2L) .col_sd(p_mat) else rep(NA_real_, n_p)
   ate_ok <- ate_vec[is.finite(ate_vec)]
-  ate_se <- if (length(ate_ok) >= max(2L, MIN_BOOT_SUPPORT)) stats::sd(ate_ok) else NA_real_
+  ate_floor <- max(2L, min(30L, as.integer(length(ate_vec) %/% 2L)))
+  ate_se <- if (length(ate_ok) >= ate_floor) stats::sd(ate_ok) else NA_real_
 
   e_ci_lo <- e0 - z * e_se;  e_ci_hi <- e0 + z * e_se
   p_ci_lo <- p0 - z * p_se;  p_ci_hi <- p0 + z * p_se
@@ -273,7 +277,8 @@
 .joint_pvalue <- function(theta0, boot_mat) {
   if (nrow(boot_mat) < 2L) return(NA_real_)
   support <- colSums(is.finite(boot_mat))
-  keep <- is.finite(theta0) & support >= 30L
+  floor_n <- max(2L, min(30L, as.integer(nrow(boot_mat) %/% 2L)))
+  keep <- is.finite(theta0) & support >= floor_n
   if (!any(keep)) return(NA_real_)
   th <- theta0[keep]
   bm <- boot_mat[, keep, drop = FALSE]
