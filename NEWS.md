@@ -389,3 +389,14 @@ each with CUDA kernels for the hot paths.
   parallel-equals-sequential / checkpoint round-trip / degenerate /
   very-small. Default `DIDGPU_FUZZ_N = 8` for fast CI; bump via env
   var for deep local runs (validated at N = 200, no failures).
+
+## Validation
+
+- **Monte Carlo CI coverage by switcher count** (`tools/validation/`): with
+  the cluster bootstrap, 95% CIs achieve ~94% coverage at 8+ switchers,
+  ~87% at 4, but only ~66% at 2 — the classic few-treated-clusters
+  failure, not specific to didgpu. Point estimates are unbiased at every
+  count. Practical rule: treat estimates identified off fewer than ~5
+  clean switchers as diagnostics; their bootstrap CIs materially
+  undercover. The degenerate-resample drop does not distort coverage
+  where support is adequate (8-13 switchers: nominal).

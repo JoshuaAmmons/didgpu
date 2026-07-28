@@ -1,0 +1,4 @@
+switchers= 2 | ok=200 | bias=+0.017 | bootSE=0.315 | empSD=0.503 | coverage=65.5%
+switchers= 4 | ok=200 | bias=+0.025 | bootSE=0.337 | empSD=0.357 | coverage=87.5%
+switchers= 8 | ok=200 | bias=-0.002 | bootSE=0.272 | empSD=0.289 | coverage=94.0%
+switchers=13 | ok=200 | bias=-0.020 | bootSE=0.248 | empSD=0.264 | coverage=94.0%
