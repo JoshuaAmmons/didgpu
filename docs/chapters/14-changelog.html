@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.38">
+<meta name="generator" content="quarto-1.10.18">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -12,10 +12,13 @@
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
 */
-code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
-div.columns{display: flex; gap: min(4vw, 1.5em);}
-div.column{flex: auto; overflow-x: auto;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
 div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
 ul.task-list{list-style: none;}
 ul.task-list li input[type="checkbox"] {
@@ -39,14 +42,14 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-31cb823a069fdaf454f4d3e38efd546a.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-ade7d03c17f22d7cbcaa6387c685beb8.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-31cb823a069fdaf454f4d3e38efd546a.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-d64cad229ae5e9b03e304a785e905439.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-c86cab0608ea882fe01ef336a8aac08f.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-d64cad229ae5e9b03e304a785e905439.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-4257395e575bf34f6180e37031feeb58.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-c8f64023d7f39d4602f6592e5401752c.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-4257395e575bf34f6180e37031feeb58.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-67ed2d6000758ff64693936f0426fbc1.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-ca6fc6d19f54fb7156b26f550a299d55.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-67ed2d6000758ff64693936f0426fbc1.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -481,11 +484,12 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#changelog" id="toc-changelog" class="nav-link active" data-scroll-target="#changelog"><span class="header-section-number">16</span> Changelog</a></li>
   <li><a href="#didgpu-0.1.2" id="toc-didgpu-0.1.2" class="nav-link" data-scroll-target="#didgpu-0.1.2"><span class="header-section-number">17</span> didgpu 0.1.2</a>
   <ul class="collapse">
-  <li><a href="#cran-resubmission-fixes" id="toc-cran-resubmission-fixes" class="nav-link" data-scroll-target="#cran-resubmission-fixes"><span class="header-section-number">17.1</span> CRAN resubmission fixes</a></li>
+  <li><a href="#bug-fixes" id="toc-bug-fixes" class="nav-link" data-scroll-target="#bug-fixes"><span class="header-section-number">17.1</span> Bug fixes</a></li>
+  <li><a href="#cran-resubmission-fixes" id="toc-cran-resubmission-fixes" class="nav-link" data-scroll-target="#cran-resubmission-fixes"><span class="header-section-number">17.2</span> CRAN resubmission fixes</a></li>
   </ul></li>
   <li><a href="#didgpu-0.1.1" id="toc-didgpu-0.1.1" class="nav-link" data-scroll-target="#didgpu-0.1.1"><span class="header-section-number">18</span> didgpu 0.1.1</a>
   <ul class="collapse">
-  <li><a href="#bug-fixes" id="toc-bug-fixes" class="nav-link" data-scroll-target="#bug-fixes"><span class="header-section-number">18.1</span> Bug fixes</a></li>
+  <li><a href="#bug-fixes-1" id="toc-bug-fixes-1" class="nav-link" data-scroll-target="#bug-fixes-1"><span class="header-section-number">18.1</span> Bug fixes</a></li>
   <li><a href="#reference-parity-with-didmultiplegtdyn-2.3.x" id="toc-reference-parity-with-didmultiplegtdyn-2.3.x" class="nav-link" data-scroll-target="#reference-parity-with-didmultiplegtdyn-2.3.x"><span class="header-section-number">18.2</span> Reference parity with <code>DIDmultiplegtDYN</code> 2.3.x</a></li>
   <li><a href="#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" id="toc-correctness-fixes-found-by-randomized-differential-testing-vs-the-reference" class="nav-link" data-scroll-target="#correctness-fixes-found-by-randomized-differential-testing-vs-the-reference"><span class="header-section-number">18.3</span> Correctness fixes (found by randomized differential testing vs the reference)</a></li>
   </ul></li>
@@ -502,6 +506,7 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#r-interface" id="toc-r-interface" class="nav-link" data-scroll-target="#r-interface"><span class="header-section-number">19.9</span> R interface</a></li>
   <li><a href="#fect-family-counterfactual-prediction-estimators" id="toc-fect-family-counterfactual-prediction-estimators" class="nav-link" data-scroll-target="#fect-family-counterfactual-prediction-estimators"><span class="header-section-number">19.10</span> fect family (counterfactual-prediction estimators)</a></li>
   <li><a href="#testing" id="toc-testing" class="nav-link" data-scroll-target="#testing"><span class="header-section-number">19.11</span> Testing</a></li>
+  <li><a href="#validation" id="toc-validation" class="nav-link" data-scroll-target="#validation"><span class="header-section-number">19.12</span> Validation</a></li>
   </ul></li>
   </ul>
 <div class="toc-actions"><ul><li><a href="https://github.com/JoshuaAmmons/didgpu/edit/main/chapters/14-changelog.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/JoshuaAmmons/didgpu/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
@@ -535,8 +540,17 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="didgpu-0.1.2" class="level1" data-number="17">
 <h1 data-number="17"><span class="header-section-number">17</span> didgpu 0.1.2</h1>
-<section id="cran-resubmission-fixes" class="level2" data-number="17.1">
-<h2 data-number="17.1" class="anchored" data-anchor-id="cran-resubmission-fixes"><span class="header-section-number">17.1</span> CRAN resubmission fixes</h2>
+<section id="bug-fixes" class="level2" data-number="17.1">
+<h2 data-number="17.1" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">17.1</span> Bug fixes</h2>
+<ul>
+<li><p><strong>Bootstrap SEs survive partial-NA iterations.</strong> A kept bootstrap iteration can carry NA at some horizons (its resample has switchers overall but none reaching horizon j). Plain <code>sd()</code>/<code>cov()</code> then returned NA — with few switchers this silently wiped out EVERY SE, CI and joint p-value while the point estimates looked fine. Per-horizon SEs are now computed from the finite draws with a minimum bootstrap support of 30 finite draws per horizon (below that the SE stays NA, honestly), and the stored <code>$coef$vcov</code> uses a pairwise-complete covariance.</p></li>
+<li><p><strong>Joint tests: near-singular covariance now warns.</strong> With many horizons and few switchers, the bootstrap covariance behind the omnibus joint-effects/placebo chi-square can be near-singular; the statistic is then numerically unstable (tiny eigenvalues amplify arbitrary linear combinations). <code>.joint_pvalue()</code> now excludes horizons with inadequate bootstrap support and emits a warning when <code>rcond(V) &lt; 1e-10</code>, advising a low-dimensional prespecified test (e.g.&nbsp;the leads nearest treatment) instead of the omnibus p.</p></li>
+<li><p><strong>CUDA: unbalanced panels with late-entrant groups no longer crash with error 700.</strong> Groups unobserved at the global first period have NA baseline treatment (<code>d_sq</code>); on the CPU path they fall out of every cohort mask and contribute zero, but on the CUDA path the NA flowed through <code>match()</code> into <code>cohort_key</code> as <code>NA_integer_</code>, which reaches the kernels as <code>INT_MIN</code> and caused an illegal memory access (<code>CUDA DID kernel failed with code 700</code>) in <code>k_finalize_dist_and_kernel</code> — and error 700 poisons the CUDA context, so every subsequent didgpu call in the process failed too. Any real-world unbalanced panel (units entering the sample over time) hit this immediately. NA-key rows are now parked in a padding cohort whose kernel contribution is identically zero, matching CPU semantics bit-for-bit. Diagnosed with <code>compute-sanitizer</code> (invalid 8-byte global read at <code>base + INT_MIN * 8</code>); regression-tested in <code>test-cuda-late-entrants.R</code>, including a context-not-poisoned check.</p></li>
+<li><p><strong>Bootstrap aggregation no longer crashes on degenerate resamples.</strong> Under sparse-switching treatments (few clean switchers), a bootstrap resample can contain no valid switcher cell at some horizon, yielding a zero-length effects vector. <code>.aggregate_to_result()</code>’s <code>vapply()</code> calls hard-required full-length vectors, so a single such iteration aborted the entire estimation with <code>values must be length K ... result is length 0</code> — and because the failure probability grows with <code>bootstrap_reps</code>, exactly the large-rep runs users want for final inference were the ones crashing. Degenerate iterations are now dropped with a warning that reports the count; SEs and the bootstrap covariance use the surviving iterations (standard failed-resample practice). Found while re-estimating thin subsamples at 2,000 reps; e.g.&nbsp;a 78-DAO/4-switcher spec had 103/2,000 degenerate resamples.</p></li>
+</ul>
+</section>
+<section id="cran-resubmission-fixes" class="level2" data-number="17.2">
+<h2 data-number="17.2" class="anchored" data-anchor-id="cran-resubmission-fixes"><span class="header-section-number">17.2</span> CRAN resubmission fixes</h2>
 <ul>
 <li><strong><code>test-parallel.R</code> now skips on CRAN.</strong> The previous submission’s pretest exceeded CRAN’s 2-core cap (<code>_R_CHECK_LIMIT_CORES_</code>) despite the test honouring the env var, producing the only test failure. Both <code>test_that</code> blocks in <code>test-parallel.R</code> now call <code>skip_on_cran()</code>. The parallel path is fully exercised in our GitHub Actions CI matrix on every push.</li>
 <li><strong>README links rewritten to absolute GitHub URLs.</strong> Two references (<code>WINDOWS_BUILD_STATUS.md</code>, <code>BENCHMARKS.md</code>) are intentionally excluded from the source tarball via <code>.Rbuildignore</code>; the README now points to their canonical GitHub URLs so they resolve from the rendered README on CRAN. One stale link (<code>../NOTES_did_gpu_checkpointed.Rmd</code>, an out-of-tree file that no longer exists) was removed.</li>
@@ -546,8 +560,8 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="didgpu-0.1.1" class="level1" data-number="18">
 <h1 data-number="18"><span class="header-section-number">18</span> didgpu 0.1.1</h1>
-<section id="bug-fixes" class="level2" data-number="18.1">
-<h2 data-number="18.1" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">18.1</span> Bug fixes</h2>
+<section id="bug-fixes-1" class="level2" data-number="18.1">
+<h2 data-number="18.1" class="anchored" data-anchor-id="bug-fixes-1"><span class="header-section-number">18.1</span> Bug fixes</h2>
 <ul>
 <li><strong>CUDA: support Blackwell (<code>sm_120</code>) GPUs.</strong> The GPU build previously targeted only Turing–Hopper (<code>sm_75</code>–<code>sm_90</code>) with no PTX fallback, so on Blackwell parts (RTX PRO Blackwell, RTX 50xx) the kernels had no device image and effect estimates silently came back as <strong>all zeros</strong> while the CPU/R backends were correct. Added <code>compute_120,sm_120</code> plus a <code>compute_120</code> PTX target to both <code>src/Makevars</code> and <code>src/Makevars.win</code>. GPU effects are again bit-identical to the CPU/R backends on Blackwell (verified on an RTX PRO 5000 Blackwell, CUDA 13.2).</li>
 <li><strong>Windows build: ship <code>src/didgpu_cuda.def</code>.</strong> The DLL export list was git-ignored (<code>/src/*.def</code>), so clean checkouts — and the r-universe / <code>install_github</code> source build — could not link <code>didgpu_cuda.dll</code>. It is now tracked.</li>
@@ -686,6 +700,12 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li>300+ tests across 24 test files; <code>R CMD check</code> passes with only pre-existing intentional WARN (CUDA <code>.cu</code> files in <code>src/</code>) and the declared GNU make <code>SystemRequirements</code> NOTE.</li>
 <li>Adversarial fuzz harness (<code>tests/testthat/test-fuzz.R</code>) covers 21 scenarios: vanilla / weight / controls / switchers / normalized / placebos / trends_lin / only_never + same_switchers / kitchen sink / trends_lin sink / multivalued / bootstrap-stability / parallel-equals-sequential / checkpoint round-trip / degenerate / very-small. Default <code>DIDGPU_FUZZ_N = 8</code> for fast CI; bump via env var for deep local runs (validated at N = 200, no failures).</li>
+</ul>
+</section>
+<section id="validation" class="level2" data-number="19.12">
+<h2 data-number="19.12" class="anchored" data-anchor-id="validation"><span class="header-section-number">19.12</span> Validation</h2>
+<ul>
+<li><strong>Monte Carlo CI coverage by switcher count</strong> (<code>tools/validation/</code>): with the cluster bootstrap, 95% CIs achieve ~94% coverage at 8+ switchers, ~87% at 4, but only ~66% at 2 — the classic few-treated-clusters failure, not specific to didgpu. Point estimates are unbiased at every count. Practical rule: treat estimates identified off fewer than ~5 clean switchers as diagnostics; their bootstrap CIs materially undercover. The degenerate-resample drop does not distort coverage where support is adequate (8-13 switchers: nominal).</li>
 </ul>
 
 

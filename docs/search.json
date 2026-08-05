@@ -1037,11 +1037,11 @@
     ]
   },
   {
-    "objectID": "chapters/14-changelog.html#cran-resubmission-fixes",
-    "href": "chapters/14-changelog.html#cran-resubmission-fixes",
+    "objectID": "chapters/14-changelog.html#bug-fixes",
+    "href": "chapters/14-changelog.html#bug-fixes",
     "title": "15  Changelog",
-    "section": "17.1 CRAN resubmission fixes",
-    "text": "17.1 CRAN resubmission fixes\n\ntest-parallel.R now skips on CRAN. The previous submission’s pretest exceeded CRAN’s 2-core cap (_R_CHECK_LIMIT_CORES_) despite the test honouring the env var, producing the only test failure. Both test_that blocks in test-parallel.R now call skip_on_cran(). The parallel path is fully exercised in our GitHub Actions CI matrix on every push.\nREADME links rewritten to absolute GitHub URLs. Two references (WINDOWS_BUILD_STATUS.md, BENCHMARKS.md) are intentionally excluded from the source tarball via .Rbuildignore; the README now points to their canonical GitHub URLs so they resolve from the rendered README on CRAN. One stale link (../NOTES_did_gpu_checkpointed.Rmd, an out-of-tree file that no longer exists) was removed.\nDESCRIPTION typography. Single-quoted the software-name references 'Rcpp' and 'CUDA' per CRAN convention.",
+    "section": "17.1 Bug fixes",
+    "text": "17.1 Bug fixes\n\nBootstrap SEs survive partial-NA iterations. A kept bootstrap iteration can carry NA at some horizons (its resample has switchers overall but none reaching horizon j). Plain sd()/cov() then returned NA — with few switchers this silently wiped out EVERY SE, CI and joint p-value while the point estimates looked fine. Per-horizon SEs are now computed from the finite draws with a minimum bootstrap support of 30 finite draws per horizon (below that the SE stays NA, honestly), and the stored $coef$vcov uses a pairwise-complete covariance.\nJoint tests: near-singular covariance now warns. With many horizons and few switchers, the bootstrap covariance behind the omnibus joint-effects/placebo chi-square can be near-singular; the statistic is then numerically unstable (tiny eigenvalues amplify arbitrary linear combinations). .joint_pvalue() now excludes horizons with inadequate bootstrap support and emits a warning when rcond(V) &lt; 1e-10, advising a low-dimensional prespecified test (e.g. the leads nearest treatment) instead of the omnibus p.\nCUDA: unbalanced panels with late-entrant groups no longer crash with error 700. Groups unobserved at the global first period have NA baseline treatment (d_sq); on the CPU path they fall out of every cohort mask and contribute zero, but on the CUDA path the NA flowed through match() into cohort_key as NA_integer_, which reaches the kernels as INT_MIN and caused an illegal memory access (CUDA DID kernel failed with code 700) in k_finalize_dist_and_kernel — and error 700 poisons the CUDA context, so every subsequent didgpu call in the process failed too. Any real-world unbalanced panel (units entering the sample over time) hit this immediately. NA-key rows are now parked in a padding cohort whose kernel contribution is identically zero, matching CPU semantics bit-for-bit. Diagnosed with compute-sanitizer (invalid 8-byte global read at base + INT_MIN * 8); regression-tested in test-cuda-late-entrants.R, including a context-not-poisoned check.\nBootstrap aggregation no longer crashes on degenerate resamples. Under sparse-switching treatments (few clean switchers), a bootstrap resample can contain no valid switcher cell at some horizon, yielding a zero-length effects vector. .aggregate_to_result()’s vapply() calls hard-required full-length vectors, so a single such iteration aborted the entire estimation with values must be length K ... result is length 0 — and because the failure probability grows with bootstrap_reps, exactly the large-rep runs users want for final inference were the ones crashing. Degenerate iterations are now dropped with a warning that reports the count; SEs and the bootstrap covariance use the surviving iterations (standard failed-resample practice). Found while re-estimating thin subsamples at 2,000 reps; e.g. a 78-DAO/4-switcher spec had 103/2,000 degenerate resamples.",
     "crumbs": [
       "Get Started",
       "Reference",
@@ -1049,8 +1049,20 @@
     ]
   },
   {
-    "objectID": "chapters/14-changelog.html#bug-fixes",
-    "href": "chapters/14-changelog.html#bug-fixes",
+    "objectID": "chapters/14-changelog.html#cran-resubmission-fixes",
+    "href": "chapters/14-changelog.html#cran-resubmission-fixes",
+    "title": "15  Changelog",
+    "section": "17.2 CRAN resubmission fixes",
+    "text": "17.2 CRAN resubmission fixes\n\ntest-parallel.R now skips on CRAN. The previous submission’s pretest exceeded CRAN’s 2-core cap (_R_CHECK_LIMIT_CORES_) despite the test honouring the env var, producing the only test failure. Both test_that blocks in test-parallel.R now call skip_on_cran(). The parallel path is fully exercised in our GitHub Actions CI matrix on every push.\nREADME links rewritten to absolute GitHub URLs. Two references (WINDOWS_BUILD_STATUS.md, BENCHMARKS.md) are intentionally excluded from the source tarball via .Rbuildignore; the README now points to their canonical GitHub URLs so they resolve from the rendered README on CRAN. One stale link (../NOTES_did_gpu_checkpointed.Rmd, an out-of-tree file that no longer exists) was removed.\nDESCRIPTION typography. Single-quoted the software-name references 'Rcpp' and 'CUDA' per CRAN convention.",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#bug-fixes-1",
+    "href": "chapters/14-changelog.html#bug-fixes-1",
     "title": "15  Changelog",
     "section": "18.1 Bug fixes",
     "text": "18.1 Bug fixes\n\nCUDA: support Blackwell (sm_120) GPUs. The GPU build previously targeted only Turing–Hopper (sm_75–sm_90) with no PTX fallback, so on Blackwell parts (RTX PRO Blackwell, RTX 50xx) the kernels had no device image and effect estimates silently came back as all zeros while the CPU/R backends were correct. Added compute_120,sm_120 plus a compute_120 PTX target to both src/Makevars and src/Makevars.win. GPU effects are again bit-identical to the CPU/R backends on Blackwell (verified on an RTX PRO 5000 Blackwell, CUDA 13.2).\nWindows build: ship src/didgpu_cuda.def. The DLL export list was git-ignored (/src/*.def), so clean checkouts — and the r-universe / install_github source build — could not link didgpu_cuda.dll. It is now tracked.\nWindows build: locate CUDA runtime DLLs under bin/x64. CUDA 13 moved the redistributable DLLs from bin/ to bin/x64/; the bundling step now searches both so didgpu_cuda.dll loads at runtime.",
@@ -1210,6 +1222,18 @@
     "title": "15  Changelog",
     "section": "19.11 Testing",
     "text": "19.11 Testing\n\n300+ tests across 24 test files; R CMD check passes with only pre-existing intentional WARN (CUDA .cu files in src/) and the declared GNU make SystemRequirements NOTE.\nAdversarial fuzz harness (tests/testthat/test-fuzz.R) covers 21 scenarios: vanilla / weight / controls / switchers / normalized / placebos / trends_lin / only_never + same_switchers / kitchen sink / trends_lin sink / multivalued / bootstrap-stability / parallel-equals-sequential / checkpoint round-trip / degenerate / very-small. Default DIDGPU_FUZZ_N = 8 for fast CI; bump via env var for deep local runs (validated at N = 200, no failures).",
+    "crumbs": [
+      "Get Started",
+      "Reference",
+      "<span class='chapter-number'>15</span>  <span class='chapter-title'>Changelog</span>"
+    ]
+  },
+  {
+    "objectID": "chapters/14-changelog.html#validation",
+    "href": "chapters/14-changelog.html#validation",
+    "title": "15  Changelog",
+    "section": "19.12 Validation",
+    "text": "19.12 Validation\n\nMonte Carlo CI coverage by switcher count (tools/validation/): with the cluster bootstrap, 95% CIs achieve ~94% coverage at 8+ switchers, ~87% at 4, but only ~66% at 2 — the classic few-treated-clusters failure, not specific to didgpu. Point estimates are unbiased at every count. Practical rule: treat estimates identified off fewer than ~5 clean switchers as diagnostics; their bootstrap CIs materially undercover. The degenerate-resample drop does not distort coverage where support is adequate (8-13 switchers: nominal).",
     "crumbs": [
       "Get Started",
       "Reference",
