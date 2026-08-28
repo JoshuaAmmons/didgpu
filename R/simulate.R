@@ -40,12 +40,22 @@
 #' @param unit_fe_sd numeric. Unit fixed-effect SD.
 #' @param time_fe_sd numeric. Time fixed-effect SD.
 #' @param seed integer. RNG seed.
+#' @param late_entry_frac numeric in `[0, 1]`. Share of units that enter
+#'   the panel after period 1, producing an UNBALANCED panel: their rows
+#'   before entry are absent entirely (not `NA`). Default `0` (balanced),
+#'   which leaves the RNG stream untouched so every existing seeded
+#'   fixture stays bit-identical.
+#' @param max_entry_period integer. Latest entry period for late
+#'   entrants, drawn uniformly from `2:max_entry_period`. Defaults to
+#'   `max(2, floor(n_periods * 0.4))`, which keeps most late entrants
+#'   with a usable pre-period before they switch.
 #'
 #' @return A data.frame with columns: `unit` (int), `period` (int),
 #'   `D` (binary treatment indicator), `Y` (outcome). Sorted by
 #'   (unit, period). Also has an attribute `"truth"`: a list with
 #'   `F_g` (named numeric per unit; Inf = never-treated),
-#'   `tau_profile`, `unit_fe`, `time_fe`.
+#'   `tau_profile`, `unit_fe`, `time_fe`, and `entry_period` (named
+#'   integer per late-entering unit, or `NULL` when balanced).
 #'
 #' @examples
 #' p <- didgpu_simulate_panel(n_units = 40L, n_periods = 10L,
@@ -67,7 +77,9 @@ didgpu_simulate_panel <- function(
     sigma            = 0.5,
     unit_fe_sd       = 1.0,
     time_fe_sd       = 0.3,
-    seed             = 1L) {
+    seed             = 1L,
+    late_entry_frac  = 0,
+    max_entry_period = NULL) {
 
   # Default treatment window: middle ~half of the panel. Scales with n_periods
   # so callers can pass tiny panels without having to override these.
@@ -80,7 +92,8 @@ didgpu_simulate_panel <- function(
     frac_treated >= 0, frac_treated <= 1,
     min_treat_period >= 1, max_treat_period <= n_periods,
     min_treat_period <= max_treat_period,
-    length(tau_profile) >= 1, all(is.finite(tau_profile))
+    length(tau_profile) >= 1, all(is.finite(tau_profile)),
+    late_entry_frac >= 0, late_entry_frac <= 1
   )
 
   set.seed(seed)
@@ -131,13 +144,44 @@ didgpu_simulate_panel <- function(
   data.table::setkeyv(panel, c("unit", "period"))
   out <- as.data.frame(panel[, list(unit, period, D, Y)])
 
+  # Optional unbalancing: a share of units enter the panel after period 1,
+  # with every row before their entry period ABSENT (not NA). This is what
+  # a real country panel looks like -- units enter the data in different
+  # years -- and it is precisely the case that separates a per-group
+  # baseline treatment from a global-first-period one. Guarded so that the
+  # default (0) never touches the RNG stream and every existing seeded
+  # fixture stays bit-identical.
+  entry <- NULL
+  if (late_entry_frac > 0) {
+    n_late <- round(n_units * late_entry_frac)
+    if (n_late > 0L) {
+      if (is.null(max_entry_period)) {
+        max_entry_period <- max(2L, as.integer(n_periods * 0.4))
+      }
+      stopifnot(max_entry_period >= 2L, max_entry_period <= n_periods)
+      late_units <- sort(sample(units, n_late))
+      # Index into an explicit pool: sample(x) with length(x) == 1 would
+      # silently mean sample(seq_len(x)).
+      pool  <- seq.int(2L, max_entry_period)
+      entry <- pool[sample.int(length(pool), n_late, replace = TRUE)]
+      names(entry) <- as.character(late_units)
+      idx  <- match(as.character(out$unit), names(entry))
+      hit  <- !is.na(idx)
+      keep <- rep(TRUE, nrow(out))
+      keep[hit] <- out$period[hit] >= entry[idx[hit]]
+      out <- out[keep, , drop = FALSE]
+      rownames(out) <- NULL
+    }
+  }
+
   attr(out, "truth") <- list(
     F_g = F_g,
     tau_profile = tau_profile,
     unit_fe = unit_fe,
     time_fe = time_fe,
     sigma = sigma,
-    seed = seed
+    seed = seed,
+    entry_period = entry
   )
   out
 }

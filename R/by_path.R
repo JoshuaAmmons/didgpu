@@ -75,11 +75,14 @@ didgpu_compute_paths <- function(df, outcome, group, time, treatment,
   d[, time_path_int_XX := as.integer(factor(time_path_XX,
                                               levels = sort(unique(time_path_XX))))]
 
-  # Per-group baseline treatment (value at t_min).
-  t_min_int <- min(d$time_path_int_XX)
+  # Per-group baseline treatment: value at the group's OWN first period
+  # with non-missing treatment (same rule as core_r.R and the reference).
+  # A global t_min lookup drops late entrants on unbalanced panels.
   d[, d_sq_path_XX := {
-      idx <- which(time_path_int_XX == t_min_int)
-      if (length(idx) > 0L) treatment_path_XX[idx[1L]] else NA
+      ok <- !is.na(treatment_path_XX)
+      if (any(ok)) {
+        treatment_path_XX[ok][which.min(time_path_int_XX[ok])]
+      } else NA
     },
     by = group_path_int_XX]
 

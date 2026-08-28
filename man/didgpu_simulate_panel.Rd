@@ -14,7 +14,9 @@ didgpu_simulate_panel(
   sigma = 0.5,
   unit_fe_sd = 1,
   time_fe_sd = 0.3,
-  seed = 1L
+  seed = 1L,
+  late_entry_frac = 0,
+  max_entry_period = NULL
 )
 }
 \arguments{
@@ -42,13 +44,25 @@ Length \code{length(tau_profile) - 1} upper bound on k.}
 \item{time_fe_sd}{numeric. Time fixed-effect SD.}
 
 \item{seed}{integer. RNG seed.}
+
+\item{late_entry_frac}{numeric in erb{[0, 1]}. Share of units that enter
+the panel after period 1, producing an UNBALANCED panel: their rows
+before entry are absent entirely (not \code{NA}). Default \code{0} (balanced),
+which leaves the RNG stream untouched so every existing seeded
+fixture stays bit-identical.}
+
+\item{max_entry_period}{integer. Latest entry period for late
+entrants, drawn uniformly from \code{2:max_entry_period}. Defaults to
+\code{max(2, floor(n_periods * 0.4))}, which keeps most late entrants
+with a usable pre-period before they switch.}
 }
 \value{
 A data.frame with columns: \code{unit} (int), \code{period} (int),
 \code{D} (binary treatment indicator), \code{Y} (outcome). Sorted by
 (unit, period). Also has an attribute \code{"truth"}: a list with
 \code{F_g} (named numeric per unit; Inf = never-treated),
-\code{tau_profile}, \code{unit_fe}, \code{time_fe}.
+\code{tau_profile}, \code{unit_fe}, \code{time_fe}, and \code{entry_period} (named
+integer per late-entering unit, or \code{NULL} when balanced).
 }
 \description{
 Generate a simulated DiD panel with known event-time profile

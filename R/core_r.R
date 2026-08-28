@@ -98,9 +98,16 @@
   # the entire group. Skip this whole block when dont_drop_larger_lower
   # is TRUE.
   if (!isTRUE(dont_drop_larger_lower)) {
-    t_min0 <- min(d$time_XX)
-    # Per-group baseline (first-period) treatment, broadcast in place.
-    d[, d_sq_tmp := treatment_XX[time_XX == t_min0][1L], by = group_XX]
+    # Per-group baseline treatment, broadcast in place. Keyed off the
+    # group's OWN first period with non-missing treatment, not the global
+    # first period -- see the d_sq_XX note below.
+    d[, d_sq_tmp := {
+        ok <- !is.na(treatment_XX)
+        if (any(ok)) {
+          mean(treatment_XX[ok][time_XX[ok] == min(time_XX[ok])])
+        } else NA_real_
+      },
+      by = group_XX]
     d[, diff_from_sq_tmp := treatment_XX - d_sq_tmp]
     data.table::setorder(d, group_XX, time_XX)
     d[, ever_strict_increase_tmp := as.integer(pmin(1L,
@@ -114,11 +121,37 @@
           "ever_strict_increase_tmp", "ever_strict_decrease_tmp") := NULL]
   }
 
-  # Baseline (period-1) treatment per group. NA if the group is unobserved
-  # at the first period of the balanced grid. Computed in place with
-  # grouped assignment (faster than merge: no second allocation + bmerge).
-  t_min <- min(d$time_XX)
-  d[, d_sq_XX := treatment_XX[time_XX == t_min][1L], by = group_XX]
+  # Baseline treatment per group: treatment at the group's OWN first
+  # period with non-missing treatment. This mirrors the reference exactly
+  # (main.R:148-180, where min_time_d_nonmiss_XX is computed
+  # `by = group_XX` and d_sq_XX is the mean of treatment at that period).
+  #
+  # It must NOT key off the global min(time_XX). On an unbalanced panel a
+  # late-entering group has treatment_XX = NA at the global first period
+  # -- the CJ balancing merge above creates the row but leaves it missing
+  # -- so a global lookup returned NA for that group's d_sq_XX. Two things
+  # then went wrong:
+  #   1. F_g_XX below requires !is.na(d_sq_XX), so it fell through to
+  #      T_max + 1 and the group was reclassified as a never-switcher.
+  #   2. The NA propagated into the (time, d_sq) cohort-key encoding used
+  #      by the fast backends (backend.R), forcing its string-factor
+  #      fallback branch and producing different cohort groupings than
+  #      the reference.
+  # Net effect: backends "r" / "cpu" / CUDA disagreed with DIDmultiplegtDYN
+  # on any unbalanced panel (max |diff| ~1.8e-01 on the reported reprex),
+  # while backend "reference" happened to agree anyway -- so a parity test
+  # pinned to "reference" could not see it either. On a BALANCED panel the
+  # group's own first period IS the global first period, so every backend
+  # agreed exactly; that is why the randomized differential suite, whose
+  # simulator emitted only balanced panels, ran clean throughout.
+  # Regression test: tests/testthat/test-unbalanced-parity.R.
+  d[, d_sq_XX := {
+      ok <- !is.na(treatment_XX)
+      if (any(ok)) {
+        mean(treatment_XX[ok][time_XX[ok] == min(time_XX[ok])])
+      } else NA_real_
+    },
+    by = group_XX]
 
   # First-switch period F_g_XX: the smallest t with treatment_XX != d_sq_XX
   # (and both observed). For never-switchers, F_g_XX = T_max + 1.

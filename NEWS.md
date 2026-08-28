@@ -2,6 +2,32 @@
 
 ## Bug fixes
 
+- **Reference parity restored on UNBALANCED panels.** Baseline treatment
+  `d_sq` was taken from the *global* first period rather than each
+  group's own first period with non-missing treatment. A group entering
+  the panel late therefore had `d_sq = NA` (the internal balancing merge
+  creates the row but leaves treatment missing), which (a) made `F_g`
+  fall through to `T_max + 1`, reclassifying the group as a
+  never-switcher, and (b) propagated the NA into the `(time, d_sq)`
+  cohort-key encoding used by the fast backends, forcing a fallback
+  branch that grouped cohorts differently from the reference. Backends
+  `"r"`, `"cpu"` and CUDA consequently disagreed with `DIDmultiplegtDYN`
+  on any panel with unequal group lengths -- max |diff| 1.8e-01 on a
+  60-unit reprex -- while `backend = "reference"` happened to agree.
+  Baseline treatment now uses each group's own first non-missing period,
+  matching the reference definition exactly; the same reprex now agrees
+  to 5.6e-17. Balanced-panel results are bit-identical to before.
+
+  This went undetected by the randomized differential suite because
+  `didgpu_simulate_panel()` could only emit balanced panels, on which
+  the two definitions coincide. The simulator gained a
+  `late_entry_frac` argument (default `0`, RNG-stream preserving) and
+  `tests/testthat/test-unbalanced-parity.R` now checks every CPU backend
+  against the reference on an unbalanced panel.
+
+  Users who ran didgpu on an unbalanced panel with any backend other
+  than `"reference"` should re-run: point estimates were affected.
+
 - **Bootstrap SEs survive partial-NA iterations.** A kept bootstrap
   iteration can carry NA at some horizons (its resample has switchers
   overall but none reaching horizon j). Plain `sd()`/`cov()` then
