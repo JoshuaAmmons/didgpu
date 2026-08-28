@@ -2,6 +2,35 @@
 
 ## Bug fixes
 
+- **`didgpu_fect()` no longer reports always-treated units' levels as
+  treatment effects.** A unit treated in every observed period has no
+  control cell, so its unit fixed effect (`fe`) / factor loading
+  (`ife`, `mc`) is unidentified. The fitter set an unidentified unit
+  effect to `0`, which made the imputed counterfactual the time effect
+  alone -- so the unit's entire LEVEL landed in the residual and was
+  reported as treatment effect. Always-treated units are selected on
+  level (they are exactly the units already treated before the sample
+  window opened), so the bias did not average out. On a known-zero DGP
+  with 10 such units the reported ATE was **+1.63 against a true effect
+  of 0**, and it survived every factor count and `method = "fe"`.
+  Units with no untreated period are now dropped before estimation
+  with a warning, and the count is returned as
+  `$n_always_treated_dropped`. This matches the reference `fect`
+  package ("units whose number of untreated periods <1 are dropped
+  automatically") and `didgpu_bacon()`, which already did this.
+  On the same DGP all three methods now recover the null.
+
+  Anyone who ran `didgpu_fect()` on a panel containing always-treated
+  units should re-run: the ATT was biased upward by their level.
+
+- **Note on `fect` parity.** `didgpu_fect(method = "fe")` agrees with
+  `fect::fect()` definitionally but NOT bit-for-bit at the default
+  `tol = 1e-5`: the alternating-projections fit stops early, leaving a
+  gap of ~6e-5 on a 60-unit panel (~2e-6 at `tol = 1e-8`, ~2e-8 at
+  `tol = 1e-12`). Pass a tighter `tol` when exact agreement matters.
+  `fect` has been added to `Suggests` so the comparison is now covered
+  by the test suite.
+
 - **Reference parity restored on UNBALANCED panels.** Baseline treatment
   `d_sq` was taken from the *global* first period rather than each
   group's own first period with non-missing treatment. A group entering

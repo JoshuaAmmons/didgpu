@@ -45,7 +45,7 @@ Length \code{length(tau_profile) - 1} upper bound on k.}
 
 \item{seed}{integer. RNG seed.}
 
-\item{late_entry_frac}{numeric in erb{[0, 1]}. Share of units that enter
+\item{late_entry_frac}{numeric in \verb{[0, 1]}. Share of units that enter
 the panel after period 1, producing an UNBALANCED panel: their rows
 before entry are absent entirely (not \code{NA}). Default \code{0} (balanced),
 which leaves the RNG stream untouched so every existing seeded

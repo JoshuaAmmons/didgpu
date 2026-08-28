@@ -42,6 +42,7 @@ Suggests:
     DIDmultiplegtDYN,
     DRDID,
     eventstudyr,
+    fect,
     HonestDiD,
     quadprog,
     splines2,

@@ -174,6 +174,41 @@ didgpu_fect <- function(
     stop("unknown method")
   )
 
+  # ---- drop units with no untreated period -----------------------------
+  # A unit treated in EVERY observed period contributes no control cell,
+  # so its unit fixed effect (fe) / factor loading (ife, mc) is not
+  # identified. .fect_fe_fit() sets an unidentified alpha to 0, which
+  # makes the imputed counterfactual Y_hat = xi alone -- the unit's whole
+  # LEVEL then lands in the residual and is reported as treatment effect.
+  # Always-treated units are selected on level (they are the ones already
+  # treated before the window opened), so this bias does not average out:
+  # on a known-zero DGP with 10 such units the reported ATE was +1.63
+  # instead of 0, and survived every factor count.
+  #
+  # The reference implementation drops them ("units whose number of
+  # untreated periods <1 are dropped automatically"), and didgpu
+  # reproduces fect::fect exactly once they are removed. didgpu_bacon()
+  # already drops always-treated units for the same reason.
+  .grp_vec <- as.character(df[[group]])
+  .trt_vec <- df[[treatment]]
+  .n_untreated <- tapply(.trt_vec, .grp_vec,
+                         function(x) sum(x == 0 & !is.na(x)))
+  .always <- names(.n_untreated)[.n_untreated < 1L]
+  n_always_treated <- length(.always)
+  if (n_always_treated > 0L) {
+    if (n_always_treated == length(.n_untreated)) {
+      stop("every unit is always-treated: no untreated periods anywhere, ",
+           "so no counterfactual is identified.", call. = FALSE)
+    }
+    df <- df[!.grp_vec %in% .always, , drop = FALSE]
+    warning(sprintf(
+      paste0("didgpu_fect: dropped %d unit(s) with no untreated period ",
+             "(always-treated). Their counterfactuals are not identified; ",
+             "retaining them biases the ATT by their unit level. This ",
+             "matches fect's own behaviour."),
+      n_always_treated), call. = FALSE)
+  }
+
   ph <- .panel_hash(df, outcome, group, time, treatment)
 
   # ---- checkpoint init / load ----
@@ -234,6 +269,7 @@ didgpu_fect <- function(
     normalizePath(checkpoint_dir, winslash = "/", mustWork = FALSE)
   } else NA_character_
   result$method <- method
+  result$n_always_treated_dropped <- n_always_treated
   class(result) <- c("didgpu_fect_result", "didgpu_result", "list")
   result
 }
