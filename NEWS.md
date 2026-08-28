@@ -2,6 +2,27 @@
 
 ## Bug fixes
 
+- **`didgpu_cs()` cluster bootstrap no longer crashes on panels whose
+  columns collide with internal variable names.** `.cs_bootstrap_se()`
+  held the panel as a `data.table` and subset it with
+  `d[d[[args$group]] == u, ]`. `[.data.table` evaluates its `i`
+  expression with the table's COLUMNS in scope, so a panel carrying a
+  column literally named `d` shadowed the local `d` with the treatment
+  VECTOR: `d[[args$group]]` became `treatment[["g"]]` and failed with
+  `subscript out of bounds`. Since `d` is an ordinary name for a
+  treatment indicator, real panels hit this routinely, and because it
+  fired only when `bootstrap_reps > 0` it looked data-dependent rather
+  than name-dependent -- the same panel worked at `reps = 0` and
+  crashed at `reps > 0`. didgpu's own simulated panels never tripped it
+  because their treatment column is `D`.
+
+  The bootstrap now keeps the panel as a plain data.frame and resolves
+  every column lookup before indexing, so no column name can shadow an
+  internal. Point estimates and SEs are bit-identical on panels that
+  previously worked. As a side effect the per-unit row lookup is
+  precomputed once instead of rescanning the whole panel for every
+  (replicate x pick), removing an O(B * n_units * nrow) cost.
+
 - **`didgpu_fect()` no longer reports always-treated units' levels as
   treatment effects.** A unit treated in every observed period has no
   control cell, so its unit fixed effect (`fe`) / factor loading

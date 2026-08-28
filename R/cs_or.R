@@ -197,8 +197,21 @@
 .cs_bootstrap_se <- function(df, args, att_gt, verbose = TRUE) {
   B <- args$bootstrap_reps
   if (B <= 0L) return(att_gt)
-  d <- data.table::as.data.table(df)
-  units <- unique(d[[args$group]])
+  # Keep the panel a plain data.frame and resolve every column lookup
+  # BEFORE indexing into it. `[.data.table` evaluates its `i` expression
+  # with the table's COLUMNS in scope, so on a panel carrying a column
+  # literally named `d` the local `d` was shadowed by the treatment
+  # vector and `d[[args$group]]` became treatment[["g"]], failing with
+  # "subscript out of bounds". Every panel whose treatment column is
+  # named `d` crashed here -- and only here, since bootstrap_reps = 0
+  # skips this function, which is why point estimates were unaffected.
+  panel   <- as.data.frame(df, stringsAsFactors = FALSE)
+  grp_vec <- panel[[args$group]]
+  units   <- unique(grp_vec)
+  # Row positions per unit, computed once. This also removes a full-panel
+  # scan per (replicate x pick), which was O(B * n_units * nrow).
+  rows_by_unit <- split(seq_len(nrow(panel)),
+                        factor(grp_vec, levels = units))
 
   boot_mat <- matrix(NA_real_, nrow = B, ncol = nrow(att_gt))
   for (b in seq_len(B)) {
@@ -210,10 +223,11 @@
     names(pcount) <- as.character(units)
     for (i in seq_along(picks)) {
       u <- picks[i]
-      pcount[as.character(u)] <- pcount[as.character(u)] + 1L
-      block <- d[d[[args$group]] == u, , drop = FALSE]
-      if (pcount[as.character(u)] > 1L) {
-        shift <- (pcount[as.character(u)] - 1L) * OFFSET
+      key <- as.character(u)
+      pcount[key] <- pcount[key] + 1L
+      block <- panel[rows_by_unit[[key]], , drop = FALSE]
+      if (pcount[key] > 1L) {
+        shift <- (pcount[key] - 1L) * OFFSET
         block[[args$group]] <- as.numeric(block[[args$group]]) + shift
       }
       rep_dfs[[i]] <- block
