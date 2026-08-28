@@ -2,6 +2,29 @@
 
 ## Bug fixes
 
+- **`didgpu_fect(method = "ife", r = 0)` now runs.** An
+  interactive-fixed-effects model with zero factors is the plain
+  two-way FE model, and sweeping `r = 0..k` is the standard way to ask
+  whether a result depends on the factor structure. It previously
+  errored with `requires numeric/complex matrix/vector arguments`:
+  `svd(M, nu = 0, nv = 0)` omits the `u` component entirely (it is
+  present only when `nu > 0`), so the truncated-SVD helper multiplied
+  `NULL`. `r = 0` now returns an empty factor term and the fit reduces
+  to two-way FE -- verified identical to `method = "fe"`.
+
+- **`didgpu_tidy()` accepts a `didgpu_cs_result`.** The CS result class
+  does not carry the `didgpu_result` parent, so tidy failed its
+  `stopifnot()` with the opaque `inherits(x, "didgpu_result") is not
+  TRUE`, even though `didgpu_loo()` and `didgpu_honest_did()` both
+  document and accept that class. Tidy now emits one row per
+  `aggregation` entry (`kind = "aggregate"`) followed by one row per
+  ATT(g, t) cell (`kind = "att_gt"`). `.cs_aggregate()` propagates
+  point estimates only, so `std.error` and the CI columns are `NA` on
+  the aggregate rows rather than fabricated; the cell rows carry real
+  SEs and CIs when `bootstrap_reps > 0`. Passing anything else now
+  names both accepted classes instead of printing a bare `inherits()`
+  assertion.
+
 - **`didgpu_cs()` cluster bootstrap no longer crashes on panels whose
   columns collide with internal variable names.** `.cs_bootstrap_se()`
   held the panel as a `data.table` and subset it with

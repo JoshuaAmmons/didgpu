@@ -7,7 +7,13 @@
 didgpu_tidy(x, conf.int = TRUE, conf.level = NULL, ...)
 }
 \arguments{
-\item{x}{A \code{didgpu_result} object.}
+\item{x}{A \code{didgpu_result} or \code{didgpu_cs_result} object.
+For a \code{didgpu_cs_result} the return has one row per entry of
+the \code{aggregation} table (\code{kind = "aggregate"}) followed by one
+row per ATT(g, t) cell (\code{kind = "att_gt"}). \code{.cs_aggregate()}
+propagates point estimates only, so \code{std.error} and the CI
+columns are \code{NA} on the aggregate rows; the cell rows carry the
+real SEs and CIs (themselves \code{NA} unless \code{bootstrap_reps > 0}).}
 
 \item{conf.int}{Logical. Include confidence interval columns. Default TRUE.}
 

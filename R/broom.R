@@ -21,7 +21,13 @@
 #' `term` column distinguishes effects (`Effect_1`, `Effect_2`, ...,
 #' `ATE`) from placebos (`Placebo_1`, ...).
 #'
-#' @param x A `didgpu_result` object.
+#' @param x A `didgpu_result` or `didgpu_cs_result` object.
+#'   For a `didgpu_cs_result` the return has one row per entry of
+#'   the `aggregation` table (`kind = "aggregate"`) followed by one
+#'   row per ATT(g, t) cell (`kind = "att_gt"`). `.cs_aggregate()`
+#'   propagates point estimates only, so `std.error` and the CI
+#'   columns are `NA` on the aggregate rows; the cell rows carry the
+#'   real SEs and CIs.
 #' @param conf.int Logical. Include confidence interval columns. Default TRUE.
 #' @param conf.level Confidence level. Defaults to whatever the fit used.
 #' @param ... Unused.
@@ -34,7 +40,20 @@
 #' didgpu_tidy(fit)
 #' @export
 didgpu_tidy <- function(x, conf.int = TRUE, conf.level = NULL, ...) {
-  stopifnot(inherits(x, "didgpu_result"))
+  # didgpu_cs_result is a first-class result type elsewhere in the
+  # package (didgpu_loo(), didgpu_honest_did()), but it is shaped
+  # differently from a didgpu_result -- $att_gt / $aggregation rather
+  # than $results$Effects -- so it needs its own tidier. Previously it
+  # fell through to the stopifnot() below and failed with the opaque
+  # message `inherits(x, "didgpu_result") is not TRUE`.
+  if (inherits(x, "didgpu_cs_result")) {
+    return(.tidy_cs(x, conf.int = conf.int))
+  }
+  if (!inherits(x, "didgpu_result")) {
+    stop("didgpu_tidy(): `x` must be a didgpu_result or a ",
+         "didgpu_cs_result; got ",
+         paste(class(x), collapse = "/"), ".", call. = FALSE)
+  }
 
   rows <- list()
   if (!is.null(x$results$Effects) && nrow(x$results$Effects) > 0L) {
@@ -77,6 +96,67 @@ didgpu_tidy <- function(x, conf.int = TRUE, conf.level = NULL, ...) {
   }
   out
 }
+
+# Tidy a didgpu_cs_result.
+#
+# Two granularities are reported, because only one of them has SEs:
+#   * $aggregation -- the requested scheme (event / group / calendar /
+#     overall). .cs_aggregate() propagates POINT ESTIMATES ONLY, so
+#     std.error and the CI columns are NA here. We do not invent one.
+#   * $att_gt -- the per-(g, t) ATT cells, which do carry se / ci_low /
+#     ci_high (analytic, or bootstrap when bootstrap_reps > 0).
+#' @keywords internal
+#' @noRd
+.tidy_cs <- function(x, conf.int = TRUE) {
+  rows <- list()
+
+  ag <- x$aggregation
+  if (!is.null(ag) && nrow(ag) > 0L) {
+    lvl <- if ("event_time" %in% names(ag)) ag$event_time
+           else if ("level" %in% names(ag)) ag$level
+           else seq_len(nrow(ag))
+    scheme <- x$args$aggregation %||% "agg"
+    rows[[length(rows) + 1L]] <- .row_block(
+      term      = paste0(scheme, "_", lvl),
+      estimate  = ag$estimate,
+      std.error = if ("se" %in% names(ag)) ag$se else rep(NA_real_, nrow(ag)),
+      conf.low  = rep(NA_real_, nrow(ag)),
+      conf.high = rep(NA_real_, nrow(ag)),
+      kind      = "aggregate"
+    )
+  }
+
+  gt <- x$att_gt
+  if (!is.null(gt) && nrow(gt) > 0L) {
+    # ci_low / ci_high are written by the bootstrap path only, so they are
+    # absent entirely when bootstrap_reps = 0. Fill rather than index a
+    # missing column (which yields NULL and a rows-mismatch in data.frame).
+    .col <- function(nm) {
+      if (nm %in% names(gt)) gt[[nm]] else rep(NA_real_, nrow(gt))
+    }
+    rows[[length(rows) + 1L]] <- .row_block(
+      term      = sprintf("ATT_g%s_t%s", gt$g, gt$t),
+      estimate  = gt$att,
+      std.error = .col("se"),
+      conf.low  = .col("ci_low"),
+      conf.high = .col("ci_high"),
+      kind      = "att_gt"
+    )
+  }
+
+  if (!length(rows)) {
+    return(data.frame(term = character(0), estimate = numeric(0),
+                      std.error = numeric(0), statistic = numeric(0),
+                      p.value = numeric(0), conf.low = numeric(0),
+                      conf.high = numeric(0), kind = character(0),
+                      stringsAsFactors = FALSE))
+  }
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  if (!isTRUE(conf.int)) { out$conf.low <- NULL; out$conf.high <- NULL }
+  out
+}
+
 
 .row_block <- function(term, estimate, std.error, conf.low, conf.high, kind) {
   statistic <- estimate / std.error

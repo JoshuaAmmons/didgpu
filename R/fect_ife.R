@@ -31,6 +31,20 @@
 #' @keywords internal
 #' @noRd
 .fect_svd_r <- function(M, r) {
+  # r = 0 is a meaningful request: an interactive-fixed-effects model with
+  # zero factors IS the plain two-way FE model, and sweeping r = 0..k is
+  # the standard way to ask whether a result depends on the factor
+  # structure at all. Return an empty factor term so that L %*% F is a
+  # conformable all-zero matrix and the fit reduces to two-way FE.
+  #
+  # Without this, svd(M0, nu = 0, nv = 0) returns no `u` component at all
+  # (it is present only when nu > 0), so `s$u %*% ...` failed with
+  # "requires numeric/complex matrix/vector arguments".
+  if (r <= 0L) {
+    return(list(L = matrix(0, nrow(M), 0L),
+                F = matrix(0, 0L, ncol(M)),
+                d = numeric(0)))
+  }
   # Replace NaN with 0 (control-cell positions where Y wasn't observed).
   M0 <- M
   M0[is.na(M0)] <- 0
@@ -49,6 +63,10 @@
 #' @keywords internal
 #' @noRd
 .fect_svd_truncated_cuda <- function(M, r) {
+  # r = 0 has no factor term to compute; fall back so .fect_svd_r's
+  # empty-factor branch handles it rather than calling the kernel with
+  # a zero rank.
+  if (r <= 0L) return(NULL)
   if (!isTRUE(tryCatch(didgpu_has_cuda_support(),
                        error = function(e) FALSE))) return(NULL)
   M0 <- M
