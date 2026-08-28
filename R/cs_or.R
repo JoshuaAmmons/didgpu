@@ -419,13 +419,89 @@
   att_gt$ci_high <- att_gt$att + z * att_gt$se
   att_gt
 }
-
-
-# Aggregation step. Given the long-form ATT(g, t) table, return one of
-# four summaries. Pre-treatment cells (event_time < 0) appear in the
-# event-study aggregation as placebos.
+# ---------------------------------------------------------------------------
+# Aggregation of ATT(g, t) into event-time / group / calendar / overall
+# summaries, WITH standard errors derived from the influence functions.
+#
+# This mirrors did::aggte(). The aggregate's influence function is the same
+# weighted combination of the cells' influence functions, PLUS a correction
+# for the fact that the aggregation weights are themselves estimated
+# (did:::wif). Omitting that correction understates the SE badly at long
+# event times, where few cohorts contribute: measured against
+# did::aggte(type = "dynamic"), fixed-weight SEs ran from 0.98x of the
+# correct value at event 0 down to 0.33x at event 9.
+#
+# Scaling convention, taken from did:::compute.att_gt, which rescales each
+# cell's influence onto the FULL sample before aggregating:
+#     psi_full(i, c) = (n / n_c) * psi_c(i)   for i in cell c, else 0
+# and did:::getSE, which reports se = sqrt(mean(psi^2) / n). For a single
+# cell this collapses to sqrt(sum(psi_c^2)) / n_c, exactly the per-cell SE
+# that DRDID reports -- so cell and aggregate SEs sit on one footing.
 #' @keywords internal
 #' @noRd
+.cs_agg_se <- function(cell_idx, att_cells, pg_cells, g_cells,
+                        IF_list, units, F_g_per_unit) {
+  K <- length(cell_idx)
+  if (K == 0L) return(NA_real_)
+  if (is.null(IF_list) || is.null(units)) return(NA_real_)
+  n <- length(units)
+  if (n == 0L) return(NA_real_)
+  key <- as.character(units)
+  pos <- stats::setNames(seq_len(n), key)
+
+  # Cell influence functions, rescaled onto the full sample.
+  infl <- matrix(0, nrow = n, ncol = K)
+  for (k in seq_len(K)) {
+    cl <- IF_list[[cell_idx[k]]]
+    if (is.null(cl) || is.null(cl$IF) || !length(cl$IF)) return(NA_real_)
+    idx <- pos[as.character(cl$units)]
+    if (anyNA(idx)) return(NA_real_)
+    nc <- length(cl$IF)
+    infl[idx, k] <- (n / nc) * cl$IF
+  }
+
+  pg <- as.numeric(pg_cells)
+  spg <- sum(pg)
+  if (!is.finite(spg) || spg <= 0) return(NA_real_)
+  a <- pg / spg
+
+  psi <- as.numeric(infl %*% a)
+
+  # Weight-estimation correction (did:::wif). Vanishes when every cell in
+  # the level shares one cohort (group aggregation), because then the
+  # numerator and denominator effects cancel exactly.
+  if (!is.null(F_g_per_unit) && !anyNA(g_cells)) {
+    Gu <- F_g_per_unit[key]
+    Gind <- matrix(0, nrow = n, ncol = K)
+    for (k in seq_len(K)) {
+      Gind[, k] <- as.numeric(!is.na(Gu) & Gu == g_cells[k])
+    }
+    dev <- sweep(Gind, 2L, pg, "-")
+    if1 <- dev / spg
+    if2 <- rowSums(dev) %*% t(pg / (spg^2))
+    wif <- if1 - if2
+    psi <- psi + as.numeric(wif %*% as.matrix(att_cells))
+  }
+
+  sqrt(mean(psi^2) / n)
+}
+
+
+# SE for one aggregation level, given the cells it covers.
+#' @keywords internal
+#' @noRd
+.cs_level_se <- function(cells, att_gt, IF_list, units, F_g_per_unit, n_units) {
+  idx <- which(cells)
+  if (!length(idx)) return(NA_real_)
+  .cs_agg_se(cell_idx = idx,
+             att_cells = att_gt$att[idx],
+             pg_cells  = att_gt$n_treated[idx] / n_units,
+             g_cells   = att_gt$g[idx],
+             IF_list   = IF_list, units = units,
+             F_g_per_unit = F_g_per_unit)
+}
+
+
 .cs_aggregate <- function(att_gt, aggregation, args) {
   if (nrow(att_gt) == 0L) {
     return(data.frame(scheme = aggregation, level = character(0),
@@ -433,59 +509,81 @@
                       n_cells = integer(0)))
   }
   w <- att_gt$n_treated
+  IF_list <- attr(att_gt, "IF_per_cell")
+  units   <- attr(att_gt, "units")
+  F_g_per_unit <- attr(att_gt, "F_g_per_unit")
+  n_units <- if (is.null(units)) NA_integer_ else length(units)
+  z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
+  se_of <- function(cells) {
+    if (is.null(IF_list) || is.null(units)) return(NA_real_)
+    .cs_level_se(cells, att_gt, IF_list, units, F_g_per_unit, n_units)
+  }
+  finish <- function(out) {
+    out$ci_low  <- out$estimate - z * out$se
+    out$ci_high <- out$estimate + z * out$se
+    out
+  }
+
   switch(aggregation,
     "event" = {
       events <- sort(unique(att_gt$event_time))
-      out <- data.frame(
+      finish(data.frame(
         event_time = events,
         estimate = vapply(events, function(e) {
           cells <- att_gt$event_time == e
           if (!any(cells)) return(NA_real_)
           sum(att_gt$att[cells] * w[cells]) / sum(w[cells])
         }, numeric(1)),
+        se = vapply(events, function(e) se_of(att_gt$event_time == e),
+                     numeric(1)),
         n_cells = vapply(events, function(e) sum(att_gt$event_time == e),
                           integer(1)),
         stringsAsFactors = FALSE
-      )
-      out
+      ))
     },
     "group" = {
       gs <- sort(unique(att_gt$g))
-      data.frame(
+      finish(data.frame(
         g = gs,
         estimate = vapply(gs, function(g) {
           cells <- att_gt$g == g & att_gt$t >= g
           if (!any(cells)) return(NA_real_)
           sum(att_gt$att[cells] * w[cells]) / sum(w[cells])
         }, numeric(1)),
+        se = vapply(gs, function(g) se_of(att_gt$g == g & att_gt$t >= g),
+                     numeric(1)),
         n_cells = vapply(gs, function(g) sum(att_gt$g == g & att_gt$t >= g),
                           integer(1)),
         stringsAsFactors = FALSE
-      )
+      ))
     },
     "calendar" = {
       ts <- sort(unique(att_gt$t))
-      data.frame(
+      finish(data.frame(
         t = ts,
         estimate = vapply(ts, function(t) {
           cells <- att_gt$t == t & att_gt$g <= t
           if (!any(cells)) return(NA_real_)
           sum(att_gt$att[cells] * w[cells]) / sum(w[cells])
         }, numeric(1)),
+        se = vapply(ts, function(t) se_of(att_gt$t == t & att_gt$g <= t),
+                     numeric(1)),
         n_cells = vapply(ts, function(t) sum(att_gt$t == t & att_gt$g <= t),
                           integer(1)),
         stringsAsFactors = FALSE
-      )
+      ))
     },
     "overall" = {
       post <- att_gt$t >= att_gt$g
       est <- sum(att_gt$att[post] * w[post]) / sum(w[post])
-      data.frame(scheme = "overall", estimate = est,
-                  n_cells = sum(post),
-                  stringsAsFactors = FALSE)
+      se  <- se_of(post)
+      data.frame(scheme = "overall", estimate = est, se = se,
+                  ci_low = est - z * se, ci_high = est + z * se,
+                  n_cells = sum(post), stringsAsFactors = FALSE)
     }
   )
 }
+
 
 
 # Placebo joint test: pre-treatment cells should have ATT ~ 0 under

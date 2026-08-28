@@ -2,6 +2,49 @@
 
 ## Bug fixes
 
+- **`didgpu_cs()` influence functions were wrong; multiplier-bootstrap
+  standard errors were two to eight times too narrow.** The per-cell
+  influence function was taken to be the treated units' demeaned
+  residual. It is not. It needs (a) the treated arm normalised by
+  `E[D]`, (b) the comparison arm normalised by `E[p(X)(1-D)/(1-p(X))]`
+  -- not `E[D]` -- and (c) estimation-effect terms for the nuisance
+  parameters, which load onto CONTROL units. `OR` set every control
+  unit's influence to zero outright; `IPW`/`DR` omitted the
+  normalisers. Measured against `did::att_gt()` on a 200-unit panel,
+  `bootstrap_kind = "multiplier"` returned SEs at ~0.13x (`OR`) and
+  ~0.50x (`IPW`/`DR`) of the correct width. Point estimates were
+  correct throughout, so nothing looked wrong. The default
+  `bootstrap_kind = "cluster"` never touches these and was correct.
+
+  The three per-cell estimators now mirror DRDID -- the package `did`
+  itself calls -- function for function (`reg_did_panel`,
+  `std_ipw_did_panel`, `drdid_panel`). Verified against `did::att_gt()`
+  to machine precision for all three methods, with and without
+  covariates: max |diff| ~4e-16 on ATT(g, t) and ~1e-16 on its SE.
+
+  Anyone who used `bootstrap_kind = "multiplier"` should re-run:
+  confidence intervals were far too narrow and p-values far too small.
+
+## New features
+
+- **`didgpu_cs()` aggregations now carry standard errors and confidence
+  intervals.** `.cs_aggregate()` previously propagated point estimates
+  only, so `$aggregation` had no `se` column (while its empty-result
+  stub declared one) and `didgpu_tidy()` could only report `NA`.
+  Aggregate SEs are now derived from the influence functions the same
+  way `did::aggte()` derives them, including the correction for having
+  ESTIMATED the aggregation weights (`did:::wif`) -- without which SEs
+  degrade badly at long event times, where few cohorts contribute
+  (0.98x of correct at event 0, falling to 0.33x at event 9).
+  Verified identical to `did::aggte(type = "dynamic")` for all three
+  estimators, with and without covariates: max |diff| ~5e-16 on the
+  aggregate estimate and ~3e-17 on its SE.
+
+  Note that pre-treatment ATT(g, t) still differ from `did` by
+  construction: didgpu uses a universal base period, `did` defaults to
+  a varying one. Parity is asserted on post-treatment cells and
+  non-negative event times.
+
 - **`didgpu_fect(method = "ife", r = 0)` now runs.** An
   interactive-fixed-effects model with zero factors is the plain
   two-way FE model, and sweeping `r = 0..k` is the standard way to ask

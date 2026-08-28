@@ -46,159 +46,244 @@
     stop("Unknown control_group: ", control_group)
   }
 }
+# ---------------------------------------------------------------------------
+# Per-cell 2x2 estimators and their INFLUENCE FUNCTIONS.
+#
+# These mirror DRDID (the package that `did` itself calls) function for
+# function, because bit-for-bit agreement with did::att_gt() is the
+# contract:
+#     est_method = "reg" -> DRDID::reg_did_panel
+#     est_method = "ipw" -> DRDID::std_ipw_did_panel
+#     est_method = "dr"  -> DRDID::drdid_panel
+#
+# The influence function of an ATT is NOT just the treated units'
+# demeaned residual. It has three parts:
+#   (a) the treated arm, normalised by mean(w.treat) = E[D];
+#   (b) the comparison arm, normalised by mean(w.cont) -- which for IPW/DR
+#       is E[p(X)(1-D)/(1-p(X))], NOT E[D];
+#   (c) estimation-effect terms for the nuisance parameters: the OLS
+#       outcome regression (asy.lin.rep.wols) and/or the propensity score
+#       (asy.lin.rep.ps). These load onto CONTROL units.
+#
+# Previous versions dropped (c) entirely and used the wrong normaliser in
+# (b): OR set every control unit's influence to zero, and IPW/DR omitted
+# the 1/E[D] and 1/E[p(1-D)/(1-p)] scaling. Measured against did::att_gt
+# on a 200-unit panel, the resulting multiplier-bootstrap SEs were ~0.13x
+# (OR) and ~0.50x (IPW/DR) of the correct width -- confidence intervals
+# two to eight times too narrow. The cluster bootstrap never touches
+# these, which is why it was unaffected and correct throughout.
+#
+# Reference: Callaway and Sant'Anna (2021, J. Econometrics 225, Theorem
+# 2); Sant'Anna and Zhao (2020). SE convention: sd(psi) * sqrt(n - 1) / n.
+# ---------------------------------------------------------------------------
 
-
-# Per-cell OR estimator. Without covariates, it's mean(Δy_t) - mean(Δy_c).
-# With covariates, fit lm(Δy ~ X) on controls and predict for treated.
-# Returns att, IF (length n_unit), n_treated, n_control.
+# Design matrix with intercept, matching DRDID's `int.cov`.
 #' @keywords internal
 #' @noRd
-.cs_inner_or <- function(delta, D_mask, X_treated, X_control, n_total) {
-  n_t <- sum(D_mask)
-  n_c <- length(delta) - n_t
-  if (n_t == 0L || n_c == 0L) {
-    return(list(att = NA_real_, IF = rep(0, n_total),
-                 n_treated = n_t, n_control = n_c))
-  }
-  delta_t <- delta[D_mask]
-  delta_c <- delta[!D_mask]
-
-  if (is.null(X_treated) || is.null(X_control) || ncol(X_control) == 0L) {
-    # No covariates: simple difference of means.
-    m_hat_t <- mean(delta_c, na.rm = TRUE)
-    fitted_c <- rep(m_hat_t, n_c)
-    fitted_t <- rep(m_hat_t, n_t)
+.cs_int_cov <- function(X, n) {
+  if (is.null(X) || !is.matrix(X) || ncol(X) == 0L) {
+    matrix(1, nrow = n, ncol = 1L)
   } else {
-    # Fit lm(Δy ~ X) on controls; predict.
-    X_c <- cbind(1, X_control)
-    qr_c <- tryCatch(qr(X_c), error = function(e) NULL)
-    if (is.null(qr_c) || qr_c$rank < ncol(X_c)) {
-      # Rank-deficient; fall back to intercept-only.
-      m_hat <- mean(delta_c, na.rm = TRUE)
-      fitted_c <- rep(m_hat, n_c)
-      fitted_t <- rep(m_hat, n_t)
-    } else {
-      beta <- qr.solve(qr_c, delta_c)
-      fitted_c <- as.numeric(X_c %*% beta)
-      X_t <- cbind(1, X_treated)
-      fitted_t <- as.numeric(X_t %*% beta)
-    }
+    cbind(1, X)
   }
-  att <- mean(delta_t - fitted_t)
-  # Influence function (unit-level contribution to ATT).
-  IF <- numeric(n_total)
-  IF[D_mask] <- (delta_t - fitted_t) - att
-  # Control units' IF is zero in OR (they only affect the projection,
-  # not the ATT directly).
-  list(att = att, IF = IF,
-       n_treated = as.integer(n_t),
-       n_control = as.integer(n_c))
 }
 
-
-# Per-cell IPW estimator (Abadie 2005).
-# Without covariates, propensity = n_t / (n_t + n_c) is constant, so
-# weights cancel and IPW reduces to OR-without-X (= simple difference).
-# With covariates, propensity glm gives unit-specific weights.
+# Weighted least squares of `y` on `Xm` over rows `keep`. NULL if singular.
 #' @keywords internal
 #' @noRd
-.cs_inner_ipw <- function(delta, D_mask, X, n_total) {
-  n_t <- sum(D_mask)
-  n_c <- length(delta) - n_t
-  if (n_t == 0L || n_c == 0L) {
-    return(list(att = NA_real_, IF = rep(0, n_total),
-                 n_treated = n_t, n_control = n_c))
-  }
-  if (is.null(X) || ncol(X) == 0L) {
-    # Constant propensity: IPW = simple difference.
-    delta_t <- delta[D_mask]
-    delta_c <- delta[!D_mask]
-    att <- mean(delta_t) - mean(delta_c)
-    IF <- numeric(n_total)
-    IF[D_mask]  <- delta_t - mean(delta_t) - att / 2
-    IF[!D_mask] <- -(delta_c - mean(delta_c)) - att / 2
-    return(list(att = att, IF = IF,
-                 n_treated = as.integer(n_t),
-                 n_control = as.integer(n_c)))
-  }
-  # Fit propensity score by logistic regression.
-  glm_fit <- tryCatch(
-    suppressWarnings(stats::glm.fit(x = cbind(1, X),
-                                    y = as.integer(D_mask),
+.cs_wls <- function(Xm, y, w, keep) {
+  Xk <- Xm[keep, , drop = FALSE]
+  XpX <- crossprod(Xk * w[keep], Xk)
+  rc <- tryCatch(rcond(XpX), error = function(e) 0)
+  if (!is.finite(rc) || rc < .Machine$double.eps) return(NULL)
+  as.numeric(solve(XpX, crossprod(Xk * w[keep], y[keep])))
+}
+
+# Propensity score by logistic regression on the full cell sample.
+#' @keywords internal
+#' @noRd
+.cs_pscore <- function(Xm, D, w) {
+  fit <- tryCatch(
+    suppressWarnings(stats::glm.fit(x = Xm, y = D, weights = w,
                                     family = stats::binomial())),
     error = function(e) NULL)
-  if (is.null(glm_fit) || any(is.na(glm_fit$coefficients))) {
-    # Logistic failed; fall back to constant propensity.
-    return(.cs_inner_ipw(delta, D_mask, X = NULL, n_total = n_total))
-  }
-  beta <- glm_fit$coefficients
-  eta <- as.numeric(cbind(1, X) %*% beta)
-  p_hat <- 1 / (1 + exp(-eta))
-  # Trim extreme propensities for stability.
-  p_hat <- pmin(pmax(p_hat, 0.01), 0.99)
-  E_D <- mean(as.integer(D_mask))
-  w1 <- as.integer(D_mask) / E_D
-  w0 <- (1 - as.integer(D_mask)) * (p_hat / (1 - p_hat)) / E_D
-  att <- mean(w1 * delta) - mean(w0 * delta)
-  IF <- (w1 * delta) - (w0 * delta) - att
-  list(att = att, IF = IF,
-       n_treated = as.integer(n_t),
-       n_control = as.integer(n_c))
+  if (is.null(fit) || anyNA(fit$coefficients)) return(NULL)
+  pmin(fit$fitted.values, 1 - 1e-6)
 }
 
-
-# Per-cell DR estimator (Sant'Anna & Zhao 2020).
-# Combines OR (outcome model m(X)) + IPW (propensity score p(X)).
 #' @keywords internal
 #' @noRd
-.cs_inner_dr <- function(delta, D_mask, X, n_total) {
-  n_t <- sum(D_mask)
-  n_c <- length(delta) - n_t
-  if (n_t == 0L || n_c == 0L) {
-    return(list(att = NA_real_, IF = rep(0, n_total),
-                 n_treated = n_t, n_control = n_c))
-  }
-  if (is.null(X) || ncol(X) == 0L) {
-    # No covariates: DR reduces to the simple difference (and IPW).
-    return(.cs_inner_ipw(delta, D_mask, X = NULL, n_total = n_total))
-  }
-  # Outcome model on controls.
-  X_c <- cbind(1, X[!D_mask, , drop = FALSE])
-  delta_c <- delta[!D_mask]
-  qr_c <- tryCatch(qr(X_c), error = function(e) NULL)
-  if (is.null(qr_c) || qr_c$rank < ncol(X_c)) {
-    m_hat <- rep(mean(delta_c, na.rm = TRUE), n_total)
-  } else {
-    beta_or <- qr.solve(qr_c, delta_c)
-    m_hat <- as.numeric(cbind(1, X) %*% beta_or)
-  }
-  # Propensity model on all units.
-  glm_fit <- tryCatch(
-    suppressWarnings(stats::glm.fit(x = cbind(1, X),
-                                    y = as.integer(D_mask),
-                                    family = stats::binomial())),
-    error = function(e) NULL)
-  if (is.null(glm_fit) || any(is.na(glm_fit$coefficients))) {
-    # Propensity failed; fall back to OR.
-    return(.cs_inner_or(delta, D_mask,
-                         X_treated = X[D_mask, , drop = FALSE],
-                         X_control = X[!D_mask, , drop = FALSE],
-                         n_total = n_total))
-  }
-  beta_ps <- glm_fit$coefficients
-  eta <- as.numeric(cbind(1, X) %*% beta_ps)
-  p_hat <- pmin(pmax(1 / (1 + exp(-eta)), 0.01), 0.99)
-  E_D <- mean(as.integer(D_mask))
-  w1 <- as.integer(D_mask) / E_D
-  w0 <- (1 - as.integer(D_mask)) * (p_hat / (1 - p_hat)) / E_D
-  # DR formula: ATT = E[w1 * (Y - m)] - E[w0 * (Y - m)]
-  resid <- delta - m_hat
-  att <- mean(w1 * resid) - mean(w0 * resid)
-  IF <- (w1 * resid) - (w0 * resid) - att
-  list(att = att, IF = IF,
-       n_treated = as.integer(n_t),
-       n_control = as.integer(n_c))
+.cs_na_cell <- function(n_t, n_c, n_total) {
+  list(att = NA_real_, IF = rep(0, n_total),
+       n_treated = as.integer(n_t), n_control = as.integer(n_c))
 }
+
+#' @keywords internal
+#' @noRd
+.cs_safe_inv <- function(M) {
+  rc <- tryCatch(rcond(M), error = function(e) 0)
+  if (!is.finite(rc) || rc < .Machine$double.eps) return(NULL)
+  solve(M)
+}
+
+
+# OR / "reg": mirrors DRDID::reg_did_panel.
+#' @keywords internal
+#' @noRd
+.cs_inner_or <- function(delta, D_mask, X_treated, X_control, n_total,
+                          X = NULL) {
+  n_t <- sum(D_mask); n_c <- length(delta) - n_t
+  if (n_t == 0L || n_c == 0L) return(.cs_na_cell(n_t, n_c, n_total))
+  n  <- length(delta)
+  D  <- as.numeric(D_mask)
+  iw <- rep(1, n)
+  if (is.null(X) && !is.null(X_control) && ncol(X_control) > 0L) {
+    X <- matrix(NA_real_, nrow = n, ncol = ncol(X_control))
+    X[D_mask, ] <- X_treated
+    X[!D_mask, ] <- X_control
+  }
+  int.cov <- .cs_int_cov(X, n)
+
+  reg.coeff <- .cs_wls(int.cov, delta, iw, keep = (D == 0))
+  if (is.null(reg.coeff)) return(.cs_na_cell(n_t, n_c, n_total))
+  out.delta <- as.numeric(int.cov %*% reg.coeff)
+
+  # DRDID uses w.cont = w.treat = D: the comparison arm is the regression
+  # prediction evaluated on the TREATED units.
+  w.treat <- iw * D
+  w.cont  <- iw * D
+  reg.att.treat <- w.treat * delta
+  reg.att.cont  <- w.cont * out.delta
+  eta.treat <- mean(reg.att.treat) / mean(w.treat)
+  eta.cont  <- mean(reg.att.cont)  / mean(w.cont)
+  att <- eta.treat - eta.cont
+
+  weights.ols <- iw * (1 - D)
+  wols.x  <- weights.ols * int.cov
+  wols.eX <- weights.ols * (delta - out.delta) * int.cov
+  XpXinv <- .cs_safe_inv(crossprod(wols.x, int.cov) / n)
+  if (is.null(XpXinv)) return(.cs_na_cell(n_t, n_c, n_total))
+  asy.lin.rep.ols <- wols.eX %*% XpXinv
+
+  inf.treat  <- (reg.att.treat - w.treat * eta.treat) / mean(w.treat)
+  inf.cont.1 <- (reg.att.cont - w.cont * eta.cont)
+  M1 <- colMeans(w.cont * int.cov)
+  inf.cont.2 <- asy.lin.rep.ols %*% M1
+  inf.control <- (inf.cont.1 + inf.cont.2) / mean(w.cont)
+
+  list(att = att, IF = as.numeric(inf.treat - inf.control),
+       n_treated = as.integer(n_t), n_control = as.integer(n_c))
+}
+
+
+# IPW: mirrors DRDID::std_ipw_did_panel (Hajek / standardised weights).
+#' @keywords internal
+#' @noRd
+.cs_inner_ipw <- function(delta, D_mask, X, n_total, trim.level = 0.995) {
+  n_t <- sum(D_mask); n_c <- length(delta) - n_t
+  if (n_t == 0L || n_c == 0L) return(.cs_na_cell(n_t, n_c, n_total))
+  n  <- length(delta)
+  D  <- as.numeric(D_mask)
+  iw <- rep(1, n)
+  int.cov <- .cs_int_cov(X, n)
+
+  ps.fit <- .cs_pscore(int.cov, D, iw)
+  if (is.null(ps.fit)) return(.cs_na_cell(n_t, n_c, n_total))
+  W <- ps.fit * (1 - ps.fit) * iw
+
+  trim.ps <- (ps.fit < 1.01)
+  trim.ps[D == 0] <- (ps.fit[D == 0] < trim.level)
+
+  w.treat <- trim.ps * iw * D
+  w.cont  <- trim.ps * iw * ps.fit * (1 - D) / (1 - ps.fit)
+  if (mean(w.treat) == 0 || mean(w.cont) == 0) {
+    return(.cs_na_cell(n_t, n_c, n_total))
+  }
+  att.treat <- w.treat * delta
+  att.cont  <- w.cont * delta
+  eta.treat <- mean(att.treat) / mean(w.treat)
+  eta.cont  <- mean(att.cont)  / mean(w.cont)
+  att <- eta.treat - eta.cont
+
+  score.ps <- iw * (D - ps.fit) * int.cov
+  Hinv <- .cs_safe_inv(crossprod(int.cov, W * int.cov))
+  if (is.null(Hinv)) return(.cs_na_cell(n_t, n_c, n_total))
+  asy.lin.rep.ps <- score.ps %*% (Hinv * n)
+
+  inf.treat  <- (att.treat - w.treat * eta.treat) / mean(w.treat)
+  inf.cont.1 <- (att.cont - w.cont * eta.cont)
+  M2 <- colMeans(w.cont * (delta - eta.cont) * int.cov)
+  inf.cont.2 <- asy.lin.rep.ps %*% M2
+  inf.control <- (inf.cont.1 + inf.cont.2) / mean(w.cont)
+
+  list(att = att, IF = as.numeric(inf.treat - inf.control),
+       n_treated = as.integer(n_t), n_control = as.integer(n_c))
+}
+
+
+# DR: mirrors DRDID::drdid_panel.
+#' @keywords internal
+#' @noRd
+.cs_inner_dr <- function(delta, D_mask, X, n_total, trim.level = 0.995) {
+  n_t <- sum(D_mask); n_c <- length(delta) - n_t
+  if (n_t == 0L || n_c == 0L) return(.cs_na_cell(n_t, n_c, n_total))
+  n  <- length(delta)
+  D  <- as.numeric(D_mask)
+  iw <- rep(1, n)
+  int.cov <- .cs_int_cov(X, n)
+
+  ps.fit <- .cs_pscore(int.cov, D, iw)
+  if (is.null(ps.fit)) {
+    return(.cs_inner_or(delta, D_mask, NULL, NULL, n_total, X = X))
+  }
+  trim.ps <- (ps.fit < 1.01)
+  trim.ps[D == 0] <- (ps.fit[D == 0] < trim.level)
+  W <- ps.fit * (1 - ps.fit) * iw
+
+  reg.coeff <- .cs_wls(int.cov, delta, iw, keep = (D == 0))
+  if (is.null(reg.coeff)) return(.cs_na_cell(n_t, n_c, n_total))
+  out.delta <- as.numeric(int.cov %*% reg.coeff)
+
+  w.treat <- trim.ps * iw * D
+  w.cont  <- trim.ps * iw * ps.fit * (1 - D) / (1 - ps.fit)
+  if (mean(w.treat) == 0 || mean(w.cont) == 0) {
+    return(.cs_na_cell(n_t, n_c, n_total))
+  }
+  dr.att.treat <- w.treat * (delta - out.delta)
+  dr.att.cont  <- w.cont * (delta - out.delta)
+  eta.treat <- mean(dr.att.treat) / mean(w.treat)
+  eta.cont  <- mean(dr.att.cont)  / mean(w.cont)
+  att <- eta.treat - eta.cont
+
+  weights.ols <- iw * (1 - D)
+  wols.x  <- weights.ols * int.cov
+  wols.eX <- weights.ols * (delta - out.delta) * int.cov
+  XpXinv <- .cs_safe_inv(crossprod(wols.x, int.cov) / n)
+  if (is.null(XpXinv)) return(.cs_na_cell(n_t, n_c, n_total))
+  asy.lin.rep.wols <- wols.eX %*% XpXinv
+
+  score.ps <- iw * (D - ps.fit) * int.cov
+  Hinv <- .cs_safe_inv(crossprod(int.cov, W * int.cov))
+  if (is.null(Hinv)) return(.cs_na_cell(n_t, n_c, n_total))
+  asy.lin.rep.ps <- score.ps %*% (Hinv * n)
+
+  inf.treat.1 <- (dr.att.treat - w.treat * eta.treat)
+  M1 <- colMeans(w.treat * int.cov)
+  inf.treat.2 <- asy.lin.rep.wols %*% M1
+  inf.treat <- (inf.treat.1 - inf.treat.2) / mean(w.treat)
+
+  inf.cont.1 <- (dr.att.cont - w.cont * eta.cont)
+  M2 <- colMeans(w.cont * (delta - out.delta - eta.cont) * int.cov)
+  inf.cont.2 <- asy.lin.rep.ps %*% M2
+  M3 <- colMeans(w.cont * int.cov)
+  inf.cont.3 <- asy.lin.rep.wols %*% M3
+  inf.control <- (inf.cont.1 + inf.cont.2 - inf.cont.3) / mean(w.cont)
+
+  list(att = att, IF = as.numeric(inf.treat - inf.control),
+       n_treated = as.integer(n_t), n_control = as.integer(n_c))
+}
+
+
 
 
 # Method dispatch.
