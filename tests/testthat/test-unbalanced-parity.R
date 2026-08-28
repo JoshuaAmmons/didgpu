@@ -50,7 +50,10 @@ test_that("a late-entrant switcher is estimated, not silently discarded", {
   }))
   p <- rbind(late, ctrl)
 
-  for (bk in c("reference", "r")) {
+  # NB: backend "reference" DELEGATES to DIDmultiplegtDYN (backend.R:6), so
+  # it needs polars and says nothing about didgpu's own code. Exercise
+  # didgpu's OWN backends here.
+  for (bk in c("r", "cpu")) {
     fit <- didgpu(df = p, outcome = "Y", group = "unit", time = "period",
                   treatment = "D", effects = 1L, placebo = 0L,
                   bootstrap_reps = 0L, backend = bk, verbose = FALSE)
@@ -81,7 +84,7 @@ test_that("baseline treatment uses each group's own first observed period", {
 
   fit <- didgpu(df = p, outcome = "Y", group = "unit", time = "period",
                 treatment = "D", effects = 2L, placebo = 0L,
-                bootstrap_reps = 0L, backend = "reference", verbose = FALSE)
+                bootstrap_reps = 0L, backend = "r", verbose = FALSE)
   expect_true(all(is.finite(fit$results$Effects[, "Estimate"])))
 })
 
@@ -90,11 +93,12 @@ test_that("baseline treatment uses each group's own first observed period", {
 test_that("all CPU backends match DIDmultiplegtDYN on an unbalanced panel", {
   skip_if_no_reference()
 
-  # Reproduces the reported failure. NOTE the backend loop: backend
-  # "reference" agreed with the oracle even on the BROKEN build, because
-  # the NA d_sq only corrupts results via the fast backends' (time, d_sq)
-  # cohort-key encoding (backend.R). A parity test that pinned only
-  # backend = "reference" passed throughout and caught nothing.
+  # Reproduces the reported failure. NOTE which backends are looped:
+  # backend = "reference" DELEGATES to DIDmultiplegtDYN itself
+  # (backend.R:6), so comparing it to the oracle compares the reference
+  # package with itself and can never fail. Only didgpu's own backends
+  # ("r", "cpu", "cuda") carried the bug, via the NA d_sq flowing into
+  # their (time, d_sq) cohort-key encoding.
   sim <- as.data.frame(didgpu_simulate_panel(n_units = 80L, n_periods = 12L,
                                              seed = 11L))
   set.seed(99)
@@ -113,7 +117,7 @@ test_that("all CPU backends match DIDmultiplegtDYN on an unbalanced panel", {
   e_ref <- fit_ref$results$Effects[, 1]
   p_ref <- fit_ref$results$Placebos[, 1]
 
-  for (bk in c("reference", "r")) {
+  for (bk in c("r", "cpu")) {
     fit_us <- didgpu(
       df = p, outcome = "Y", group = "unit", time = "period",
       treatment = "D", effects = 3L, placebo = 2L,

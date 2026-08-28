@@ -44,6 +44,7 @@ Suggests:
     eventstudyr,
     fect,
     HonestDiD,
+    polars,
     quadprog,
     splines2,
     testthat (>= 3.0.0)
@@ -51,4 +52,5 @@ LinkingTo:
     Rcpp,
     RcppEigen
 SystemRequirements: GNU make; optional NVIDIA CUDA Toolkit (>= 12.0) with cuBLAS and cuSOLVER for the GPU backend
+Additional_repositories: https://rpolars.r-universe.dev
 Config/testthat/edition: 3
