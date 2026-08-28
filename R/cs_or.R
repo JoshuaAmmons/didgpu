@@ -125,7 +125,25 @@
   # Pass 2: solve.
   # ------------------------------------------------------------------
   cuda_result <- NULL
-  if (identical(args$backend, "cuda")) {
+  if (identical(args$backend, "cuda") && isTRUE(getOption("didgpu.cs_cuda_inner", FALSE))) {
+    # OFF BY DEFAULT, deliberately. The batched CUDA inner kernel still
+    # computes the OLD influence functions: treated-arm only, no
+    # nuisance-estimation terms, wrong normalisers. Its ATT agrees with
+    # the CPU path to ~4e-16, but its influence functions do not -- and
+    # they now feed BOTH the multiplier bootstrap and the aggregation
+    # SEs. Measured against did::att_gt() after the CPU rewrite, per-cell
+    # max |dSE|:
+    #     backend "r"    1.11e-16
+    #     backend "cpu"  1.11e-16
+    #     backend "cuda" 1.96e-01   <- the stale kernel
+    #
+    # Until src/ implements the DRDID influence functions on device (a
+    # per-cell propensity Hessian inverse plus the OLS estimation-effect
+    # term), CS routes through the validated CPU path so that every
+    # backend returns identical numbers. Correctness before speed --
+    # and the GPU is not winning for CS at realistic panel sizes anyway.
+    # Re-enable for kernel development with
+    # options(didgpu.cs_cuda_inner = TRUE).
     cuda_result <- .cs_inner_batched_cuda(
       cells     = cell_data,
       method    = args$est_method,

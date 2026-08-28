@@ -25,6 +25,18 @@
   Anyone who used `bootstrap_kind = "multiplier"` should re-run:
   confidence intervals were far too narrow and p-values far too small.
 
+- **The batched CUDA inner kernel for `didgpu_cs()` is disabled pending
+  a matching rewrite.** Its ATT agrees with the CPU path to ~4e-16, but
+  it computes the OLD influence functions, and those now feed both the
+  multiplier bootstrap and the aggregation SEs. After the CPU rewrite,
+  per-cell `max |dSE|` against `did::att_gt()` was 1.11e-16 for
+  backends `"r"` and `"cpu"` but 1.96e-01 for `"cuda"`. CS therefore
+  routes through the validated CPU path, so all backends -- `"r"`,
+  `"cpu"` and `"cuda"` -- now return identical numbers; verified at
+  cell `max |dSE|` = 1.11e-16 and aggregate `max |dSE|` = 0 for every
+  backend. Re-enable for kernel development with
+  `options(didgpu.cs_cuda_inner = TRUE)`.
+
 ## New features
 
 - **`didgpu_cs()` aggregations now carry standard errors and confidence
