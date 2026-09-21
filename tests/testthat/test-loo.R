@@ -44,7 +44,12 @@ test_that("CS cohort-LOO fast path (re-aggregate) == refit, bit-for-bit (never c
                        est_method = "OR",
                        control_group = "never", aggregation = agg,
                        bootstrap_reps = 0L, backend = "r", verbose = FALSE))
-      fb$aggregation$estimate[1]
+      # Reference is the OVERALL ATT of the refit. It used to be
+      # fb$aggregation$estimate[1], which for aggregation = "event" is the
+      # longest PRE-treatment horizon -- the very bug didgpu_loo() had, so
+      # the old reference asserted the broken contract rather than testing
+      # it. didgpu_loo() now always reports the overall ATT.
+      didgpu:::.cs_aggregate(fb$att_gt, "overall", fb$args)$estimate[1]
     }, numeric(1))
     fast_ord <- fast[order(as.numeric(fast$leave_out)), ]
     expect_equal(fast_ord$estimate, ref_est, tolerance = 1e-12,

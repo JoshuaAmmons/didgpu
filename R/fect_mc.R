@@ -28,11 +28,31 @@
 #' @keywords internal
 #' @noRd
 .fect_mc_default_lambda <- function(Y, M, frac = 0.1) {
-  Y_c <- Y
-  Y_c[M == 1L] <- 0  # zero treated cells for the initial scan
-  Y_c[is.na(Y_c)] <- 0
-  s <- svd(Y_c, nu = 0L, nv = 0L)
-  frac * max(s$d)
+  frac * .fect_mc_sigma_max(Y, M)
+}
+
+
+# Largest singular value of the matrix ACTUALLY being penalised, i.e. the
+# residual after two-way fixed effects.
+#
+# The penalty must be scaled to the low-rank part, not to the level. The
+# old version ran svd() on the raw outcome matrix with treated cells
+# zeroed, so sigma_max -- and therefore lambda -- grew with the location
+# of Y. That left the estimator level-dependent even once the fit itself
+# removed fixed effects: on a known-zero DGP the ATT still drifted from
+# -0.0321 to -0.0244 as a constant was added to the outcome.
+#' @keywords internal
+#' @noRd
+.fect_mc_sigma_max <- function(Y, M) {
+  Z <- Y
+  obs <- !is.na(Z) & (M == 0L)
+  fill <- if (any(obs)) mean(Z[obs]) else 0
+  Z[M == 1L] <- NA_real_
+  Z[is.na(Z)] <- fill
+  R <- Z - .fect_mc_twoway(Z)
+  s <- svd(R, nu = 0L, nv = 0L)
+  mx <- max(s$d)
+  if (!is.finite(mx) || mx <= 0) 0 else mx
 }
 
 
@@ -57,9 +77,9 @@
   n_units   <- nrow(Y)
   n_periods <- ncol(Y)
   # Lambda grid: geometric from 0.01 * sigma_max to 1.0 * sigma_max.
-  Y_c <- Y; Y_c[M == 1L] <- 0; Y_c[is.na(Y_c)] <- 0
-  s <- svd(Y_c, nu = 0L, nv = 0L)
-  sigma_max <- max(s$d)
+  # Scale the grid to the penalised (post-fixed-effect) residual, not to
+  # the raw outcome -- see .fect_mc_sigma_max().
+  sigma_max <- .fect_mc_sigma_max(Y, M)
   if (!is.finite(sigma_max) || sigma_max <= 0) return(0.1)
   lambdas <- exp(seq(log(0.01 * sigma_max), log(sigma_max),
                      length.out = n_grid))
@@ -125,14 +145,48 @@
   list(Y_hat = result$Y_hat,
        n_nonzero = as.integer(result$n_nonzero %||% NA_integer_))
 }
-
-
-# MC fit: iterative soft-thresholded SVD.
+# Exact additive two-way fixed effects of a COMPLETE matrix.
 #
-# `use_cuda_svd`: when TRUE, every iteration's soft-thresholded SVD
-# step runs on the GPU via .fect_svd_softthreshold_cuda. If any CUDA
-# call fails, the function silently switches back to host svd() for
-# the rest of the fit.
+#   FE[i, t] = rowMean_i + colMean_t - grandMean
+#
+# Closed form (no iteration needed once the matrix has no missing
+# cells). Adding a constant c to Z raises rowMean, colMean and
+# grandMean each by c, so FE rises by c + c - c = c: the residual
+# Z - FE is invariant to the level, which is what makes the MC
+# estimator location-invariant.
+#' @keywords internal
+#' @noRd
+.fect_mc_twoway <- function(Z) {
+  gm <- mean(Z)
+  a  <- rowMeans(Z) - gm
+  x  <- colMeans(Z) - gm
+  outer(a, rep(1, ncol(Z))) + outer(rep(1, nrow(Z)), x) + gm
+}
+
+
+# MC fit: two-way fixed effects PLUS an iterative soft-thresholded SVD
+# of the residual.
+#
+# Athey et al. (2021) estimate Y = L + unit FE + time FE, penalising the
+# nuclear norm of L ALONE. Penalising the raw outcome matrix instead
+# shrinks the level, so the imputed counterfactual is biased toward zero
+# and ATT = mean(Y - Y_hat) over treated cells inherits the units' level.
+# That made the estimator depend on the location of Y: on a known-zero
+# DGP, adding 100 to the outcome moved the reported ATT from +0.27 to
+# +2.55, while fe, ife and fect::fect all returned -0.024 at every level.
+# On a positive, trending outcome it manufactured large, monotonically
+# rising, significant effects where fe and ife both found a null.
+#
+# Each iteration therefore:
+#   1. takes two-way fixed effects off the current complete matrix,
+#   2. soft-thresholds the SVD of the RESIDUAL,
+#   3. adds the fixed effects back to form Y_hat,
+#   4. re-imputes the treated cells from Y_hat.
+#
+# `use_cuda_svd`: when TRUE the SVD + soft-threshold step runs on the GPU
+# via .fect_svd_softthreshold_cuda, applied to the residual so the GPU and
+# host paths stay numerically identical. If any CUDA call fails, the
+# function silently switches back to host svd() for the rest of the fit.
 #' @keywords internal
 #' @noRd
 .fect_mc_fit <- function(Y, M, lambda = NULL, tol = 1e-5, max_iter = 500L,
@@ -141,51 +195,65 @@
   n_periods <- ncol(Y)
   if (is.null(lambda)) lambda <- .fect_mc_default_lambda(Y, M)
 
-  # Initialise Y_complete: control cells = Y, treated cells = 0.
+  # Initialise Y_complete: control cells = Y, treated cells seeded from
+  # the two-way fit on the controls so the first residual is sensible.
   Y_complete <- Y
-  Y_complete[M == 1L] <- 0
-  Y_complete[is.na(Y_complete)] <- 0
+  obs <- !is.na(Y_complete) & (M == 0L)
+  seed_fill <- if (any(obs)) mean(Y_complete[obs]) else 0
+  Y_complete[M == 1L] <- NA_real_
+  Y_complete[is.na(Y_complete)] <- seed_fill
 
-  Y_hat <- matrix(0, n_units, n_periods)
+  Y_hat <- matrix(seed_fill, n_units, n_periods)
   prev_Y_hat <- Y_hat
   n_nz <- 0L
+  delta <- NA_real_
 
   for (iter in seq_len(max_iter)) {
-    Y_hat_new <- NULL
+    FE <- .fect_mc_twoway(Y_complete)
+    R  <- Y_complete - FE
+
+    L_new <- NULL
     if (use_cuda_svd) {
-      cuda_res <- .fect_svd_softthreshold_cuda(Y_complete, lambda)
+      cuda_res <- .fect_svd_softthreshold_cuda(R, lambda)
       if (!is.null(cuda_res)) {
-        Y_hat_new <- cuda_res$Y_hat
-        n_nz <- cuda_res$n_nonzero
+        L_new <- cuda_res$Y_hat
+        n_nz  <- cuda_res$n_nonzero
       } else {
         use_cuda_svd <- FALSE   # disable for remainder of fit
       }
     }
-    if (is.null(Y_hat_new)) {
-      s <- svd(Y_complete)
+    if (is.null(L_new)) {
+      s <- svd(R)
       D_st <- .soft_threshold(s$d, lambda)
       nz <- D_st > 0
       n_nz <- sum(nz)
       if (any(nz)) {
-        Y_hat_new <- s$u[, nz, drop = FALSE] %*%
-                     diag(D_st[nz], sum(nz), sum(nz)) %*%
-                     t(s$v[, nz, drop = FALSE])
+        L_new <- s$u[, nz, drop = FALSE] %*%
+                 diag(D_st[nz], sum(nz), sum(nz)) %*%
+                 t(s$v[, nz, drop = FALSE])
       } else {
-        Y_hat_new <- matrix(0, n_units, n_periods)
+        L_new <- matrix(0, n_units, n_periods)
       }
     }
-    Y_hat <- Y_hat_new
-    # Update Y_complete: replace treated cells with current estimate.
+
+    Y_hat <- FE + L_new
+    # Re-impute the treated cells; control cells keep their observed
+    # values, and genuinely missing control cells follow Y_hat too.
     Y_complete[M == 1L] <- Y_hat[M == 1L]
+    miss <- is.na(Y) & (M == 0L)
+    if (any(miss)) Y_complete[miss] <- Y_hat[miss]
+
     delta <- max(abs(Y_hat - prev_Y_hat))
     prev_Y_hat <- Y_hat
-    if (delta < tol) break
+    if (is.finite(delta) && delta < tol) break
   }
 
   list(Y_hat = Y_hat, lambda = lambda,
        iter = iter, delta = delta,
+       converged = isTRUE(is.finite(delta) && delta < tol),
        n_nonzero_singular = as.integer(n_nz))
 }
+
 
 
 # Compute ATT + per-event-time effects from a fitted MC model.

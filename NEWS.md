@@ -2,6 +2,47 @@
 
 ## Bug fixes
 
+- **`didgpu_fect(method = "mc")` ignored fixed effects and was not
+  invariant to the level of the outcome.** Athey et al. (2021) estimate
+  `Y = L + unit FE + time FE`, penalising the nuclear norm of `L`
+  alone. The implementation soft-thresholded the RAW outcome matrix, so
+  the penalty shrank the level itself and the residual `Y - Y_hat`
+  absorbed it. `lambda` compounded this by being scaled to the singular
+  values of the raw matrix, so the penalty also grew with the level.
+
+  On a known-zero DGP the reported ATT moved with a pure location
+  shift -- `Y + 0` gave `+0.269`, `Y + 100` gave `+2.551` -- while
+  `fe`, `ife` and `fect::fect` all returned `-0.024` at every level. On
+  a positive, trending outcome it manufactured large, monotonically
+  rising, significant effects where `fe` and `ife` both found a null.
+
+  The fit now removes two-way fixed effects, soft-thresholds the SVD of
+  the RESIDUAL, and adds the fixed effects back; `lambda` is scaled to
+  that residual. The estimator is now exactly level-invariant, recovers
+  the known-zero null (`-0.031`), and tracks `fect::fect` to 6.9e-03
+  (was 2.9e-01). It is not yet bit-for-bit: `lambda` selection still
+  differs from `fect`'s own cross-validation.
+
+- **`didgpu_loo()` reported a pre-treatment placebo instead of the
+  ATT.** The headline for a `didgpu_cs_result` was
+  `fit$aggregation$estimate[1]`, documented as working "for all four
+  aggregations". It does not: with the default `aggregation = "event"`
+  row 1 is the MOST NEGATIVE event time, i.e. the longest
+  pre-treatment horizon.
+
+  It also concealed itself, because dropping a single entity seldom
+  changes which cells populate the earliest lead -- so nearly every
+  entity returned an IDENTICAL estimate, which reads as "no entity is
+  influential" rather than as a bug. On a 56-year panel with a 1985
+  cohort it returned the `e = -42` cell (`-0.006317`) instead of the
+  ATT (`-0.032831`), for both `by = "cohort"` and `by = "unit"`.
+
+  `didgpu_loo()` now always reports the OVERALL ATT -- the
+  `n_treated`-weighted mean over post-treatment cells -- regardless of
+  which aggregation the fit requested, so the answer no longer depends
+  on an unrelated display choice. Both the fast re-aggregation path and
+  the refit path were affected and both are fixed.
+
 - **`didgpu_cs()` influence functions were wrong; multiplier-bootstrap
   standard errors were two to eight times too narrow.** The per-cell
   influence function was taken to be the treated units' demeaned

@@ -27,8 +27,11 @@
 #' re-fits the estimator dropping that entity and reports the
 #' headline estimate. The headline depends on family:
 #'   - `didgpu_result`: the ATE.
-#'   - `didgpu_cs_result`: the requested aggregation's first row
-#'     (or the `overall` value if aggregation = "overall").
+#'   - `didgpu_cs_result`: the OVERALL ATT (the n_treated-weighted mean
+#'     over post-treatment cells), regardless of which aggregation the
+#'     fit requested. Earlier versions returned the requested
+#'     aggregation's first row, which for the default `"event"` scheme
+#'     is the longest PRE-treatment horizon rather than the ATT.
 #'   - `didgpu_fect_result`: the ATE.
 #'
 #' Useful for detecting single-cohort or single-unit influence on
@@ -218,7 +221,14 @@ didgpu_loo <- function(fit, by = "cohort", df = NULL, verbose = TRUE) {
                         delta = NA_real_, delta_pct = NA_real_,
                         note = "all cells dropped", stringsAsFactors = FALSE))
     }
-    agg <- .cs_aggregate(sub, args$aggregation, args)
+    # Headline is the OVERALL ATT, never the first row of whatever
+    # aggregation the fit happened to request. With aggregation = "event"
+    # the first row is the MOST NEGATIVE event time -- the longest
+    # pre-treatment horizon -- so the old code reported a pre-treatment
+    # placebo as the leave-one-out estimate, and reported it identically
+    # for nearly every entity (dropping one cohort rarely changes the
+    # earliest lead). See .loo_extract_headline().
+    agg <- .cs_aggregate(sub, "overall", args)
     est <- if ("estimate" %in% names(agg) && nrow(agg) > 0L)
              as.numeric(agg$estimate[1]) else NA_real_
     delta <- est - full_est
@@ -240,16 +250,27 @@ didgpu_loo <- function(fit, by = "cohort", df = NULL, verbose = TRUE) {
     "didgpu" = as.numeric(fit$results$ATE[1, "Estimate"]),
     "fect"   = as.numeric(fit$results$ATE[1, "Estimate"]),
     "cs"     = {
+      # The headline for a CS fit is the OVERALL ATT: the n_treated-
+      # weighted mean over post-treatment cells (t >= g).
+      #
+      # It must NOT be `fit$aggregation$estimate[1]`. That is only the
+      # ATT when aggregation = "overall"; for the default "event" scheme
+      # row 1 is the most negative event time, i.e. the longest
+      # PRE-treatment horizon. LOO then reported a pre-treatment placebo
+      # as its headline, and -- because dropping a single cohort seldom
+      # changes which cells populate the earliest lead -- returned a
+      # near-identical number for almost every entity, which looked like
+      # "no entity matters" rather than like a bug. Affected both
+      # by = "cohort" and by = "unit".
       agg <- fit$aggregation
-      if ("estimate" %in% names(agg) && nrow(agg) > 0L) {
-        if ("scheme" %in% names(agg) &&
-            agg$scheme[1] == "overall") {
-          as.numeric(agg$estimate[1])
-        } else {
-          # Use the first row's estimate as the headline (works for
-          # all four aggregations).
-          as.numeric(agg$estimate[1])
-        }
+      if (!is.null(agg) && "scheme" %in% names(agg) && nrow(agg) > 0L &&
+          identical(agg$scheme[1], "overall")) {
+        as.numeric(agg$estimate[1])
+      } else if (!is.null(fit$att_gt) && nrow(fit$att_gt) > 0L) {
+        ov <- .cs_aggregate(fit$att_gt, "overall", fit$args)
+        if ("estimate" %in% names(ov) && nrow(ov) > 0L) {
+          as.numeric(ov$estimate[1])
+        } else NA_real_
       } else NA_real_
     },
     NA_real_
