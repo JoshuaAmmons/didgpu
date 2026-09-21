@@ -44,9 +44,17 @@ jobs:
           r-version: "release"
           use-public-rspm: true
 
+      # Docs-only dependencies. Every chunk in index.qmd and chapters/**
+      # is `eval: false`, so rendering executes no R code and needs none
+      # of the package's Suggests -- only knitr/rmarkdown to process the
+      # chunks. Installing Suggests here pulled in heavyweight compiled
+      # packages (polars is Rust, fect is C++) that the runner cannot
+      # build, which failed this step while the site itself needs
+      # nothing from them.
       - name: Install R deps
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
+          dependencies: '"hard"'
           extra-packages: |
             any::rprojroot
             any::knitr
