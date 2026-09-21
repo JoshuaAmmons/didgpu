@@ -2,6 +2,41 @@
 
 ## Bug fixes
 
+- **The CUDA backend silently ignored most estimation options.** Its
+  compatibility guard tested only `controls`, `weight` and
+  `trends_nonparam`, so every other option passed through to a kernel
+  that does not implement it and a wrong number came back with no
+  warning and no fallback.
+
+  `normalized` was the damaging case. With a multivalued treatment,
+  `backend = "cuda"` returned the UNnormalised effects, which do not
+  vary with dose -- so a dose-response analysis looked exactly as
+  though the treatment had been binarised. Against
+  `DIDmultiplegtDYN` with `normalized = TRUE` on a three-level dose:
+
+      backend   |diff| vs reference
+      r         5.551e-17
+      cpu       5.551e-17
+      cuda      8.465e-01
+
+  `backend = "auto"` resolves to `"cuda"` whenever a GPU is present, so
+  this was the default path on a CUDA machine. `dont_drop_larger_lower`
+  was separately dropped, because the CUDA path called `.prep_panel()`
+  without forwarding it.
+
+  The guard is now identical to the CPU backend's and names the
+  offending option when it falls back. All backends now agree with the
+  reference to 5.551e-17 on a normalised multivalued treatment.
+
+  To be explicit, since this was reported as binarisation: `didgpu()`
+  does NOT binarise the treatment. Under the default
+  `normalized = FALSE` the dCDH dynamic effect is the average outcome
+  change among switchers, keyed on switching TIMES rather than dose
+  magnitude, so rescaling a treatment that keeps the same switching
+  pattern leaves the estimate unchanged -- in `DIDmultiplegtDYN` too.
+  Dose enters under `normalized = TRUE`, where it moved the estimate by
+  0.56 and matched the reference exactly.
+
 - **`didgpu_fect(method = "mc")` ignored fixed effects and was not
   invariant to the level of the outcome.** Athey et al. (2021) estimate
   `Y = L + unit FE + time FE`, penalising the nuclear norm of `L`

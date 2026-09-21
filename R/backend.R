@@ -414,18 +414,53 @@ didgpu_backend_info <- function() {
   # CUDA is built. Run the binary-no-controls path through .cuda_one_event_time
   # (R/cuda_glue.R), which has the same return shape as .core_one_event_time.
   function(df, args, iter_seed) {
-    # For now, only the simplest case is wired: no controls, no weight,
-    # no trends_nonparam. Anything fancier falls back to r-backend.
-    if (!is.null(args$controls) || !is.null(args$weight) ||
-        !is.null(args$trends_nonparam)) {
-      message("[didgpu] CUDA backend doesn't yet support controls/weight/",
-              "trends_nonparam. Falling back to r-backend for this call.")
+    # Feature compatibility check. The CUDA kernel implements the plain
+    # effects path ONLY; every other option must fall back to r-backend.
+    #
+    # This list used to cover just controls/weight/trends_nonparam, so
+    # anything else passed straight through to a kernel that does not
+    # implement it and a WRONG NUMBER came back silently. `normalized`
+    # was the worst case: with a multivalued treatment, backend "cuda"
+    # returned the UNnormalised effects, which do not vary with dose --
+    # so a dose-response analysis looked as though the treatment had
+    # been binarised. Measured against DIDmultiplegtDYN with
+    # normalized = TRUE on a 3-level dose:
+    #     r     |diff| 5.551e-17
+    #     cpu   |diff| 5.551e-17
+    #     cuda  |diff| 8.465e-01   <- silently unnormalised
+    # backend = "auto" resolves to cuda whenever a GPU is present, so
+    # this was the default path on CUDA machines.
+    #
+    # Kept deliberately identical to .backend_cpu()'s list: a backend
+    # must never answer a question it cannot compute.
+    unsupported <- list(
+      controls               = !is.null(args$controls),
+      weight                 = !is.null(args$weight),
+      continuous             = !is.null(args$continuous),
+      trends_nonparam        = !is.null(args$trends_nonparam),
+      trends_lin             = isTRUE(args$trends_lin),
+      normalized             = isTRUE(args$normalized),
+      same_switchers         = isTRUE(args$same_switchers),
+      same_switchers_pl      = isTRUE(args$same_switchers_pl),
+      only_never_switchers   = isTRUE(args$only_never_switchers),
+      predict_het            = !is.null(args$predict_het)
+    )
+    if (any(vapply(unsupported, isTRUE, logical(1)))) {
+      if (iter_seed == 0L) {
+        hit <- names(unsupported)[vapply(unsupported, isTRUE, logical(1))]
+        message("[didgpu] CUDA backend does not implement: ",
+                paste(hit, collapse = ", "),
+                ". Falling back to r-backend for this call.")
+      }
       return(.backend_r_impl()(df, args, iter_seed))
     }
     df_use <- if (iter_seed == 0L) df else .cluster_resample(df, args, iter_seed)
     t0 <- Sys.time()
+    # dont_drop_larger_lower must reach .prep_panel or it is silently
+    # ignored on this backend (it is honoured on r and cpu).
     prepped <- .prep_panel(df_use, args$outcome, args$group, args$time,
-                            args$treatment)
+                            args$treatment,
+                            dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower))
     sw <- args$switchers %||% ""
     h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
     # Run the per-event-time CUDA kernel. We mimic .compute_effects's
