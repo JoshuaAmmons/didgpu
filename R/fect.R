@@ -238,11 +238,27 @@ didgpu_fect <- function(
   n_done0 <- n_total - length(todo)
 
   in_memory <- list()
+  diag0 <- NULL          # convergence diagnostics of the point estimate
   for (idx in seq_along(todo)) {
     iter <- todo[idx]
     iter_seed <- if (iter == 0L) 0L else (seed + iter)
     t0 <- Sys.time()
     value <- fit_one(df, args, iter_seed)
+    if (iter == 0L) {
+      # The solver reports iter / delta / lambda per cell, but nothing
+      # used to surface them, so a caller could not tell a converged fit
+      # from one that exhausted max_iter. Keep the point estimate's.
+      diag0 <- list(
+        iter      = value$fect_iter      %||% NA_integer_,
+        delta     = value$fect_delta     %||% NA_real_,
+        converged = if (!is.null(value$fect_delta) && is.finite(value$fect_delta))
+                      isTRUE(value$fect_delta < (args$tol %||% 1e-5)) else NA,
+        tol       = args$tol %||% NA_real_,
+        max_iter  = args$max_iter %||% NA_integer_,
+        lambda    = value$fect_lambda    %||% NA_real_,
+        n_nonzero_singular = value$fect_n_nonzero %||% NA_integer_
+      )
+    }
     value$wall_seconds_total <- as.numeric(difftime(Sys.time(), t0,
                                                      units = "secs"))
     if (!is.null(checkpoint_dir)) {
@@ -270,6 +286,14 @@ didgpu_fect <- function(
   } else NA_character_
   result$method <- method
   result$n_always_treated_dropped <- n_always_treated
+  result$diagnostics <- diag0
+  if (!is.null(diag0) && identical(diag0$converged, FALSE)) {
+    warning(sprintf(
+      paste0("didgpu_fect(method = '%s') did not converge: delta = %.3g ",
+             "after %s iterations (tol = %.3g). Raise max_iter or loosen ",
+             "tol; the estimate may be unreliable."),
+      method, diag0$delta, format(diag0$iter), diag0$tol), call. = FALSE)
+  }
   class(result) <- c("didgpu_fect_result", "didgpu_result", "list")
   result
 }

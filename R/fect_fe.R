@@ -90,9 +90,16 @@
     resid <- Y_c - alpha - matrix(xi, n_units, n_periods, byrow = TRUE)
     loss <- sum(resid^2, na.rm = TRUE)
 
-    if (delta < tol) break
-    if (iter > 1L && abs(loss - prev_loss) < tol) break
+    # Convergence is judged on the PARAMETERS. There used to be a second
+    # break here on abs(loss - prev_loss) < tol, but `loss` is a SUM of
+    # squared residuals, so its absolute change falls below a tol meant
+    # for parameter units long before alpha and xi have settled. It fired
+    # first in practice: on a 60x10 panel the fit exited after 6
+    # iterations with delta = 2.0e-04, twenty times the requested 1e-05,
+    # and reported itself done. That early exit is what kept method "fe"
+    # 3.3e-05 away from fect::fect at default settings.
     prev_loss <- loss
+    if (delta < tol) break
   }
 
   attr(alpha, "iter")  <- iter

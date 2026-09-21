@@ -2,6 +2,32 @@
 
 ## Bug fixes
 
+- **`didgpu_fect(method = "fe")` stopped before converging.** The fit
+  had a second stopping rule, `abs(loss - prev_loss) < tol`, where
+  `loss` is a SUM of squared residuals. Its absolute change falls below
+  a tolerance meant for parameter units long before the parameters
+  settle, so it fired first: on a 60x10 panel the fit exited after 6
+  iterations with `delta = 2.0e-04` against the requested `1e-05` and
+  reported itself finished. Convergence is now judged on the
+  parameters alone. `fe` converges in 9 iterations and its agreement
+  with `fect::fect` improved from 2.81e-05 to 7.80e-07.
+
+## New features
+
+- **`didgpu_fect()` reports convergence diagnostics and warns when a
+  fit does not converge.** The solver already produced `iter`, `delta`
+  and `lambda` per cell but nothing surfaced them, so a caller could
+  not tell a converged fit from one that had exhausted `max_iter` --
+  both returned a number and looked identical. Results now carry
+  `$diagnostics` (`iter`, `delta`, `converged`, `tol`, `max_iter`,
+  `lambda`, `n_nonzero_singular`) and a non-converged fit warns.
+
+  This immediately exposed two problems that had been invisible: `fe`
+  was exiting after 6 iterations (fixed above), and `method = "ife"`
+  exhausts `max_iter` without converging at default settings. The
+  latter is a known outstanding defect -- `ife` is materially wrong as
+  the factor structure strengthens -- and is not yet fixed.
+
 - **The CUDA backend silently ignored most estimation options.** Its
   compatibility guard tested only `controls`, `weight` and
   `trends_nonparam`, so every other option passed through to a kernel
