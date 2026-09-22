@@ -1,5 +1,24 @@
 # didgpu 0.1.2
 
+## Build
+
+- **`DIDGPU_NO_CUDA=1` forces a CPU-only build** even on a machine with
+  the CUDA toolkit installed. Honoured by `src/Makevars`,
+  `src/Makevars.win`, `configure` and `configure.win`.
+
+  Without it there was no way to reproduce the configuration CRAN
+  actually builds (their machines have no CUDA) on a developer box that
+  does. `R CMD check --as-cran` now reports:
+
+      CUDA build      Status: 1 NOTE   (checking compiled code)
+      CPU-only build  Status: OK
+
+  The NOTE names only `cudart64_13.dll` and `didgpu_cuda.dll` --
+  NVIDIA's runtime and the package's CUDA helper. Neither is an R
+  extension, so neither calls `R_registerRoutines`, and neither exists
+  in a CPU-only build. That the NOTE is CUDA-only is now demonstrable
+  rather than asserted.
+
 ## Bug fixes
 
 - **`didgpu_fect(method = "mc")` selected too little shrinkage.** The

@@ -26,6 +26,22 @@ ifeq ($(strip $(CUDA_HOME)),)
                   $(wildcard /usr/local/cuda-12.5) \
                   $(wildcard /usr/local/cuda-12.4))
 endif
+# Deterministic opt-out. Setting DIDGPU_NO_CUDA=1 forces a CPU-only
+# build even on a machine that has the CUDA toolkit installed.
+#
+# Without this there is no way to reproduce the configuration CRAN
+# actually builds (their machines have no CUDA) on a developer box that
+# does, so "R CMD check is clean apart from a CUDA-only NOTE" could only
+# be asserted, never demonstrated. The NOTE in question is
+#     checking compiled code ... NOTE
+#     File 'didgpu/libs/x64/cudart64_13.dll': Found no calls to:
+#       'R_registerRoutines', 'R_useDynamicSymbols'
+# which is raised for NVIDIA's runtime and for didgpu_cuda.dll -- neither
+# is an R extension, and neither exists in a CPU-only build.
+ifeq ($(strip $(DIDGPU_NO_CUDA)),1)
+  CUDA_HOME :=
+endif
+
 NVCC := $(if $(strip $(CUDA_HOME)),$(CUDA_HOME)/bin/nvcc,)
 HAVE_NVCC := $(if $(NVCC),$(shell test -x $(NVCC) && echo yes),)
 

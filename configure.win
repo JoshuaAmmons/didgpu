@@ -8,6 +8,14 @@ echo ""
 echo "*** didgpu configure (Windows) ***"
 
 CUDA_DIR=""
+# DIDGPU_NO_CUDA=1 forces a CPU-only build even where CUDA is present.
+# Mirrors the same switch in src/Makevars* so the two cannot disagree.
+if [ "$DIDGPU_NO_CUDA" = "1" ]; then
+  echo "  DIDGPU_NO_CUDA=1 set -> forcing a CPU-only build."
+  echo "     backends available after install: 'r', 'cpu'"
+  echo ""
+  exit 0
+fi
 # 1. Honor CUDA_HOME / CUDA_PATH (Rtools shell exposes both as env vars
 #    if they are set in Windows).
 if [ -n "$CUDA_HOME" ] && [ -x "$CUDA_HOME/bin/nvcc.exe" ]; then
