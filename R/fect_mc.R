@@ -54,69 +54,85 @@
   mx <- max(s$d)
   if (!is.finite(mx) || mx <= 0) 0 else mx
 }
-
-
 # Cross-validated lambda selection for fect_mc.
 #
-# Splits the CONTROL cells (M == 0) into K folds at random. For each
-# lambda in the grid:
-#   - For each fold, mask the fold's cells (treat them as "missing"),
-#     fit MC on the rest, and predict the held-out fold.
-#   - Record out-of-sample MSE on the fold.
-# Average across folds gives a CV-MSE curve. Pick the lambda minimising it.
+# The held-out cells must look like the cells we actually have to
+# predict. The treated block is a CONTIGUOUS RUN at the end of a unit's
+# untreated history, so validation uses a rolling origin: for each unit,
+# hold out the last `cv_nobs` untreated observations, then shift the
+# origin back one period per fold.
 #
-# Default grid: geometric from 0.01 * sigma_max to 1.0 * sigma_max, 10 points.
-# K defaults to 5.
+# The previous version held out RANDOM SCATTERED control cells. A
+# low-rank model interpolates isolated holes far more easily than it
+# extrapolates a block, so scattered-hole MSE is minimised at too little
+# shrinkage and the selected lambda left spurious factors in. On a DGP
+# with NO factor structure, where full shrinkage is correct:
 #
-# Reference: fect package's MC option does this same procedure.
+#   scattered CV -> lambda 3.15, keeps 3 singular values, ATT -0.031349
+#   rolling CV   -> lambda 8.77, keeps 0 singular values, ATT -0.024425
+#   fect                                                  ATT -0.024427
+#
+# Note fect works in lambda / (T * N) units, so its reported
+# `lambda.cv` corresponds to `lambda * T * N` here.
 #' @keywords internal
 #' @noRd
-.fect_mc_cv_lambda <- function(Y, M, K = 5L, n_grid = 10L,
-                                  tol = 1e-5, max_iter = 200L,
-                                  seed = 1L) {
+.fect_mc_cv_lambda <- function(Y, M, n_grid = 10L, cv_nobs = 3L,
+                                folds = 3L, tol = 1e-6, max_iter = 200L,
+                                seed = 1L) {
   n_units   <- nrow(Y)
   n_periods <- ncol(Y)
-  # Lambda grid: geometric from 0.01 * sigma_max to 1.0 * sigma_max.
-  # Scale the grid to the penalised (post-fixed-effect) residual, not to
-  # the raw outcome -- see .fect_mc_sigma_max().
   sigma_max <- .fect_mc_sigma_max(Y, M)
   if (!is.finite(sigma_max) || sigma_max <= 0) return(0.1)
   lambdas <- exp(seq(log(0.01 * sigma_max), log(sigma_max),
                      length.out = n_grid))
 
-  # Build fold assignment over control cells only.
-  set.seed(seed)
-  ctrl_idx <- which(M == 0L & !is.na(Y))
-  if (length(ctrl_idx) < K * 5L) {
-    # Too few control cells to do CV reliably; fall back to heuristic.
-    return(.fect_mc_default_lambda(Y, M))
-  }
-  fold_id <- sample(rep(seq_len(K), length.out = length(ctrl_idx)))
-
-  cv_mse <- numeric(length(lambdas))
-  for (li in seq_along(lambdas)) {
-    lambda <- lambdas[li]
-    fold_mse <- numeric(K)
-    for (k in seq_len(K)) {
-      hold_out_idx <- ctrl_idx[fold_id == k]
-      # Build a panel where the held-out cells are TREATED in M_cv
-      # (so MC's fit ignores them).
-      M_cv <- M
-      M_cv[hold_out_idx] <- 1L
-      fit <- .fect_mc_fit(Y, M_cv, lambda = lambda,
-                            tol = tol, max_iter = max_iter)
-      # Out-of-sample MSE: actual Y vs Y_hat on the held-out cells.
-      held_Y    <- Y[hold_out_idx]
-      held_Yhat <- fit$Y_hat[hold_out_idx]
-      ok <- !is.na(held_Y) & !is.na(held_Yhat)
-      fold_mse[k] <- if (any(ok)) mean((held_Y[ok] - held_Yhat[ok])^2)
-                     else NA_real_
+  # Rolling-origin hold-out sets, built once and reused for every lambda
+  # so the grid is compared on identical cells.
+  #
+  # Only EVER-TREATED units are validated on. They are the units whose
+  # counterfactuals have to be predicted, and their prediction task is
+  # extrapolation past the end of a short untreated run. Never-treated
+  # units have a full history, so holding out their last few periods is
+  # a much easier, interpolation-like problem -- and because they are
+  # usually the majority, including them dominates the MSE and selects
+  # too little shrinkage. Measured against fect, with validation on all
+  # units vs ever-treated only:
+  #     long histories   all units lambda 0.244 -> ATT -0.027469
+  #                      treated   lambda 5.257 -> ATT -0.024425  (fect -0.024427)
+  #     short histories  treated   lambda 4.161 -> ATT +0.014847  (fect +0.014847)
+  ever_treated <- rowSums(M == 1L, na.rm = TRUE) > 0L
+  holds <- vector("list", folds)
+  for (fd in seq_len(folds)) {
+    idx <- integer(0)
+    for (i in seq_len(n_units)) {
+      if (!ever_treated[i]) next
+      un <- which(M[i, ] == 0L & !is.na(Y[i, ]))
+      if (length(un) < cv_nobs + fd) next
+      last <- un[length(un) - (fd - 1L)]
+      take <- un[un <= last & un > last - cv_nobs]
+      idx <- c(idx, (take - 1L) * n_units + i)
     }
-    cv_mse[li] <- mean(fold_mse, na.rm = TRUE)
+    holds[[fd]] <- idx
   }
-  best <- which.min(cv_mse)
-  if (length(best) == 0L) return(.fect_mc_default_lambda(Y, M))
-  lambdas[best]
+  if (!length(unlist(holds))) return(.fect_mc_default_lambda(Y, M))
+
+  cv_mse <- vapply(lambdas, function(lambda) {
+    err <- numeric(0)
+    for (fd in seq_len(folds)) {
+      hold <- holds[[fd]]
+      if (!length(hold)) next
+      M_cv <- M
+      M_cv[hold] <- 1L
+      fit <- .fect_mc_fit(Y, M_cv, lambda = lambda,
+                          tol = tol, max_iter = max_iter)
+      e <- Y[hold] - fit$Y_hat[hold]
+      err <- c(err, e[is.finite(e)])
+    }
+    if (length(err)) mean(err^2) else NA_real_
+  }, numeric(1))
+
+  if (all(is.na(cv_mse))) return(.fect_mc_default_lambda(Y, M))
+  lambdas[which.min(cv_mse)]
 }
 
 
@@ -335,8 +351,9 @@
     } else if (iter_seed == 0L) {
       # CV on the point-estimate panel.
       l <- .fect_mc_cv_lambda(mats$Y, mats$M,
-                                K = args$mc_cv_K %||% 5L,
-                                n_grid = args$mc_cv_grid %||% 10L,
+                                n_grid  = args$mc_cv_grid %||% 10L,
+                                cv_nobs = args$mc_cv_nobs %||% 3L,
+                                folds   = args$mc_cv_folds %||% 3L,
                                 tol = args$tol %||% 1e-5,
                                 max_iter = (args$max_iter %||% 500L) / 2L,
                                 seed = args$seed %||% 1L)

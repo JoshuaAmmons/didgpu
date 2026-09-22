@@ -84,7 +84,9 @@ test_that("fect_mc CV picks a positive lambda on a clean panel", {
                               tau_profile = c(0.5, 1.0),
                               seed = 17L)
   mats <- didgpu:::.fect_build_matrices(p, "Y", "unit", "period", "D")
-  l <- didgpu:::.fect_mc_cv_lambda(mats$Y, mats$M, K = 3L, n_grid = 4L)
+  # `K` (random folds) was replaced by `folds` when the CV moved to a
+  # rolling-origin hold-out on ever-treated units.
+  l <- didgpu:::.fect_mc_cv_lambda(mats$Y, mats$M, folds = 3L, n_grid = 4L)
   expect_true(is.finite(l))
   expect_gt(l, 0)
 })

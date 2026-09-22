@@ -2,6 +2,41 @@
 
 ## Bug fixes
 
+- **`didgpu_fect(method = "mc")` selected too little shrinkage.** The
+  lambda cross-validation held out RANDOM SCATTERED control cells. A
+  low-rank model interpolates isolated holes far more easily than it
+  extrapolates the contiguous block it actually has to predict, so the
+  out-of-sample MSE was minimised at too small a lambda and the fit
+  kept spurious factors.
+
+  Validation now uses a rolling origin -- the last `cv_nobs` untreated
+  observations of each unit, shifted back one period per fold -- and
+  only on EVER-TREATED units, since those are the units whose
+  counterfactuals must be predicted and whose task is extrapolation.
+  Never-treated units have full histories, so holding out their final
+  periods is an easier problem, and as the usual majority they
+  dominated the MSE.
+
+  Agreement with `fect::fect`:
+
+      panel                    before      after
+      long histories           6.911e-03   1.529e-05
+      mixed short histories     3.208e-03   4.009e-06
+
+  Note also that `fect`'s lambda is expressed in `lambda / (T * N)`
+  units, so its reported `lambda.cv` corresponds to
+  `lambda * T * N` here; passing its raw value to `didgpu_fect()` will
+  not reproduce its fit.
+
+  A caution when comparing against the reference: with neither
+  `lambda` nor `CV` supplied, `fect::fect(method = "mc")` degenerates
+  to pure two-way FE -- its own message reads "No lambda is supplied.
+  FEct is applied." -- and returns exactly its `method = "fe"` answer.
+  Comparisons against that run measure FE, not MC.
+
+  All three fect methods now track the reference: `fe` 7.8e-07,
+  `ife` 6.9e-08, `mc` 4.0e-06.
+
 - **`didgpu_fect()` kept units whose counterfactual is not identified,
   which made `method = "ife"` badly wrong -- sometimes the wrong sign.**
   A unit's counterfactual comes only from its UNTREATED observations:
