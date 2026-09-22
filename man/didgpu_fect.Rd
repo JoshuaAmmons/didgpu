@@ -11,6 +11,7 @@ didgpu_fect(
   time,
   treatment,
   method = c("fe", "ife", "mc"),
+  min_T0 = NULL,
   effects = 1L,
   r = 2L,
   lambda = NULL,
@@ -31,6 +32,17 @@ columns named by \code{outcome}, \code{group}, \code{time}, \code{treatment}.}
 \item{outcome, group, time, treatment}{Character. Column names.}
 
 \item{method}{One of \code{"fe"}, \code{"ife"}, \code{"mc"}. Default \code{"fe"}.}
+
+\item{min_T0}{Integer. Minimum number of UNTREATED periods a unit must
+have to be kept. A unit's counterfactual is identified only from its
+untreated observations: the unit fixed effect needs at least one, an
+r-factor loading needs several. Units below the threshold are dropped
+with a warning and the count is returned as \code{$n_units_dropped}.
+\code{NULL} (the default) follows fect's rule: \code{1} for
+\code{method = "fe"}, \code{5} for \code{"ife"} and \code{"mc"}. Because the
+defaults differ by method, \code{method = "ife", r = 0} does NOT generally
+equal \code{method = "fe"}; they fit different samples. Pass \code{min_T0 = 1}
+to make them agree. Mirrors \code{min.T0} in fect.}
 
 \item{effects}{Integer. Number of post-treatment event-times to
 estimate (e = 1..effects). Must be >= 1.}

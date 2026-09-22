@@ -2,6 +2,40 @@
 
 ## Bug fixes
 
+- **`didgpu_fect()` kept units whose counterfactual is not identified,
+  which made `method = "ife"` badly wrong -- sometimes the wrong sign.**
+  A unit's counterfactual comes only from its UNTREATED observations:
+  the unit fixed effect needs at least one, an r-factor loading needs
+  several. fect drops units below a minimum (`fect.default`): `min.T0`
+  is `1` for `method = "fe"` and `5` for `"ife"`, `"mc"`, `"both"`,
+  `"gsynth"` and `"cfe"`. didgpu kept every unit and extrapolated.
+
+  With a weak factor structure that is a nuisance; with a strong one it
+  is fatal. On a 100-unit panel with two latent factors and a TRUE ATT
+  of +1.0:
+
+      factors    truth   fect       didgpu before   didgpu after
+      L ~ 0.5     1.0    +1.00142   +0.97446        +1.00206
+      L ~ 1.5     1.0    +0.99880   +0.72146        +0.98872
+      L ~ 3.0     1.0    +1.00064   -0.17445        +0.94980
+
+  The clue was that `fect`'s returned `lambda` was 84 x 2 on a 100-unit
+  panel: it had silently dropped 16 units, exactly those with fewer
+  than 5 untreated periods.
+
+  `didgpu_fect()` gains a documented `min_T0` argument. `NULL` (the
+  default) follows fect's rule; `$n_units_dropped` and `$min_T0` are
+  returned and dropped units are warned about. This subsumes the
+  earlier always-treated fix, since those units have zero untreated
+  periods.
+
+  Note a consequence: because the defaults differ by method,
+  `method = "ife", r = 0` does NOT generally equal `method = "fe"` --
+  they fit different samples. `fect` behaves the same way, and didgpu
+  now reproduces both of its numbers on a panel where 22 of 60 units
+  have short histories (`fe` +0.302820, `ife(r = 0)` +0.236833). Pass
+  `min_T0 = 1` to make them agree.
+
 - **`didgpu_fect(method = "fe")` stopped before converging.** The fit
   had a second stopping rule, `abs(loss - prev_loss) < tol`, where
   `loss` is a SUM of squared residuals. Its absolute change falls below

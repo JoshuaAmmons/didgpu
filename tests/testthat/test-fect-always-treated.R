@@ -37,7 +37,9 @@
 
 test_that("always-treated units are dropped, warned about, and counted", {
   p <- .always_treated_panel()
-  expect_warning(f <- .fit(p, "fe"), "no untreated period")
+  # Always-treated units have zero untreated periods, so they fail any
+  # min_T0 >= 1. The warning now names the min_T0 rule.
+  expect_warning(f <- .fit(p, "fe"), "always-treated")
   expect_equal(f$n_always_treated_dropped, 10L)
 })
 
@@ -66,7 +68,7 @@ test_that("dropping always-treated by hand changes nothing", {
 test_that("a panel of only always-treated units is an error, not a number", {
   p <- .always_treated_panel()
   p <- p[p$unit %in% 1:10, ]
-  expect_error(.fit(p, "fe"), "every unit is always-treated")
+  expect_error(.fit(p, "fe"), "fewer than min_T0")
 })
 
 test_that("fe matches the fect package once always-treated are dropped", {

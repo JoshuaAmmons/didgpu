@@ -71,6 +71,16 @@
 #'
 #' @inheritParams didgpu
 #' @param method One of `"fe"`, `"ife"`, `"mc"`. Default `"fe"`.
+#' @param min_T0 Integer. Minimum number of UNTREATED periods a unit
+#'   must have to be kept. A unit's counterfactual is identified only
+#'   from its untreated observations: the unit fixed effect needs at
+#'   least one, an r-factor loading needs several. Units below the
+#'   threshold are dropped with a warning and the count is returned as
+#'   `$n_units_dropped`. `NULL` (the default) follows fect's rule: `1`
+#'   for `method = "fe"`, `5` for `"ife"` and `"mc"`. Because the
+#'   defaults differ by method, `method = "ife", r = 0` does NOT
+#'   generally equal `method = "fe"`; they fit different samples. Pass
+#'   `min_T0 = 1` to make them agree. Mirrors `min.T0` in fect.
 #' @param r Integer. For method `"ife"`, the number of latent factors.
 #'   Default `2L`. Ignored for `"fe"` and `"mc"`.
 #' @param lambda Numeric or NULL. For method `"mc"`, the nuclear-norm
@@ -116,6 +126,7 @@ didgpu_fect <- function(
     time,
     treatment,
     method         = c("fe", "ife", "mc"),
+    min_T0         = NULL,
     effects        = 1L,
     r              = 2L,
     lambda         = NULL,
@@ -174,39 +185,55 @@ didgpu_fect <- function(
     stop("unknown method")
   )
 
-  # ---- drop units with no untreated period -----------------------------
-  # A unit treated in EVERY observed period contributes no control cell,
-  # so its unit fixed effect (fe) / factor loading (ife, mc) is not
-  # identified. .fect_fe_fit() sets an unidentified alpha to 0, which
-  # makes the imputed counterfactual Y_hat = xi alone -- the unit's whole
-  # LEVEL then lands in the residual and is reported as treatment effect.
-  # Always-treated units are selected on level (they are the ones already
-  # treated before the window opened), so this bias does not average out:
-  # on a known-zero DGP with 10 such units the reported ATE was +1.63
-  # instead of 0, and survived every factor count.
+  # ---- drop units with too few untreated periods (min_T0) --------------
+  # A unit's counterfactual is only identified from its UNTREATED
+  # observations: the unit fixed effect needs at least one, and an
+  # r-factor loading needs several. fect applies a minimum and drops the
+  # rest (fect.default):
   #
-  # The reference implementation drops them ("units whose number of
-  # untreated periods <1 are dropped automatically"), and didgpu
-  # reproduces fect::fect exactly once they are removed. didgpu_bacon()
-  # already drops always-treated units for the same reason.
+  #     method "fe"                        -> min.T0 = 1
+  #     method "ife" / "mc" / "both" / ...  -> min.T0 = 5
+  #
+  # didgpu kept every unit and extrapolated, which is where the large
+  # errors came from. On a 100-unit panel with a strong 2-factor
+  # structure and a true ATT of 1.0, method "ife" returned -0.177 with
+  # all units and +0.977 once the 16 units with fewer than 5 untreated
+  # periods were dropped -- the same 84 units fect keeps.
+  #
+  # This subsumes the always-treated case: those units have zero
+  # untreated periods and fail any min_T0 >= 1. Retaining them put their
+  # whole LEVEL into the residual (a known-zero DGP reported +1.63).
+  if (is.null(min_T0)) {
+    min_T0 <- if (identical(method, "fe")) 1L else 5L
+  }
+  min_T0 <- as.integer(min_T0)
+  if (is.na(min_T0) || min_T0 < 1L) {
+    stop("`min_T0` must be a positive integer.", call. = FALSE)
+  }
   .grp_vec <- as.character(df[[group]])
   .trt_vec <- df[[treatment]]
   .n_untreated <- tapply(.trt_vec, .grp_vec,
                          function(x) sum(x == 0 & !is.na(x)))
-  .always <- names(.n_untreated)[.n_untreated < 1L]
-  n_always_treated <- length(.always)
-  if (n_always_treated > 0L) {
-    if (n_always_treated == length(.n_untreated)) {
-      stop("every unit is always-treated: no untreated periods anywhere, ",
-           "so no counterfactual is identified.", call. = FALSE)
+  .drop <- names(.n_untreated)[.n_untreated < min_T0]
+  n_units_dropped  <- length(.drop)
+  n_always_treated <- sum(.n_untreated < 1L)
+  if (n_units_dropped > 0L) {
+    if (n_units_dropped == length(.n_untreated)) {
+      stop(sprintf(paste0("every unit has fewer than min_T0 = %d untreated ",
+                          "periods, so no counterfactual is identified."),
+                   min_T0), call. = FALSE)
     }
-    df <- df[!.grp_vec %in% .always, , drop = FALSE]
+    df <- df[!.grp_vec %in% .drop, , drop = FALSE]
     warning(sprintf(
-      paste0("didgpu_fect: dropped %d unit(s) with no untreated period ",
-             "(always-treated). Their counterfactuals are not identified; ",
-             "retaining them biases the ATT by their unit level. This ",
-             "matches fect's own behaviour."),
-      n_always_treated), call. = FALSE)
+      paste0("didgpu_fect: dropped %d unit(s) with fewer than min_T0 = %d ",
+             "untreated period(s)%s. Their counterfactuals are not ",
+             "identified from their own history; retaining them biases the ",
+             "ATT. This matches fect's min.T0 rule (1 for \"fe\", 5 for ",
+             "\"ife\"/\"mc\")."),
+      n_units_dropped, min_T0,
+      if (n_always_treated > 0L)
+        sprintf(", of which %d are always-treated", n_always_treated) else ""),
+      call. = FALSE)
   }
 
   ph <- .panel_hash(df, outcome, group, time, treatment)
@@ -286,6 +313,8 @@ didgpu_fect <- function(
   } else NA_character_
   result$method <- method
   result$n_always_treated_dropped <- n_always_treated
+  result$n_units_dropped <- n_units_dropped
+  result$min_T0 <- min_T0
   result$diagnostics <- diag0
   if (!is.null(diag0) && identical(diag0$converged, FALSE)) {
     warning(sprintf(
