@@ -160,7 +160,16 @@ didgpu_freyaldenhoven <- function(df, outcome, policy, id, time,
   cluster_col <- cluster %||% id
 
   dt <- data.table::as.data.table(df)
-  dt <- dt[!is.na(get(outcome)) & !is.na(get(policy)) & !is.na(get(time))]
+  # Resolve the column vectors BEFORE subsetting. `[.data.table` evaluates
+  # its `i` expression with the table's COLUMNS in scope, so a user column
+  # named `outcome` / `group` / `time` / `treatment` shadows the argument
+  # holding that column's NAME and get() receives a vector instead of a
+  # string: "invalid first argument" for a numeric column, "first argument
+  # has length > 1" for a character one. Ordinary analysis frames carry
+  # columns with exactly these names.
+  .didgpu_keep <- !is.na(dt[[outcome]]) & !is.na(dt[[policy]]) &
+                  !is.na(dt[[time]])
+  dt <- dt[.didgpu_keep]
   des <- .fhs_build_design(dt, id, time, policy,
                            pre, post, overidpre, overidpost, normalize)
   dt <- des$dt; terms <- des$terms

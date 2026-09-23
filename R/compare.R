@@ -45,6 +45,30 @@ didgpu_compare <- function(
                            fit_r = NULL, fit_ref = NULL)))
   }
 
+  # DIDmultiplegtDYN (>= 2.x) dispatches to polars through bare `pl$...`
+  # calls but only Suggests it, so it never attaches polars itself. If the
+  # caller has not run library(polars), the reference fit dies inside
+  # polars -- "attempt to apply non-function", or "Evaluation failed in
+  # `$with_columns()`" depending on version -- and didgpu_compare()
+  # inherited that failure with nothing to indicate the cause.
+  #
+  # Attach it here so the comparison works from a clean session, and say
+  # plainly what is missing when it cannot be attached.
+  if (!"package:polars" %in% search()) {
+    if (requireNamespace("polars", quietly = TRUE)) {
+      suppressMessages(suppressWarnings(
+        attachNamespace("polars")))
+    } else {
+      warning("DIDmultiplegtDYN requires the 'polars' package to be ",
+              "ATTACHED (it calls `pl$...` directly but only Suggests ",
+              "it). Install polars and re-run; without it the reference ",
+              "fit fails inside polars with an unrelated-looking error.",
+              call. = FALSE)
+      return(invisible(list(pass = NA, report = NULL,
+                             fit_r = NULL, fit_ref = NULL)))
+    }
+  }
+
   fit_r <- didgpu(df = df, outcome = outcome, group = group, time = time,
                    treatment = treatment, effects = effects, placebo = placebo,
                    cluster = cluster, switchers = switchers,

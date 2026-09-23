@@ -32,7 +32,15 @@
 #' @noRd
 .fect_build_matrices <- function(df, outcome, group, time, treatment) {
   d <- data.table::as.data.table(df)
-  d <- d[!is.na(get(group)) & !is.na(get(time)), ]
+  # Resolve the column vectors BEFORE subsetting. `[.data.table` evaluates
+  # its `i` expression with the table's COLUMNS in scope, so a user column
+  # named `outcome` / `group` / `time` / `treatment` shadows the argument
+  # holding that column's NAME and get() receives a vector instead of a
+  # string: "invalid first argument" for a numeric column, "first argument
+  # has length > 1" for a character one. Ordinary analysis frames carry
+  # columns with exactly these names.
+  .didgpu_keep <- !is.na(d[[group]]) & !is.na(d[[time]])
+  d <- d[.didgpu_keep, ]
   data.table::setorderv(d, c(group, time))
   units   <- sort(unique(d[[group]]))
   periods <- sort(unique(d[[time]]))

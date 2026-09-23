@@ -67,8 +67,16 @@ didgpu_bacon <- function(df, outcome, group, time, treatment) {
     if (!v %in% names(df)) stop("column not in df: ", v)
   }
   d <- data.table::as.data.table(df)
-  d <- d[!is.na(get(outcome)) & !is.na(get(group)) &
-         !is.na(get(time)) & !is.na(get(treatment))]
+  # Resolve the column vectors BEFORE subsetting. `[.data.table` evaluates
+  # its `i` expression with the table's COLUMNS in scope, so a user column
+  # named `outcome` / `group` / `time` / `treatment` shadows the argument
+  # holding that column's NAME and get() receives a vector instead of a
+  # string: "invalid first argument" for a numeric column, "first argument
+  # has length > 1" for a character one. Ordinary analysis frames carry
+  # columns with exactly these names.
+  .didgpu_keep <- !is.na(d[[outcome]]) & !is.na(d[[group]]) &
+                  !is.na(d[[time]]) & !is.na(d[[treatment]])
+  d <- d[.didgpu_keep]
   Y <- as.numeric(d[[outcome]]); G <- d[[group]]; Tt <- d[[time]]
   D <- as.numeric(d[[treatment]])
 

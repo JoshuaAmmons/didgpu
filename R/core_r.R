@@ -60,7 +60,10 @@
   # Stash the weight column under a stable name so the rest of prep can
   # find it after we rename outcome/group/time/treatment.
   if (!is.null(weight)) {
-    d[, "weight_XX_input" := as.numeric(get(weight))]
+    # Same hazard in `j`: a column named `weight` would shadow the
+    # argument naming the weight column. Resolve it outside.
+    .didgpu_w <- as.numeric(d[[weight]])
+    d[, "weight_XX_input" := .didgpu_w]
   } else {
     d[, "weight_XX_input" := 1.0]
   }
