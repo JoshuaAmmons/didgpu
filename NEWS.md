@@ -21,6 +21,35 @@
 
 ## Bug fixes
 
+- **A user column named after one of the arguments broke several entry
+  points.** `[.data.table` evaluates its `i` and `j` expressions with
+  the table's COLUMNS in scope, and the affected functions filtered
+  with `d[!is.na(get(outcome)) & !is.na(get(group)) & ...]`. A panel
+  carrying a column literally called `outcome`, `group`, `time`,
+  `treatment` or `weight` therefore shadowed the argument holding that
+  column's NAME, and `get()` received a vector instead of a string:
+
+      numeric column   -> "invalid first argument"
+      character column -> "first argument has length > 1"
+
+  Those are ordinary names in an analysis frame, so this failed on full
+  panels while the same rows in a minimal four-column frame worked --
+  which presents as "extra columns break it" rather than as a name
+  collision. Fixed in `didgpu_bacon()`, `didgpu_fect()`,
+  `didgpu_did_continuous()`, `didgpu_fhs()` and the `weight` argument
+  of `didgpu()`; column vectors are now resolved before subsetting.
+  These were hard errors, never silent miscalculations, so no
+  previously reported estimate is affected.
+
+- **`didgpu_compare()` required the caller to attach polars.**
+  `DIDmultiplegtDYN` (>= 2.x) calls polars through bare `pl$...` but
+  only Suggests it, so it never attaches polars itself. Without
+  `library(polars)` the reference fit died inside polars -- "attempt to
+  apply non-function", or "Evaluation failed in `$with_columns()`"
+  depending on version -- and `didgpu_compare()` surfaced that with
+  nothing pointing at the cause. It now attaches polars when available
+  and reports plainly what is missing when it is not.
+
 - **`didgpu_fect(method = "mc")` selected too little shrinkage.** The
   lambda cross-validation held out RANDOM SCATTERED control cells. A
   low-rank model interpolates isolated holes far more easily than it
