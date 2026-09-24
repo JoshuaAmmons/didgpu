@@ -245,5 +245,5 @@
   u <- rownames(per_unit)
   list(att = est$att,
        IF = as.numeric(per_unit[, 1]) * length(u) / n_units,
-       units = type.convert(u, as.is = TRUE))
+       units = utils::type.convert(u, as.is = TRUE))
 }

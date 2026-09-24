@@ -77,6 +77,7 @@ utils::globalVariables(c(
   "present_XX", "min_t_dnm_XX", "max_t_dnm_XX", "last_obs_XX",
   "trunc_control_XX", "d_F_g_XX", "F_g_trunc_XX",
   "ghost_XX", "chg_XX", "never_chg_XX", "ctl_cell_XX", "v",
+  "ft_row_XX",
   # same_switchers pre-pass scratch
   "still_switcher_XX", "N_g_control_check_XX",
   "diff_y_last_XX", "never_change_d_last_XX",
