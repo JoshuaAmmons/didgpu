@@ -47,9 +47,9 @@ ul.task-list li input[type="checkbox"] {
 <link href="../site_libs/quarto-html/quarto-syntax-highlighting-d64cad229ae5e9b03e304a785e905439.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-49d17bd0a586052b4476026df4a4b9fe.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-5f6b643bf31359676393e70c2d21cd23.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-49d17bd0a586052b4476026df4a4b9fe.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-47f0e91ac97aa71346b22896bf7e5fb1.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-5917569cdc2ff7b71ee3dfe88fba2903.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-47f0e91ac97aa71346b22896bf7e5fb1.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -556,6 +556,20 @@ CPU-only build  Status: OK</code></pre>
 <section id="bug-fixes" class="level2" data-number="17.2">
 <h2 data-number="17.2" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">17.2</span> Bug fixes</h2>
 <ul>
+<li><p><strong><code>ATE</code> did not match <code>DIDmultiplegtDYN</code>’s <code>Av_tot_eff</code> unless treatment was binary and absorbing.</strong> didgpu reported the switcher-weighted mean of the per-event-time effects,</p>
+<pre><code>ATE = sum_k (N_k * DID_k) / sum_k N_k</code></pre>
+<p>but the reference’s <code>Av_tot_eff</code> is an average total effect <strong>per unit of treatment</strong> and carries its own denominator (<code>U_Gg_den_XX</code>, built from <code>delta_D_i_XX</code> in <code>did_multiplegt_dyn_core.R</code>):</p>
+<pre><code>ATE = sum_k (N_k * DID_k) / sum_k (N_k * delta_k)</code></pre>
+<p>where <code>delta_k</code> is the average treatment change among the event-time-k switchers. When treatment is binary and absorbing every <code>delta_k</code> is exactly 1, the denominators coincide, and the two agree to the last bit – which is why the test suite and every worked example missed this.</p>
+<p>On one panel, holding the outcome fixed and changing only how the treatment is coded:</p>
+<pre><code>treatment coding             didgpu (old)   reference      ratio
+binary, absorbing            +0.35616730    +0.35616730    1.000
+binary, non-absorbing        +0.35616730    +0.47488973    0.750
+multivalued dose (1, 3, 5)   +0.35616730    +0.12020646    2.963
+non-monotone (0 -&gt; 2 -&gt; 1)   +0.35616730    +0.23744487    1.500</code></pre>
+<p>The old column is constant: the reported ATE did not respond to the magnitude of the treatment at all, only to its timing. All four now agree with <code>DIDmultiplegtDYN</code> to machine precision on every backend. Two consequences, both matching the reference: <code>normalized</code> does not affect the ATE (it rescales only the per-event-time effects), and multiplying the treatment variable by a constant <code>c</code> now divides the ATE by <code>c</code> instead of leaving it unchanged.</p>
+<p>The old formula was duplicated in <code>.backend_cpu()</code> and <code>.backend_cuda()</code> as well as the R core, and <code>backend = "auto"</code> resolves to CUDA wherever a GPU is present, so this was the default path on a CUDA machine. All three now call one <code>.ate_weighted()</code>. <code>didgpu()</code>’s help gained a <code>@return</code> section stating what <code>ATE</code> is; nothing in the docs had defined it before.</p>
+<p>Note for anyone resuming a run: checkpoint cells written by an earlier version store the old ATE, and nothing invalidates them on resume. If a checkpoint directory predates this release, delete it and re-run rather than resuming into it.</p></li>
 <li><p><strong>A user column named after one of the arguments broke several entry points.</strong> <code>[.data.table</code> evaluates its <code>i</code> and <code>j</code> expressions with the table’s COLUMNS in scope, and the affected functions filtered with <code>d[!is.na(get(outcome)) &amp; !is.na(get(group)) &amp; ...]</code>. A panel carrying a column literally called <code>outcome</code>, <code>group</code>, <code>time</code>, <code>treatment</code> or <code>weight</code> therefore shadowed the argument holding that column’s NAME, and <code>get()</code> received a vector instead of a string:</p>
 <pre><code>numeric column   -&gt; "invalid first argument"
 character column -&gt; "first argument has length &gt; 1"</code></pre>
