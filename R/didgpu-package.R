@@ -74,6 +74,9 @@ utils::globalVariables(c(
   "cnt_s_XX", "tot_s_XX", "mean_s_XX", "dofc_s_XX",
   "cnt_nss_XX", "tot_nss_XX", "mean_nss_XX", "dofc_nss_XX",
   "E_hat_XX", "DOF_XX", "kern_var_XX", "cl_tmp_XX",
+  "present_XX", "min_t_dnm_XX", "max_t_dnm_XX", "last_obs_XX",
+  "trunc_control_XX", "d_F_g_XX", "F_g_trunc_XX",
+  "ghost_XX", "chg_XX", "never_chg_XX", "ctl_cell_XX", "v",
   # same_switchers pre-pass scratch
   "still_switcher_XX", "N_g_control_check_XX",
   "diff_y_last_XX", "never_change_d_last_XX",

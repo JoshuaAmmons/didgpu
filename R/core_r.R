@@ -80,11 +80,55 @@
   d[, time_XX  := as.integer(factor(time_XX,  levels = sort(unique(time_XX))))]
   data.table::setkeyv(d, c("group_XX", "time_XX"))
 
+  # Un-aggregated data: collapse to one row per (group, time) cell.
+  # dCDH estimators work on group-by-period cells, and DIDmultiplegtDYN
+  # collapses any panel with a repeated (group, time) before doing
+  # anything else (did_multiplegt_main.R:119-137): every analysis variable
+  # becomes its weighted mean within the cell, and the cell's weight --
+  # its N_gt -- becomes the SUM of the weights, so a duplicated firm-year
+  # counts twice as one cell rather than as two rows. Rows with missing
+  # treatment carry no weight there.
+  #
+  # didgpu kept the duplicates as separate rows. That double-counted
+  # them and, because every lag below is taken by row, misaligned the
+  # long differences of each affected group. On the tax panels (9
+  # duplicated firm-years in ntr_tax) it moved estimates by up to 2e-4.
+  d[is.na(weight_XX_input), weight_XX_input := 0]
+  if (anyDuplicated(d, by = c("group_XX", "time_XX")) > 0L) {
+    d[is.na(treatment_XX), weight_XX_input := 0]
+    other <- setdiff(names(d), c("group_XX", "time_XX", "weight_XX_input"))
+    num <- other[vapply(d[, other, with = FALSE], is.numeric, logical(1))]
+    chr <- setdiff(other, num)
+    .wmean <- function(x, w) {
+      ok <- !is.na(x)
+      if (!any(ok)) return(NA_real_)
+      stats::weighted.mean(x[ok], w[ok])
+    }
+    agg_num <- d[, lapply(.SD, .wmean, w = weight_XX_input),
+                 by = c("group_XX", "time_XX"), .SDcols = num]
+    agg_w <- d[, list(weight_XX_input = sum(weight_XX_input, na.rm = TRUE)),
+               by = c("group_XX", "time_XX")]
+    d_new <- merge(agg_num, agg_w, by = c("group_XX", "time_XX"))
+    if (length(chr)) {
+      agg_chr <- d[, lapply(.SD, function(x) x[1L]),
+                   by = c("group_XX", "time_XX"), .SDcols = chr]
+      d_new <- merge(d_new, agg_chr, by = c("group_XX", "time_XX"))
+    }
+    d <- d_new
+    data.table::setkeyv(d, c("group_XX", "time_XX"))
+  }
+
   # Balance the panel: one row per (group, time) over the full
   # observed (group x time) grid.
   full_grid <- data.table::CJ(group_XX = sort(unique(d$group_XX)),
                               time_XX  = sort(unique(d$time_XX)))
+  # The reference applies its sample restrictions and missing-treatment
+  # rules BEFORE it balances the panel, so they only ever see rows the
+  # user supplied. Mark those; the balancing fill-in rows are not "rows"
+  # for any of the rules below.
+  d[, present_XX := TRUE]
   d <- merge(full_grid, d, by = c("group_XX", "time_XX"), all.x = TRUE)
+  d[is.na(present_XX), present_XX := FALSE]
   data.table::setkeyv(d, c("group_XX", "time_XX"))
 
   # Effective weight: 0 if outcome or treatment missing (excluded from
@@ -92,7 +136,8 @@
   d[, N_gt_XX := ifelse(!is.na(outcome_XX) & !is.na(treatment_XX),
                          weight_XX_input, 0)]
   d[is.na(N_gt_XX), N_gt_XX := 0]
-  d[, "weight_XX_input" := NULL]
+  # weight_XX_input is kept until the sample restrictions below have run;
+  # they blank rows, so N_gt is recomputed after them.
 
   # dont_drop_larger_lower: by default, drop rows from groups that have
   # had BOTH a strict increase AND a strict decrease in treatment
@@ -156,34 +201,178 @@
     },
     by = group_XX]
 
-  # First-switch period F_g_XX: the smallest t with treatment_XX != d_sq_XX
-  # (and both observed). For never-switchers, F_g_XX = T_max + 1.
-  T_max <- max(d$time_XX)
+  # ---- From F_g to S_g, in DIDmultiplegtDYN's order -------------------
+  # Reference: did_multiplegt_main.R:193-300. The ORDER is load-bearing:
+  # each restriction below changes what the next one sees, and G -- the
+  # group count every U-statistic is scaled by -- is fixed part-way
+  # through, so groups removed before that point do not count and groups
+  # removed after it still do.
+  #
+  # didgpu used to skip almost all of this: it had no flat-cohort drop,
+  # no no-control-cell drop, none of the missing-treatment rules, and a
+  # per-group rather than per-cohort T_g. None of that matters on a
+  # balanced panel with never-switchers in every cohort, which is why
+  # every parity test passed; on panels with gaps it moved estimates by
+  # up to 0.0011 (tric_tax) against DIDmultiplegtDYN, most visibly under
+  # only_never_switchers = TRUE, since rule (5) below turns ambiguous
+  # switchers into never-switchers.
+  #
+  # "Rows" below means rows the user supplied (present_XX). A row the
+  # reference DROPS is blanked here instead -- present_XX FALSE, outcome
+  # and treatment NA -- because the reference's balancing step then
+  # re-creates it as an empty row anyway.
+  cohort_c <- c(if (is.null(continuous)) "d_sq_XX",
+                if ("trends_np_XX" %in% names(d)) "trends_np_XX")
+
+  # (1) F_g: first period whose observed treatment differs from the
+  #     baseline (main.R:193-201). 0 for never-switchers until T_max is
+  #     known.
   d[, F_g_XX := {
-      ok <- !is.na(treatment_XX) & !is.na(d_sq_XX) & treatment_XX != d_sq_XX
-      if (any(ok)) as.integer(min(time_XX[ok])) else NA_integer_
-    },
-    by = group_XX]
-  d[is.na(F_g_XX), F_g_XX := as.integer(T_max + 1L)]
-
-  # T_g_XX: last usable time per group (= last time with N_gt > 0).
-  d[, T_g_XX := {
-      ok <- N_gt_XX > 0
-      if (any(ok)) max(time_XX[ok]) else NA_integer_
+      ok <- present_XX & !is.na(treatment_XX) & !is.na(d_sq_XX) &
+            treatment_XX != d_sq_XX
+      if (any(ok)) as.integer(min(time_XX[ok])) else 0L
     },
     by = group_XX]
 
-  # Switcher direction S_g_XX based on average post-switch treatment.
-  # 1 = switcher-in (avg post > baseline). 0 = switcher-out (avg post < baseline).
-  # NA = never-switcher or unobserved post-switch.
+  # (2) Drop every baseline cohort whose groups all share one switch date
+  #     -- there is no comparison to make within it (main.R:211-213). Rows
+  #     are removed outright: this happens BEFORE G is fixed.
+  keep_g <- d[present_XX == TRUE,
+              list(v = stats::sd(F_g_XX)),
+              by = cohort_c]
+  if (length(cohort_c)) {
+    keep_g <- keep_g[is.finite(v) & v > 0]
+    d <- d[keep_g[, cohort_c, with = FALSE], on = cohort_c, nomatch = NULL]
+  } else if (!(is.finite(keep_g$v[1]) && keep_g$v[1] > 0)) {
+    d <- d[0L]
+  }
+  # Removing whole groups leaves holes in group_XX. Everything downstream
+  # assumes groups are numbered 1..G with no holes -- the C++ and CUDA
+  # layouts size their per-group arrays and row offsets from that -- so
+  # renumber. Before this drop existed, prep never removed a group, so the
+  # ids were always consecutive and nothing had to.
+  d[, group_XX := as.integer(factor(group_XX))]
+  data.table::setkeyv(d, c("group_XX", "time_XX"))
+
+  # (3) Drop (period, cohort) cells in which every group has already
+  #     changed treatment: nothing there can serve as a control
+  #     (main.R:218-220). This happens AFTER G is fixed (main.R:215), so
+  #     the rows are blanked, not removed, and their groups still count.
+  d[, chg_XX := as.integer(present_XX & !is.na(treatment_XX) &
+                             !is.na(d_sq_XX) & treatment_XX != d_sq_XX)]
+  d[, never_chg_XX := 1L - cummax(chg_XX), by = group_XX]
+  d[present_XX == TRUE,
+    ctl_cell_XX := max(never_chg_XX),
+    by = c("time_XX", cohort_c)]
+  d[present_XX == TRUE & ctl_cell_XX == 0L,
+    `:=`(present_XX = FALSE, outcome_XX = NA_real_, treatment_XX = NA_real_)]
+  d[, c("chg_XX", "never_chg_XX", "ctl_cell_XX") := NULL]
+
+  # T_max and t_min over the rows that survive (main.R:221-222); the
+  # reference's balanced panel then spans only those periods.
+  T_max <- max(d$time_XX[d$present_XX])
+  t_min <- min(d$time_XX[d$present_XX])
+  d <- d[time_XX >= t_min & time_XX <= T_max]
+  T_max1 <- as.integer(T_max + 1L)
+  d[F_g_XX == 0L, F_g_XX := T_max1]
+  # A group with no surviving row does not reach the reference's balanced
+  # panel at all, though it still counts in G.
+  d[, ghost_XX := !any(present_XX), by = group_XX]
+
+  # (4) Outcomes before a group's first observed treatment are dropped
+  #     (main.R:231).
+  d[, `:=`(min_t_dnm_XX = {
+             x <- time_XX[!is.na(treatment_XX)]
+             if (length(x)) min(x) else NA_integer_ },
+           max_t_dnm_XX = {
+             x <- time_XX[!is.na(treatment_XX)]
+             if (length(x)) max(x) else NA_integer_ }),
+    by = group_XX]
+  d[!is.na(min_t_dnm_XX) & time_XX < min_t_dnm_XX, outcome_XX := NA_real_]
+
+  # (5) Gappy switch dates (main.R:229-245). If the last period observed
+  #     before a switch is not the period right before it, the switch
+  #     happened somewhere inside a gap and its date is unknown: the group
+  #     is demoted to a control, truncated after its last clean period.
+  #     Missing treatment inside a known span is imputed -- the status quo
+  #     before a switch, the switched-to dose after a cleanly-dated one.
+  d[, last_obs_XX := {
+        x <- time_XX[!is.na(treatment_XX) & time_XX < F_g_XX]
+        if (length(x)) max(x) else -Inf },
+    by = group_XX]
+  d[, trunc_control_XX := NA_real_]
+  d[present_XX & F_g_XX < T_max1 & is.na(treatment_XX) &
+      time_XX < last_obs_XX & time_XX > min_t_dnm_XX,
+    treatment_XX := d_sq_XX]
+  d[F_g_XX < T_max1 & time_XX > last_obs_XX & last_obs_XX < F_g_XX - 1L,
+    outcome_XX := NA_real_]
+  d[present_XX & F_g_XX < T_max1 & last_obs_XX < F_g_XX - 1L,
+    trunc_control_XX := last_obs_XX + 1]
+  d[F_g_XX < T_max1 & last_obs_XX < F_g_XX - 1L, F_g_XX := T_max1]
+  d[, d_F_g_XX := {
+        x <- treatment_XX[time_XX == F_g_XX]
+        if (length(x) && any(!is.na(x))) mean(x, na.rm = TRUE) else NA_real_ },
+    by = group_XX]
+  d[present_XX & F_g_XX < T_max1 & is.na(treatment_XX) &
+      time_XX > F_g_XX & last_obs_XX == F_g_XX - 1L,
+    treatment_XX := d_F_g_XX]
+  # (6) Never-switchers -- demoted ones included -- are controls only up
+  #     to their last observed treatment (main.R:243-245).
+  d[present_XX & F_g_XX == T_max1 & is.na(treatment_XX) &
+      time_XX > min_t_dnm_XX & time_XX < max_t_dnm_XX,
+    treatment_XX := d_sq_XX]
+  d[F_g_XX == T_max1 & !is.na(max_t_dnm_XX) & time_XX > max_t_dnm_XX,
+    outcome_XX := NA_real_]
+  d[present_XX & F_g_XX == T_max1, trunc_control_XX := max_t_dnm_XX + 1]
+
+  # The rules above blank outcomes and fill treatments, so N_gt is
+  # recomputed from them (main.R:271).
+  d[, N_gt_XX := ifelse(!is.na(outcome_XX) & !is.na(treatment_XX),
+                         weight_XX_input, 0)]
+  d[is.na(N_gt_XX), N_gt_XX := 0]
+
+  # (7) T_g: the last period in which the group's cohort still has a
+  #     usable control, one less than the cohort's latest truncated switch
+  #     date (main.R:272-275). Computed AFTER balancing in the reference,
+  #     and its balancing fill-in rows carry F_g but no trunc_control, so
+  #     for them F_g_trunc is just F_g -- a never-switcher with any gap
+  #     therefore pushes its cohort's T_g to T_max. Ghost groups are not
+  #     in that panel and do not count.
+  d[, F_g_trunc_XX := ifelse(ghost_XX, NA_real_,
+                        ifelse(is.na(trunc_control_XX), F_g_XX,
+                               pmin(F_g_XX, trunc_control_XX)))]
+  tg_by <- c("d_sq_XX", if ("trends_np_XX" %in% names(d)) "trends_np_XX")
+  if (!is.null(continuous)) tg_by <- setdiff(tg_by, "d_sq_XX")
+  if (length(tg_by)) {
+    d[, T_g_XX := suppressWarnings(as.integer(
+          max(F_g_trunc_XX, na.rm = TRUE) - 1L)), by = tg_by]
+  } else {
+    d[, T_g_XX := suppressWarnings(as.integer(
+          max(F_g_trunc_XX, na.rm = TRUE) - 1L))]
+  }
+
+  # (8) Switcher direction from the average observed treatment over the
+  #     post-switch window [F_g, T_g] (main.R:276-300).
+  #     1 = switcher-in, 0 = switcher-out, NA = never-switcher.
   d[, avg_post := {
-      ok <- time_XX >= F_g_XX & N_gt_XX > 0
+      ok <- time_XX >= F_g_XX & time_XX <= T_g_XX & !is.na(treatment_XX)
       if (any(ok)) mean(treatment_XX[ok]) else NA_real_
     },
     by = group_XX]
-  d[, S_g_XX := ifelse(is.na(avg_post) | !is.finite(F_g_XX), NA_integer_,
+  # A switcher whose post-switch treatment averages back to its baseline
+  # never switched on net and is dropped entirely -- as a control too
+  # (main.R:290-291). That is after G is fixed, so it is blanked, not
+  # removed.
+  d[!is.na(avg_post) & avg_post == d_sq_XX & F_g_XX != T_g_XX + 1L &
+      !is.na(F_g_XX) & !is.na(T_g_XX),
+    `:=`(outcome_XX = NA_real_, N_gt_XX = 0, avg_post = NA_real_,
+         F_g_XX = T_max1)]
+  d[, S_g_XX := ifelse(is.na(avg_post) | F_g_XX >= T_max1, NA_integer_,
                 ifelse(avg_post > d_sq_XX, 1L,
                 ifelse(avg_post < d_sq_XX, 0L, NA_integer_)))]
+  d[, c("weight_XX_input", "present_XX", "ghost_XX", "min_t_dnm_XX",
+        "max_t_dnm_XX", "last_obs_XX", "d_F_g_XX", "trunc_control_XX",
+        "F_g_trunc_XX") := NULL]
 
   # Continuous treatment. Reference: main.R:202-208 + 306-318. Three
   # things happen when `continuous` is set:

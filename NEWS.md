@@ -21,6 +21,72 @@
 
 ## Bug fixes
 
+- **dCDH disagreed with `DIDmultiplegtDYN` on panels with gaps or repeated
+  firm-years.** Every balanced-panel parity test passed, but on the annual
+  tax panels of a real application -- which drop loss-making years, leaving
+  holes in 40-50% of firms' histories -- the estimates moved, most under
+  `only_never_switchers = TRUE`:
+
+      tric_tax   Effect_2   didgpu -0.0156   reference -0.0145
+      ntr_tax    effects off by up to 5e-4, placebos by up to 7e-4
+
+  `.prep_panel()` was missing four things the reference does before it
+  balances the panel (`did_multiplegt_main.R:119-300`), and now does them
+  in the reference's order:
+
+  1. **Collapsing un-aggregated data.** A repeated (group, time) becomes
+     one cell: weighted-mean outcome and treatment, `N_gt` = the summed
+     weight. didgpu kept both rows, double-counting them and -- lags being
+     taken by row -- misaligning that group's differences. `ntr_tax` has 9
+     such firm-years.
+  2. **The missing-treatment rules.** When the last observation before a
+     switch is not the period right before it, the switch date is unknown;
+     the reference demotes the group to a control truncated at its last
+     clean period, which under `only_never_switchers` makes it a
+     never-switcher. Missing treatment inside a known span is imputed.
+  3. **The sample restrictions, with `G` fixed between them.** Cohorts with
+     no variation in switch dates are dropped before the group count is
+     fixed; (period, cohort) cells with no control, and switchers whose
+     post-switch treatment averages back to baseline, are dropped after it
+     and so still count in `G`.
+  4. **`T_g` per cohort, not per group** -- the last period in which the
+     group's baseline cohort still has a usable control.
+
+  `ntr_tax` and `tric_tax` now agree to ~1e-17 in effects, placebos, the
+  ATE and every SE, binary and multivalued, and the `N` and `Switchers`
+  columns agree too. The new cohort drop removes whole groups, which left
+  holes in the internal group ids; the C++ and CUDA layouts assume ids
+  1..G, and briefly returned 0.07 where the R backend returned 0.47 before
+  the ids were renumbered. `test-gappy-panels.R` pins all of it, including
+  backend agreement.
+
+- **The CUDA SVD used by `didgpu_fect(method = "ife" / "mc")` ignored GPU
+  allocation failures.** `fect_svd_softthreshold_dev()` checked none of its
+  `cudaMalloc` calls (a TODO said so), and the truncated SVD missed two. If
+  an allocation failed -- plausible when several GPU jobs share one card --
+  the next kernel wrote through a null pointer and R died with exit 139 and
+  no error message. Every allocation is now checked; a failure returns an
+  error code, and the R side, which already treated a failed GPU SVD as
+  "fall back to the CPU", does exactly that.
+
+  This was found while investigating a segfault (exit 139) in a robustness
+  suite run alongside other GPU jobs, but it does NOT explain that crash:
+  the crash came during `method = "fe"` steps, which never call this SVD
+  code. That crash is still unexplained -- it did not reproduce with the
+  same call and data on an idle machine.
+
+- **Callaway-Sant'Anna aggregates were NA whenever a single ATT(g,t) cell
+  could not be estimated.** On an unbalanced panel a cohort can have no
+  treated unit left in some period; that cell carries `att = NA` with
+  weight `n_treated = 0`, and in R `NA * 0` is still `NA`. On the trade
+  subsamples of a real application the overall ATT was NA on all twelve.
+  Unestimable cells are now dropped before weighting -- exactly what
+  `did::aggte(na.rm = TRUE)` does (`did` itself stops on them otherwise) --
+  with a message saying how many; event times, calendar periods and
+  cohorts left with no cell are dropped from the output, as `did` drops
+  them. The CS placebo test excludes them the same way.
+
+
 - **Standard errors were a bootstrap approximation of the reference's,
   not the reference's.** `DIDmultiplegtDYN` computes SEs analytically
   from the estimator's asymptotic linear representation. didgpu had no

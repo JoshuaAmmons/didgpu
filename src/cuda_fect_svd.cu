@@ -232,14 +232,16 @@ static int fect_svd_truncated_dev(
   if (st != CUSOLVER_STATUS_SUCCESS) goto fail;
 
   // Compute sqrt(D_r) on device via a small kernel (no host roundtrip).
-  cudaMalloc((void**)&d_sqrt_S, sizeof(double) * r);
+  e = cudaMalloc((void**)&d_sqrt_S, sizeof(double) * r);
+  if (e != cudaSuccess) goto fail;
   k_sqrt_first_r<<<(r + 31) / 32, 32>>>(d_S, d_sqrt_S, r);
   cudaDeviceSynchronize();
 
   // L = U[:, 1..r] * diag(sqrt(D_r)). U is m x m column-major; we want
   // the first r columns scaled by sqrt(D_r). Use a column-wise scaling
   // kernel, then transpose to row-major into d_L_out_rm.
-  cudaMalloc((void**)&d_L_cm, sizeof(double) * m * r);
+  e = cudaMalloc((void**)&d_L_cm, sizeof(double) * m * r);
+  if (e != cudaSuccess) goto fail;
   k_scale_cols<<<(m * r + 255) / 256, 256>>>(d_U, d_sqrt_S, d_L_cm, m, r);
   cudaDeviceSynchronize();
   // Transpose L_cm (m x r col-major) -> L_rm (m x r row-major).
@@ -303,61 +305,63 @@ static int fect_svd_softthreshold_dev(
     double lambda,
     double* d_Y_hat_rm,
     int* out_n_nonzero) {
-  // TODO(phase4): wire cudaError_t checks on every cudaMalloc/cudaMemcpy
-  // call below. Currently this function silently ignores allocation
-  // failures — fine for the scaffold, not OK for production.
+  // Every allocation is checked. This used to ignore allocation failures
+  // (a TODO said so): under GPU memory pressure -- e.g. several estimation
+  // jobs sharing one GPU -- cudaMalloc could fail, leave a null pointer,
+  // and the next kernel or cuSOLVER call wrote through it, killing R with
+  // exit 139 and no R-level error. Now a failure returns a negative code,
+  // which the R wrapper turns into an ordinary error.
   cusolverStatus_t st;
+  cudaError_t e;
   cublasHandle_t hb = nullptr;
   cusolverDnHandle_t hs = nullptr;
-  cublasCreate(&hb);
-  st = cusolverDnCreate(&hs);
-  if (st != CUSOLVER_STATUS_SUCCESS) { cublasDestroy(hb); return -1; }
+  double *d_Y_cm = nullptr, *d_U = nullptr, *d_V = nullptr, *d_S = nullptr;
+  double *d_work = nullptr, *d_U_scaled = nullptr, *d_Y_hat_cm = nullptr;
+  int* d_info = nullptr;
+  gesvdjInfo_t params = nullptr;
+  int rc = 0;
+  const int total = m * n;
+  const int k = (m < n) ? m : n;
+  int lwork = 0;
+  const double one = 1.0, zero = 0.0;
+
+  if (cublasCreate(&hb) != CUBLAS_STATUS_SUCCESS) { hb = nullptr; rc = -1; goto done; }
+  if (cusolverDnCreate(&hs) != CUSOLVER_STATUS_SUCCESS) { hs = nullptr; rc = -1; goto done; }
 
   // Transpose input to column-major.
-  double* d_Y_cm = nullptr;
-  cudaMalloc((void**)&d_Y_cm, sizeof(double) * m * n);
-  const int total = m * n;
+  e = cudaMalloc((void**)&d_Y_cm, sizeof(double) * m * n);
+  if (e != cudaSuccess) { rc = -4; goto done; }
   k_transpose_rm_to_cm<<<(total + 255) / 256, 256>>>(d_Y_complete_rm, d_Y_cm, m, n);
   cudaDeviceSynchronize();
 
   // Full SVD (econ = 1 returns U as m x min(m,n), V as n x min(m,n)).
-  const int k = (m < n) ? m : n;
-  double *d_U = nullptr, *d_V = nullptr, *d_S = nullptr;
-  cudaMalloc((void**)&d_U, sizeof(double) * m * k);
-  cudaMalloc((void**)&d_V, sizeof(double) * n * k);
-  cudaMalloc((void**)&d_S, sizeof(double) * k);
+  e = cudaMalloc((void**)&d_U, sizeof(double) * m * k);
+  if (e != cudaSuccess) { rc = -4; goto done; }
+  e = cudaMalloc((void**)&d_V, sizeof(double) * n * k);
+  if (e != cudaSuccess) { rc = -4; goto done; }
+  e = cudaMalloc((void**)&d_S, sizeof(double) * k);
+  if (e != cudaSuccess) { rc = -4; goto done; }
 
-  gesvdjInfo_t params = nullptr;
-  cusolverDnCreateGesvdjInfo(&params);
+  if (cusolverDnCreateGesvdjInfo(&params) != CUSOLVER_STATUS_SUCCESS) {
+    params = nullptr; rc = -2; goto done;
+  }
   cusolverDnXgesvdjSetTolerance(params, 1e-7);
   cusolverDnXgesvdjSetMaxSweeps(params, 100);
 
-  int lwork = 0;
   st = cusolverDnDgesvdj_bufferSize(
       hs, CUSOLVER_EIG_MODE_VECTOR, /*econ=*/1,
       m, n, d_Y_cm, m, d_S, d_U, m, d_V, n, &lwork, params);
-  if (st != CUSOLVER_STATUS_SUCCESS) {
-    cudaFree(d_U); cudaFree(d_V); cudaFree(d_S); cudaFree(d_Y_cm);
-    cusolverDnDestroyGesvdjInfo(params);
-    cusolverDnDestroy(hs); cublasDestroy(hb);
-    return -2;
-  }
-  double* d_work = nullptr;
-  cudaMalloc((void**)&d_work, sizeof(double) * lwork);
-  int* d_info = nullptr;
-  cudaMalloc((void**)&d_info, sizeof(int));
+  if (st != CUSOLVER_STATUS_SUCCESS) { rc = -2; goto done; }
+  e = cudaMalloc((void**)&d_work, sizeof(double) * lwork);
+  if (e != cudaSuccess) { rc = -4; goto done; }
+  e = cudaMalloc((void**)&d_info, sizeof(int));
+  if (e != cudaSuccess) { rc = -4; goto done; }
 
   st = cusolverDnDgesvdj(
       hs, CUSOLVER_EIG_MODE_VECTOR, /*econ=*/1,
       m, n, d_Y_cm, m, d_S, d_U, m, d_V, n,
       d_work, lwork, d_info, params);
-  cudaFree(d_work); cudaFree(d_info);
-  if (st != CUSOLVER_STATUS_SUCCESS) {
-    cudaFree(d_U); cudaFree(d_V); cudaFree(d_S); cudaFree(d_Y_cm);
-    cusolverDnDestroyGesvdjInfo(params);
-    cusolverDnDestroy(hs); cublasDestroy(hb);
-    return -3;
-  }
+  if (st != CUSOLVER_STATUS_SUCCESS) { rc = -3; goto done; }
 
   // Soft-threshold the singular values in place: D_st = max(D - lambda, 0).
   k_soft_threshold<<<(k + 255) / 256, 256>>>(d_S, k, lambda);
@@ -366,37 +370,48 @@ static int fect_svd_softthreshold_dev(
   // Count the non-zero singular values on host (one-time small cost).
   if (out_n_nonzero) {
     double* h_S = new double[k];
-    cudaMemcpy(h_S, d_S, sizeof(double) * k, cudaMemcpyDeviceToHost);
+    e = cudaMemcpy(h_S, d_S, sizeof(double) * k, cudaMemcpyDeviceToHost);
+    if (e != cudaSuccess) { delete[] h_S; rc = -5; goto done; }
     int nz = 0;
     for (int i = 0; i < k; ++i) if (h_S[i] > 0) ++nz;
     *out_n_nonzero = nz;
     delete[] h_S;
   }
 
-  // Y_hat = U * diag(D_st) * V^T. First scale columns of U by D_st:
-  double* d_U_scaled = nullptr;
-  cudaMalloc((void**)&d_U_scaled, sizeof(double) * m * k);
+  // Y_hat = U * diag(D_st) * V^T. First scale columns of U by D_st, then
+  // Y_hat_cm = U_scaled %*% V^T via cuBLAS Dgemm (U_scaled m x k, V n x k).
+  e = cudaMalloc((void**)&d_U_scaled, sizeof(double) * m * k);
+  if (e != cudaSuccess) { rc = -4; goto done; }
   k_scale_cols<<<(m * k + 255) / 256, 256>>>(d_U, d_S, d_U_scaled, m, k);
   cudaDeviceSynchronize();
-  // Then Y_hat_cm = U_scaled %*% V^T via cuBLAS Dgemm.
-  // U_scaled is m x k col-major, V is n x k col-major (we want V^T = k x n).
-  double* d_Y_hat_cm = nullptr;
-  cudaMalloc((void**)&d_Y_hat_cm, sizeof(double) * m * n);
-  const double one = 1.0, zero = 0.0;
-  cublasDgemm(hb, CUBLAS_OP_N, CUBLAS_OP_T,
-              m, n, k,
-              &one, d_U_scaled, m,
-              d_V, n,
-              &zero, d_Y_hat_cm, m);
+  e = cudaMalloc((void**)&d_Y_hat_cm, sizeof(double) * m * n);
+  if (e != cudaSuccess) { rc = -4; goto done; }
+  if (cublasDgemm(hb, CUBLAS_OP_N, CUBLAS_OP_T,
+                  m, n, k,
+                  &one, d_U_scaled, m,
+                  d_V, n,
+                  &zero, d_Y_hat_cm, m) != CUBLAS_STATUS_SUCCESS) {
+    rc = -6; goto done;
+  }
 
   // Transpose Y_hat_cm (m x n col-major) to row-major output.
   k_transpose_cm_to_rm<<<(m * n + 255) / 256, 256>>>(d_Y_hat_cm, d_Y_hat_rm, m, n);
+  cudaDeviceSynchronize();
+  if (cudaGetLastError() != cudaSuccess) rc = -7;
 
-  cudaFree(d_U_scaled); cudaFree(d_Y_hat_cm);
-  cudaFree(d_U); cudaFree(d_V); cudaFree(d_S); cudaFree(d_Y_cm);
-  cusolverDnDestroyGesvdjInfo(params);
-  cusolverDnDestroy(hs); cublasDestroy(hb);
-  return 0;
+done:
+  if (d_Y_hat_cm) cudaFree(d_Y_hat_cm);
+  if (d_U_scaled) cudaFree(d_U_scaled);
+  if (d_info)     cudaFree(d_info);
+  if (d_work)     cudaFree(d_work);
+  if (d_S)        cudaFree(d_S);
+  if (d_V)        cudaFree(d_V);
+  if (d_U)        cudaFree(d_U);
+  if (d_Y_cm)     cudaFree(d_Y_cm);
+  if (params)     cusolverDnDestroyGesvdjInfo(params);
+  if (hs)         cusolverDnDestroy(hs);
+  if (hb)         cublasDestroy(hb);
+  return rc;
 }
 
 

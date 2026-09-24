@@ -527,6 +527,25 @@
                       n_cells = integer(0)))
   }
   w <- att_gt$n_treated
+  # Cells that could not be estimated -- typically a cohort with no
+  # treated unit left in period t on an unbalanced panel -- carry
+  # att = NA with weight n_treated = 0. In R, NA * 0 is still NA, so a
+  # single such cell turned every aggregate containing it into NA: on the
+  # trade subsamples of a real application the overall ATT was NA on all
+  # twelve. did::aggte either stops on NA cells or, with na.rm = TRUE,
+  # removes them before weighting (compute.aggte, lines 52-76); this is
+  # the latter. `ok` masks every aggregation below, event times and
+  # calendar periods left with no cell are dropped, and a cohort with no
+  # estimable post-treatment cell is dropped from the group aggregation,
+  # all as did does.
+  ok <- !is.na(att_gt$att)
+  n_na <- sum(!ok)
+  if (n_na > 0L && !isFALSE(args$verbose)) {
+    message(sprintf("[didgpu] %d of %d ATT(g,t) cells could not be estimated ",
+                    n_na, nrow(att_gt)),
+            "(no treated or no control units observed); they are dropped ",
+            "from the aggregation, as did::aggte(na.rm = TRUE) does.")
+  }
   IF_list <- attr(att_gt, "IF_per_cell")
   units   <- attr(att_gt, "units")
   F_g_per_unit <- attr(att_gt, "F_g_per_unit")
@@ -542,19 +561,27 @@
     out
   }
 
-  switch(aggregation,
+  .drop_empty <- function(out) {
+    if (is.data.frame(out) && "n_cells" %in% names(out) && nrow(out) > 1L) {
+      out <- out[out$n_cells > 0L, , drop = FALSE]
+      rownames(out) <- NULL
+    }
+    out
+  }
+
+  out <- switch(aggregation,
     "event" = {
       events <- sort(unique(att_gt$event_time))
       finish(data.frame(
         event_time = events,
         estimate = vapply(events, function(e) {
-          cells <- att_gt$event_time == e
+          cells <- att_gt$event_time == e & ok
           if (!any(cells)) return(NA_real_)
           sum(att_gt$att[cells] * w[cells]) / sum(w[cells])
         }, numeric(1)),
-        se = vapply(events, function(e) se_of(att_gt$event_time == e),
+        se = vapply(events, function(e) se_of(att_gt$event_time == e & ok),
                      numeric(1)),
-        n_cells = vapply(events, function(e) sum(att_gt$event_time == e),
+        n_cells = vapply(events, function(e) sum(att_gt$event_time == e & ok),
                           integer(1)),
         stringsAsFactors = FALSE
       ))
@@ -564,13 +591,13 @@
       finish(data.frame(
         g = gs,
         estimate = vapply(gs, function(g) {
-          cells <- att_gt$g == g & att_gt$t >= g
+          cells <- att_gt$g == g & att_gt$t >= g & ok
           if (!any(cells)) return(NA_real_)
           sum(att_gt$att[cells] * w[cells]) / sum(w[cells])
         }, numeric(1)),
-        se = vapply(gs, function(g) se_of(att_gt$g == g & att_gt$t >= g),
+        se = vapply(gs, function(g) se_of(att_gt$g == g & att_gt$t >= g & ok),
                      numeric(1)),
-        n_cells = vapply(gs, function(g) sum(att_gt$g == g & att_gt$t >= g),
+        n_cells = vapply(gs, function(g) sum(att_gt$g == g & att_gt$t >= g & ok),
                           integer(1)),
         stringsAsFactors = FALSE
       ))
@@ -580,26 +607,28 @@
       finish(data.frame(
         t = ts,
         estimate = vapply(ts, function(t) {
-          cells <- att_gt$t == t & att_gt$g <= t
+          cells <- att_gt$t == t & att_gt$g <= t & ok
           if (!any(cells)) return(NA_real_)
           sum(att_gt$att[cells] * w[cells]) / sum(w[cells])
         }, numeric(1)),
-        se = vapply(ts, function(t) se_of(att_gt$t == t & att_gt$g <= t),
+        se = vapply(ts, function(t) se_of(att_gt$t == t & att_gt$g <= t & ok),
                      numeric(1)),
-        n_cells = vapply(ts, function(t) sum(att_gt$t == t & att_gt$g <= t),
+        n_cells = vapply(ts, function(t) sum(att_gt$t == t & att_gt$g <= t & ok),
                           integer(1)),
         stringsAsFactors = FALSE
       ))
     },
     "overall" = {
-      post <- att_gt$t >= att_gt$g
-      est <- sum(att_gt$att[post] * w[post]) / sum(w[post])
+      post <- att_gt$t >= att_gt$g & ok
+      est <- if (any(post)) sum(att_gt$att[post] * w[post]) / sum(w[post])
+             else NA_real_
       se  <- se_of(post)
       data.frame(scheme = "overall", estimate = est, se = se,
                   ci_low = est - z * se, ci_high = est + z * se,
                   n_cells = sum(post), stringsAsFactors = FALSE)
     }
   )
+  .drop_empty(out)
 }
 
 
@@ -610,7 +639,8 @@
 #' @keywords internal
 #' @noRd
 .cs_placebo_test <- function(att_gt, args) {
-  pre <- att_gt[att_gt$event_time < 0L, , drop = FALSE]
+  # Unestimable (NA) cells are excluded here too, as in .cs_aggregate.
+  pre <- att_gt[att_gt$event_time < 0L & !is.na(att_gt$att), , drop = FALSE]
   if (nrow(pre) == 0L) {
     return(list(per_event = data.frame(), joint_pval = NA_real_,
                  message = "no pre-treatment cells available"))
