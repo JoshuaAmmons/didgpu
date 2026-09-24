@@ -19,7 +19,10 @@ didgpu_cs(
   ci_level = 95,
   seed = 1L,
   backend = "auto",
-  verbose = TRUE
+  verbose = TRUE,
+  base_period = c("varying", "universal"),
+  allow_unbalanced_panel = FALSE,
+  first_treat = NULL
 )
 }
 \arguments{
@@ -54,6 +57,27 @@ influence functions; much faster for large B). Default \code{"cluster"}.}
 \item{backend}{One of \code{"auto"}, \code{"r"}, \code{"cuda"}.}
 
 \item{verbose}{Logical. Print progress per (g, t).}
+
+\item{base_period}{\code{"varying"} (the default, as in \code{did::att_gt}) or
+\code{"universal"}. Under \code{"varying"} a pre-treatment cell compares period
+\code{t} with the period before it; under \code{"universal"} every cell is
+compared with the last period before \code{g}, and that period's own cell
+is reported as exactly 0. Post-treatment cells, and so the overall
+ATT, are identical under both.}
+
+\item{allow_unbalanced_panel}{Logical, as in \code{did::att_gt}. On an
+unbalanced panel, \code{FALSE} (the default) first drops every unit not
+observed in all periods; \code{TRUE} keeps them and uses the
+repeated-cross-section estimators of Sant'Anna and Zhao (2020), as
+\code{did} does. Ignored on a balanced panel.}
+
+\item{first_treat}{Optional name of a column holding the period each
+unit is first treated, 0 if never -- \code{did::att_gt}'s \code{gname}. If
+omitted, the cohort is inferred as the first period in which the unit
+is observed with \code{treatment == 1}. That is identical on a balanced
+panel, but under \code{allow_unbalanced_panel = TRUE} a unit whose adoption
+period is unobserved would land in a later cohort, so pass it there
+(a warning says so when it matters).}
 }
 \value{
 An object of class \code{didgpu_cs_result}:

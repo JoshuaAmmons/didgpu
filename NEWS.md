@@ -19,6 +19,49 @@
   in a CPU-only build. That the NOTE is CUDA-only is now demonstrable
   rather than asserted.
 
+## New arguments (Callaway-Sant'Anna)
+
+- **`didgpu_cs(base_period = c("varying", "universal"))`**, defaulting to
+  `"varying"` as `did::att_gt` does. didgpu previously always used the
+  universal base period, so under defaults every pre-treatment cell of the
+  event study differed from `did`. Post-treatment cells and the overall
+  ATT are the same under both. **Behavior change:** to keep the previous
+  output, pass `base_period = "universal"`.
+- **`didgpu_cs(allow_unbalanced_panel = FALSE)`**, as in `did`. On an
+  unbalanced panel didgpu used, cell by cell, whatever units happened to
+  be observed in both periods -- which matched neither of `did`'s modes
+  (on a real non-trade sales-growth panel, -0.060 against `did`'s
+  -0.096). Now `FALSE` (the default) balances the panel first, dropping
+  units not observed in every period, and `TRUE` uses the
+  repeated-cross-section estimators of Sant'Anna and Zhao (2020): a port
+  of `DRDID::reg_did_rc`, `std_ipw_did_rc` and `drdid_rc`, matching them
+  to 2e-15 in the ATT and 3e-14 in the influence function. **Behavior
+  change** on unbalanced panels.
+- **`didgpu_cs(first_treat = NULL)`**: the column holding each unit's
+  first-treatment period, `did`'s `gname`. Cohorts were always inferred
+  from the treatment column, which puts a unit whose adoption-period row
+  is missing into a later cohort; with `allow_unbalanced_panel = TRUE`
+  that is common, and didgpu now warns when it happens without
+  `first_treat`.
+
+Against `did` 2.5.1, `didgpu_cs()` now matches every ATT(g,t), the
+overall, event-study, group and calendar aggregates and all their SEs to
+<= 6e-16, for OR / IPW / DR, both base periods, both control groups, and
+balanced, balanced-by-dropping and repeated-cross-section panels. Also
+fixed along the way: with `control_group = "notyet"` and a universal base
+period, controls are now chosen at the later of the two periods compared,
+as in `did`; and an aggregated SE that is numerically zero (the universal
+base period's own event time) is reported as `NA`, as `aggte` does.
+
+`did` 2.3.0 has two bugs, both fixed in 2.5.0, that make it disagree with
+this: an integer `gname` silently removes the never-treated group
+(bcallaway11/did#264), and under `allow_unbalanced_panel = TRUE` its
+influence functions land on the wrong units, so every SE that combines
+cells changes when the units are merely renumbered (overall SE 0.071487
+vs 0.072007 on one test panel; `did` 2.5.1 and didgpu both give 0.071407
+either way). `test-cs-unbalanced.R` compares those combined SEs only
+against `did` >= 2.5.0.
+
 ## Bug fixes
 
 - **dCDH disagreed with `DIDmultiplegtDYN` on panels with gaps or repeated

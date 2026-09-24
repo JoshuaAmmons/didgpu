@@ -85,6 +85,24 @@
 #' @param seed Integer.
 #' @param backend One of `"auto"`, `"r"`, `"cuda"`.
 #' @param verbose Logical. Print progress per (g, t).
+#' @param base_period `"varying"` (the default, as in `did::att_gt`) or
+#'   `"universal"`. Under `"varying"` a pre-treatment cell compares period
+#'   `t` with the period before it; under `"universal"` every cell is
+#'   compared with the last period before `g`, and that period's own cell
+#'   is reported as exactly 0. Post-treatment cells, and so the overall
+#'   ATT, are identical under both.
+#' @param allow_unbalanced_panel Logical, as in `did::att_gt`. On an
+#'   unbalanced panel, `FALSE` (the default) first drops every unit not
+#'   observed in all periods; `TRUE` keeps them and uses the
+#'   repeated-cross-section estimators of Sant'Anna and Zhao (2020), as
+#'   `did` does. Ignored on a balanced panel.
+#' @param first_treat Optional name of a column holding the period each
+#'   unit is first treated, 0 if never -- `did::att_gt`'s `gname`. If
+#'   omitted, the cohort is inferred as the first period in which the unit
+#'   is observed with `treatment == 1`. That is identical on a balanced
+#'   panel, but under `allow_unbalanced_panel = TRUE` a unit whose adoption
+#'   period is unobserved would land in a later cohort, so pass it there
+#'   (a warning says so when it matters).
 #' @return An object of class `didgpu_cs_result`:
 #'   \itemize{
 #'     \item `att_gt`: long-form data.frame of ATT(g, t) estimates.
@@ -117,8 +135,12 @@ didgpu_cs <- function(
     ci_level      = 95,
     seed          = 1L,
     backend       = "auto",
-    verbose       = TRUE) {
+    verbose       = TRUE,
+    base_period   = c("varying", "universal"),
+    allow_unbalanced_panel = FALSE,
+    first_treat   = NULL) {
   bootstrap_kind <- match.arg(bootstrap_kind)
+  base_period    <- match.arg(base_period)
 
   control_group <- match.arg(control_group)
   est_method    <- match.arg(est_method)
@@ -132,6 +154,13 @@ didgpu_cs <- function(
       stop("`", nm, "` must be a single non-empty character column name.")
     }
     if (!v %in% names(df)) stop("column not in df: ", v)
+  }
+  if (!is.null(first_treat)) {
+    if (!is.character(first_treat) || length(first_treat) != 1L ||
+        !first_treat %in% names(df)) {
+      stop("`first_treat` must name a column of df (did's `gname`: the ",
+           "period a unit is first treated, 0 if never).")
+    }
   }
   if (!is.null(covariates)) {
     miss <- setdiff(covariates, names(df))
@@ -153,7 +182,11 @@ didgpu_cs <- function(
     bootstrap_reps = bootstrap_reps,
     bootstrap_kind = bootstrap_kind,
     ci_level = ci_level,
-    seed = seed, backend = resolved_backend
+    seed = seed, backend = resolved_backend,
+    base_period = base_period,
+    allow_unbalanced_panel = isTRUE(allow_unbalanced_panel),
+    first_treat = first_treat,
+    verbose = verbose
   )
 
   # All three methods (OR / IPW / DR) and both control groups

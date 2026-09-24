@@ -25,17 +25,99 @@
   has_cov <- !is.null(cov_cols) && length(cov_cols) > 0L
 
   # Per-unit first-treated period (Inf for never-treated).
-  d[, F_g_XX := {
-      if (any(D_XX == 1L, na.rm = TRUE))
-        as.numeric(min(T_XX[D_XX == 1L], na.rm = TRUE))
-      else Inf
-    }, by = G_XX]
+  #
+  # With `first_treat` (did's `gname`: the period a unit is first treated,
+  # 0 or NA if never) the cohort is read from the data, exactly as did
+  # does. Without it the cohort is inferred as the first period in which
+  # the unit is OBSERVED with treatment == 1 -- which is the same thing on
+  # a balanced panel, but not when the adoption-year row itself is
+  # missing: the unit then lands in a later cohort. That is harmless when
+  # units with gaps are dropped (the default, balancing, mode) and wrong
+  # under allow_unbalanced_panel = TRUE, where it is warned about below.
+  ft_col <- args$first_treat
+  if (!is.null(ft_col)) {
+    ft_raw <- as.numeric(df[[ft_col]])
+    ft_by_row <- ft_raw[match(paste(d$G_XX, d$T_XX),
+                              paste(df[[args$group]], df[[args$time]]))]
+    d[, ft_row_XX := ft_by_row]
+    d[, F_g_XX := {
+        v <- ft_row_XX[!is.na(ft_row_XX)]
+        if (!length(v) || v[1L] == 0) Inf else v[1L]
+      }, by = G_XX]
+    d[, ft_row_XX := NULL]
+  } else {
+    d[, F_g_XX := {
+        if (any(D_XX == 1L, na.rm = TRUE))
+          as.numeric(min(T_XX[D_XX == 1L], na.rm = TRUE))
+        else Inf
+      }, by = G_XX]
+  }
 
-  T_min <- min(d$T_XX, na.rm = TRUE)
-  T_max <- max(d$T_XX, na.rm = TRUE)
+  # ---- did's preprocessing (pre_process_did) -------------------------
+  # Rows with a missing outcome, treatment or covariate are dropped first.
+  keep_cols <- c("Y_XX", "T_XX", "D_XX", if (has_cov) cov_cols)
+  d <- d[stats::complete.cases(d[, keep_cols, with = FALSE])]
+  T_min <- min(d$T_XX)
+  # Units already treated in the first period have no pre-period: did
+  # drops them from the data entirely, so they are neither cohorts nor
+  # controls, and do not count in n.
+  first_treated <- unique(d$G_XX[is.finite(d$F_g_XX) & d$F_g_XX <= T_min])
+  if (length(first_treated)) {
+    if (isTRUE(verbose)) {
+      message(sprintf("[didgpu] Dropped %d units that were already treated in the first period.",
+                      length(first_treated)))
+    }
+    d <- d[!G_XX %in% first_treated]
+  }
+  tlist <- sort(unique(d$T_XX))
+  nT <- length(tlist)
+  T_min <- tlist[1L]; T_max <- tlist[nT]
+  # A cohort first treated after the last observed period is never
+  # treated within the sample (did: asif_never_treated).
+  d[is.finite(F_g_XX) & F_g_XX > T_max, F_g_XX := Inf]
+  # Balanced? Every unit observed in every period.
+  per_unit <- d[, list(n = .N), by = G_XX]
+  balanced <- all(per_unit$n == nT)
+  allow_unb <- isTRUE(args$allow_unbalanced_panel)
+  rc_mode <- !balanced && allow_unb
+  if (rc_mode && is.null(ft_col)) {
+    # A unit whose adoption period is unobserved gets a later inferred
+    # cohort than its true one. Detect exactly that case.
+    # Ambiguous exactly when the period just before the first observed
+    # treated period is itself unobserved for that unit.
+    late <- d[is.finite(F_g_XX), list(miss = {
+                 k <- match(F_g_XX[1L], tlist)
+                 !is.na(k) && k > 1L && !(tlist[k - 1L] %in% T_XX) }),
+              by = G_XX]
+    if (any(late$miss, na.rm = TRUE)) {
+      warning("allow_unbalanced_panel = TRUE with cohorts inferred from `treatment`: ",
+              sum(late$miss, na.rm = TRUE), " treated units have a gap right before ",
+              "their first observed treated period, so their true cohort may be earlier. ",
+              "did reads the cohort from its gname column; pass first_treat = <that column> ",
+              "to match it.", call. = FALSE)
+    }
+  }
+  if (!balanced && !allow_unb) {
+    # did's default: convert to a balanced panel by dropping every unit
+    # not observed in all periods (BMisc::makeBalancedPanel). didgpu used
+    # to keep, cell by cell, whatever units happened to be observed in
+    # both periods -- which matched neither of did's modes.
+    keep_u <- per_unit$G_XX[per_unit$n == nT]
+    n_drop <- nrow(per_unit) - length(keep_u)
+    if (isTRUE(verbose)) {
+      message(sprintf("[didgpu] Dropped %d units while converting to a balanced panel ", n_drop),
+              "(as did::att_gt does by default); pass allow_unbalanced_panel = TRUE ",
+              "for did's repeated-cross-section estimators instead.")
+    }
+    d <- d[G_XX %in% keep_u]
+    if (nrow(d) == 0L) stop("All units dropped converting to a balanced panel.")
+  }
+
   units <- sort(unique(d$G_XX))
+  n_units <- length(units)
   F_g_per_unit <- d[!duplicated(G_XX), F_g_XX]
   names(F_g_per_unit) <- as.character(d[!duplicated(G_XX), G_XX])
+  F_g_per_unit <- F_g_per_unit[as.character(units)]
 
   cohorts <- sort(unique(d$F_g_XX[is.finite(d$F_g_XX) & d$F_g_XX > T_min]))
   if (length(cohorts) == 0L) {
@@ -46,12 +128,12 @@
       stop("control_group = 'never' requires at least one never-treated unit.")
     }
   }
+  # Cohort sizes in UNITS: did weights every ATT(g,t) by its cohort's
+  # share of units (pg in compute.aggte), not by the cell's row count.
+  cohort_size <- table(F_g_per_unit[is.finite(F_g_per_unit)])
 
-  # Pre-compute per-(unit, time) covariate matrix (constant across t
-  # for time-invariant covariates; we take the value at T_min).
-  X_per_unit <- NULL
+  X_mat <- NULL
   if (has_cov) {
-    # Check time-invariance per unit; take first value.
     X_per_unit <- d[!duplicated(G_XX),
                      c(list(G_XX = G_XX), as.list(.SD)),
                      .SDcols = cov_cols]
@@ -60,54 +142,81 @@
   }
 
   # ------------------------------------------------------------------
-  # Pass 1: enumerate every (g, t) cell and gather its inputs WITHOUT
-  # solving. The cell list is then handed to one of two solver paths:
-  #   (a) batched CUDA — single call across all cells (Phase 1 hook,
-  #       Phase 2 implementation),
-  #   (b) per-cell R   — current production path; also the fallback
-  #       when CUDA returns NULL.
-  # The cell metadata (g, t, units, n_treated, n_control) is the same
-  # either way, so the long-form data frame assembled below is solver-
-  # agnostic.
+  # Pass 1: enumerate the cells exactly as did::att_gt does
+  # (compute.att_gt), for both base periods:
+  #   varying   (did's default): a pre-treatment cell compares period t
+  #             with the period before it; cells run over every period
+  #             but the first.
+  #   universal: every cell compares with the last period before g, and
+  #             the cell AT that period is reported as exactly 0.
+  # Post-treatment cells use the last period before g either way. For the
+  # not-yet-treated control group the threshold is the LATER of the two
+  # periods compared -- under a universal base that is the base period
+  # for an early pre-treatment cell, which didgpu previously got wrong.
   # ------------------------------------------------------------------
+  bp <- args$base_period %||% "varying"
+  tfac <- if (identical(bp, "universal")) 0L else 1L
   cell_meta <- list()
   cell_data <- list()
   for (g in cohorts) {
-    pre_t <- g - 1L
-    if (pre_t < T_min) next
-    Y_pre <- d[T_XX == pre_t, list(G_XX, Y_pre = Y_XX)]
-    data.table::setkey(Y_pre, G_XX)
-    for (t in T_min:T_max) {
-      if (t == pre_t) next   # pre-period reference; mechanically 0
-      Y_t <- d[T_XX == t, list(G_XX, Y_t = Y_XX)]
-      data.table::setkey(Y_t, G_XX)
-      merged <- merge(Y_pre, Y_t, by = "G_XX")
-      merged[, delta_XX := Y_t - Y_pre]
-      merged <- merged[!is.na(delta_XX)]
-
-      treated_units <- unique(d$G_XX[d$F_g_XX == g])
-      control_units <- .cs_control_units(d, units, F_g_per_unit,
-                                            g, t, args$control_group)
-      keep <- merged$G_XX %in% c(treated_units, control_units)
-      merged <- merged[keep]
-      if (nrow(merged) == 0L) next
-
-      D_mask <- merged$G_XX %in% treated_units
-      delta_v <- merged$delta_XX
-      if (has_cov) {
-        Xm <- X_mat[as.character(merged$G_XX), , drop = FALSE]
-      } else {
-        Xm <- NULL
+    pre_g <- utils::tail(which(tlist < g), 1L)
+    if (!length(pre_g)) next
+    treated_units <- units[is.finite(F_g_per_unit) & F_g_per_unit == g]
+    for (ti in seq_len(nT - tfac)) {
+      cur <- tlist[ti + tfac]
+      pret <- if (tfac == 0L) pre_g else ti
+      if (g <= cur) pret <- pre_g
+      base <- tlist[pret]
+      if (tfac == 0L && base == cur) {
+        cell_meta[[length(cell_meta) + 1L]] <- list(
+          g = g, t = cur, n_total = length(treated_units),
+          n_treated = length(treated_units), n_control = NA_integer_,
+          n_cohort = as.integer(cohort_size[as.character(g)]),
+          units = treated_units, zero = TRUE)
+        cell_data[[length(cell_data) + 1L]] <- list(zero = TRUE,
+          units = treated_units)
+        next
       }
-      n_total <- nrow(merged)
-
-      cell_meta[[length(cell_meta) + 1L]] <- list(
-        g = g, t = t, n_total = n_total,
-        n_treated = sum(D_mask), n_control = sum(!D_mask),
-        units = merged$G_XX)
-      cell_data[[length(cell_data) + 1L]] <- list(
-        delta = delta_v, D_mask = D_mask, X = Xm, n_total = n_total,
-        units = merged$G_XX)
+      thr <- tlist[max(ti, pret) + tfac]
+      control_units <- if (args$control_group == "never") {
+        units[!is.finite(F_g_per_unit)]
+      } else {
+        units[!is.finite(F_g_per_unit) |
+              (F_g_per_unit > thr & F_g_per_unit != g)]
+      }
+      if (!rc_mode) {
+        Y_base <- d[T_XX == base, list(G_XX, Y_pre = Y_XX)]
+        Y_t    <- d[T_XX == cur,  list(G_XX, Y_t = Y_XX)]
+        merged <- merge(Y_base, Y_t, by = "G_XX")
+        merged[, delta_XX := Y_t - Y_pre]
+        merged <- merged[!is.na(delta_XX)]
+        merged <- merged[G_XX %in% c(treated_units, control_units)]
+        if (nrow(merged) == 0L) next
+        D_mask <- merged$G_XX %in% treated_units
+        Xm <- if (has_cov) X_mat[as.character(merged$G_XX), , drop = FALSE] else NULL
+        cell_meta[[length(cell_meta) + 1L]] <- list(
+          g = g, t = cur, n_total = nrow(merged),
+          n_treated = sum(D_mask), n_control = sum(!D_mask),
+          n_cohort = as.integer(cohort_size[as.character(g)]),
+          units = merged$G_XX)
+        cell_data[[length(cell_data) + 1L]] <- list(
+          delta = merged$delta_XX, D_mask = D_mask, X = Xm,
+          n_total = nrow(merged), units = merged$G_XX)
+      } else {
+        rows <- d[T_XX %in% c(base, cur) &
+                    G_XX %in% c(treated_units, control_units)]
+        if (nrow(rows) == 0L) next
+        Dr <- as.numeric(rows$G_XX %in% treated_units)
+        Xr <- if (has_cov) as.matrix(rows[, cov_cols, with = FALSE]) else NULL
+        cell_meta[[length(cell_meta) + 1L]] <- list(
+          g = g, t = cur, n_total = nrow(rows),
+          n_treated = sum(Dr), n_control = sum(1 - Dr),
+          n_cohort = as.integer(cohort_size[as.character(g)]),
+          units = unique(rows$G_XX))
+        cell_data[[length(cell_data) + 1L]] <- list(
+          rc = TRUE, y = rows$Y_XX, post = as.numeric(rows$T_XX == cur),
+          D = Dr, C = 1 - Dr, X = Xr, row_unit = rows$G_XX)
+      }
     }
   }
   n_cells <- length(cell_meta)
@@ -125,7 +234,10 @@
   # Pass 2: solve.
   # ------------------------------------------------------------------
   cuda_result <- NULL
-  if (identical(args$backend, "cuda") && isTRUE(getOption("didgpu.cs_cuda_inner", FALSE))) {
+  special <- any(vapply(cell_data, function(z) isTRUE(z$rc) || isTRUE(z$zero),
+                        logical(1)))
+  if (!special && identical(args$backend, "cuda") &&
+      isTRUE(getOption("didgpu.cs_cuda_inner", FALSE))) {
     # OFF BY DEFAULT, deliberately. The batched CUDA inner kernel still
     # computes the OLD influence functions: treated-arm only, no
     # nuisance-estimation terms, wrong normalisers. Its ATT agrees with
@@ -177,6 +289,24 @@
     # R fallback: per-cell solve.
     for (c_idx in seq_len(n_cells)) {
       ce <- cell_data[[c_idx]]
+      if (isTRUE(ce$zero)) {
+        # The universal base period's own cell: 0 by construction, with a
+        # zero influence function (did reports it the same way).
+        solver_atts[c_idx] <- 0
+        IF_list[[c_idx]] <- list(
+          g = cell_meta[[c_idx]]$g, t = cell_meta[[c_idx]]$t,
+          units = ce$units, IF = rep(0, length(ce$units)))
+        next
+      }
+      if (isTRUE(ce$rc)) {
+        rc <- .cs_rc_cell(args$est_method, ce$y, ce$post, ce$D, ce$C,
+                          ce$X, ce$row_unit, n_units)
+        solver_atts[c_idx] <- as.numeric(rc$att)
+        IF_list[[c_idx]] <- list(
+          g = cell_meta[[c_idx]]$g, t = cell_meta[[c_idx]]$t,
+          units = rc$units, IF = rc$IF)
+        next
+      }
       inner <- .cs_inner_dispatch(args$est_method, ce$delta, ce$D_mask,
                                     ce$X, ce$n_total)
       solver_atts[c_idx] <- as.numeric(inner$att)
@@ -197,6 +327,7 @@
       att = solver_atts[c_idx], se = NA_real_,
       n_treated = as.integer(m$n_treated),
       n_control = as.integer(m$n_control),
+      n_cohort  = as.integer(m$n_cohort %||% m$n_treated),
       stringsAsFactors = FALSE)
   })
   out <- do.call(rbind, results)
@@ -204,6 +335,7 @@
   attr(out, "IF_per_cell") <- IF_list
   attr(out, "F_g_per_unit") <- F_g_per_unit
   attr(out, "units")        <- units
+  attr(out, "panel_mode")   <- if (rc_mode) "repeated_cross_section" else "panel"
   out
 }
 
@@ -513,7 +645,8 @@
   if (!length(idx)) return(NA_real_)
   .cs_agg_se(cell_idx = idx,
              att_cells = att_gt$att[idx],
-             pg_cells  = att_gt$n_treated[idx] / n_units,
+             pg_cells  = (if ("n_cohort" %in% names(att_gt)) att_gt$n_cohort
+                          else att_gt$n_treated)[idx] / n_units,
              g_cells   = att_gt$g[idx],
              IF_list   = IF_list, units = units,
              F_g_per_unit = F_g_per_unit)
@@ -526,7 +659,11 @@
                       estimate = numeric(0), se = numeric(0),
                       n_cells = integer(0)))
   }
-  w <- att_gt$n_treated
+  # did weights each cell by its cohort's share of units (pg). On a
+  # balanced panel that equals the cell's treated count; under the
+  # repeated-cross-section path the cell count is in ROWS, so the cohort
+  # size is used explicitly.
+  w <- if ("n_cohort" %in% names(att_gt)) att_gt$n_cohort else att_gt$n_treated
   # Cells that could not be estimated -- typically a cohort with no
   # treated unit left in period t on an unbalanced panel -- carry
   # att = NA with weight n_treated = 0. In R, NA * 0 is still NA, so a
@@ -555,7 +692,16 @@
     if (is.null(IF_list) || is.null(units)) return(NA_real_)
     .cs_level_se(cells, att_gt, IF_list, units, F_g_per_unit, n_units)
   }
+  # did::aggte reports an aggregated SE that is numerically zero as NA
+  # (compute.aggte: `se[se <= sqrt(.Machine$double.eps) * 10] <- NA`) --
+  # e.g. the universal base period's own event time, whose influence
+  # function is identically 0.
+  na_tiny <- function(se) {
+    se[!is.na(se) & se <= sqrt(.Machine$double.eps) * 10] <- NA_real_
+    se
+  }
   finish <- function(out) {
+    out$se <- na_tiny(out$se)
     out$ci_low  <- out$estimate - z * out$se
     out$ci_high <- out$estimate + z * out$se
     out
@@ -622,7 +768,7 @@
       post <- att_gt$t >= att_gt$g & ok
       est <- if (any(post)) sum(att_gt$att[post] * w[post]) / sum(w[post])
              else NA_real_
-      se  <- se_of(post)
+      se  <- na_tiny(se_of(post))
       data.frame(scheme = "overall", estimate = est, se = se,
                   ci_low = est - z * se, ci_high = est + z * se,
                   n_cells = sum(post), stringsAsFactors = FALSE)
