@@ -21,6 +21,66 @@
 
 ## Bug fixes
 
+- **Standard errors were a bootstrap approximation of the reference's,
+  not the reference's.** `DIDmultiplegtDYN` computes SEs analytically
+  from the estimator's asymptotic linear representation. didgpu had no
+  analytic path at all: with `bootstrap_reps = 0` the `SE` column came
+  back entirely `NA`, and above zero it reported the bootstrap SD, which
+  is a different estimator:
+
+      didgpu (50 reps)  0.056174  0.051302  0.054590  0.059531  0.047412
+      reference         0.055504  0.054278  0.057839  0.052243  0.055922
+
+  `tests/testthat/test-reference-parity.R` had said so in a comment --
+  "SEs come from different estimators (bootstrap vs. analytic) and are
+  not compared here" -- so the gap was known and simply never closed,
+  while `README` claimed a bit-for-bit match on SEs.
+
+  didgpu now computes the reference's own influence functions. Effects,
+  placebos and the ATE all match `DIDmultiplegtDYN` to machine precision
+  (0 to 2.1e-17), clustered and unclustered, on every backend, and across
+  `normalized`, multivalued and non-absorbing treatment, non-zero
+  baseline dose, and `switchers = "in"` / `"out"`. The joint nullity
+  tests come from the same influence functions via the covariance
+  identity and match to 5e-16.
+
+  **`bootstrap_reps` now defaults to `0`.** Nothing in the default output
+  needs a resample any more. This was also the package's real performance
+  problem: the reference does one pass, while didgpu's old default of 100
+  reps meant 101 full fits. On a 400-unit x 104-period panel with
+  `only_never_switchers = TRUE`:
+
+      DIDmultiplegtDYN       18.50s
+      didgpu backend = r      3.13s    5.9x faster
+      didgpu backend = auto   2.56s    7.2x faster
+
+  The same specification previously ran ~5x SLOWER than the reference
+  despite didgpu being 10-25x faster per fit. Setting `bootstrap_reps`
+  above zero still works and no longer changes the reported `SE`.
+
+  One gap remains, and it is deliberate. With `controls` (or
+  `continuous`, which adds polynomial controls of its own) the reference
+  subtracts a control-estimation correction from the influence function
+  -- `part2_switch` in `did_multiplegt_dyn_core.R:502-535` -- that didgpu
+  does not compute. Reporting the uncorrected number would have been
+  wrong by about 9e-05, so the analytic path is switched off there and
+  the bootstrap remains the SE source; `didgpu()` says so rather than
+  returning a silent `NA` column. Point estimates with controls are
+  unaffected and still match the reference exactly (1.1e-16).
+
+- **`didgpu_compare()` now fails on the `SE` and CI rows too.** It scored
+  only the `Estimate` rows, on the since-removed grounds that "reference
+  SEs are analytical, ours are NA in that case". Those columns now carry
+  comparable numbers, so they are held to the same tolerance.
+
+- **Resuming a checkpoint written by a different version of didgpu is now
+  refused.** Cells carry whatever estimator produced them, and two have
+  changed in this release (the ATE became `Av_tot_eff`; the SEs became
+  analytic), so resuming would silently mix old and new numbers in one
+  result. `didgpu()` now compares the stored `package_version` and stops
+  with an explanation instead.
+
+
 - **`ATE` did not match `DIDmultiplegtDYN`'s `Av_tot_eff` unless treatment
   was binary and absorbing.** didgpu reported the switcher-weighted mean
   of the per-event-time effects,
@@ -63,10 +123,8 @@
   `didgpu()`'s help gained a `@return` section stating what `ATE` is;
   nothing in the docs had defined it before.
 
-  Note for anyone resuming a run: checkpoint cells written by an earlier
-  version store the old ATE, and nothing invalidates them on resume. If a
-  checkpoint directory predates this release, delete it and re-run rather
-  than resuming into it.
+  Checkpoint cells written by an earlier version store the old ATE;
+  resuming into such a directory is now refused outright (see below).
 
 
 - **A user column named after one of the arguments broke several entry

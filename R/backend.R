@@ -251,13 +251,26 @@ didgpu_backend_info <- function() {
                             dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower))
     sw <- args$switchers %||% ""
     h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
-    ce <- .compute_effects_cpp(prepped, h$l_eff, switchers = sw)
-    cp <- .compute_placebos_cpp(prepped, h$l_pl, switchers = sw)
+    ce <- .compute_effects_cpp(prepped, h$l_eff, switchers = sw,
+                                want_se = (iter_seed == 0L),
+                                cluster_col = args$cluster)
+    cp <- .compute_placebos_cpp(prepped, h$l_pl, switchers = sw,
+                            want_se = (iter_seed == 0L),
+                            cluster_col = args$cluster)
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
     # Av_tot_eff -- see .ate_weighted in core_r.R. Neither kernel backend
     # accepts `normalized`, so ce$effects is already the raw DID here.
     ate <- .ate_weighted(ce$effects, ce$n_inc, ce$delta_ate)
+    se_ate <- if (is.null(ce$u_mat)) NA_real_ else {
+      ok <- !is.na(ce$effects) & !is.na(ce$delta_ate) &
+            is.finite(ce$n_inc) & ce$n_inc > 0
+      den <- if (any(ok)) sum(ce$n_inc[ok] * ce$delta_ate[ok]) else 0
+      if (!any(ok) || !is.finite(den) || den == 0) NA_real_ else {
+        .se_from_u(as.numeric(ce$u_mat[, ok, drop = FALSE] %*% ce$n_inc[ok]) / den,
+                   ce$G, ce$cluster_of_group)
+      }
+    }
 
     list(
       effects        = ce$effects,
@@ -265,6 +278,13 @@ didgpu_backend_info <- function() {
       placebos       = cp$placebos,
       n_effects      = h$l_eff,
       n_placebos     = h$l_pl,
+      se_effects     = ce$se,
+      se_placebos    = cp$se,
+      se_ate         = se_ate,
+      u_mat_effects  = ce$u_mat,
+      u_mat_placebos = cp$u_mat,
+      se_G           = ce$G,
+      se_cluster_of_group = ce$cluster_of_group,
       n_inc_effects  = ce$n_inc,
       n_inc_placebos = cp$n_inc,
       n_eff_effects  = ce$n_eff,
@@ -282,9 +302,18 @@ didgpu_backend_info <- function() {
 # from the R code; only the per-(k, direction) compute is in C++.
 #' @keywords internal
 #' @noRd
-.compute_effects_cpp <- function(prepped, effects, switchers = "") {
+.compute_effects_cpp <- function(prepped, effects, switchers = "",
+                                  want_se = FALSE, cluster_col = NULL) {
   out <- numeric(effects); n_inc <- integer(effects); n_eff <- integer(effects)
   delta_ate <- numeric(effects)
+  G_all <- length(unique(prepped$group_XX))
+  cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
+               cluster_col %in% names(prepped)) {
+    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+            .SDcols = cluster_col]$cl
+  } else NULL
+  u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = effects) else NULL
+  se_vec <- rep(NA_real_, effects)
   for (k in seq_len(effects)) {
     res_in  <- if (switchers != "out") .cpu_one_event_time(prepped, k = k, direction = 1L)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L)
@@ -301,15 +330,28 @@ didgpu_backend_info <- function() {
     out[k]   <- w_in * att_in + (1 - w_in) * att_out_pool
     n_inc[k] <- n_in + n_out
     n_eff[k] <- (res_in$N_eff %||% 0L) + (res_out$N_eff %||% 0L)
-    # Av_tot_eff's denominator, pooled with the same Neyman weights. The
-    # C++ kernel returns only att and N_inc, so the mask is rebuilt here.
-    da_in  <- if (n_in  > 0L) .delta_ate_kernel_path(prepped, k, 1L) else NA_real_
-    da_out <- if (n_out > 0L) .delta_ate_kernel_path(prepped, k, 0L) else NA_real_
+    # The C++ kernel returns only att and N_inc, so the switcher mask is
+    # rebuilt here to get Av_tot_eff's denominator and, when asked, the
+    # analytic-SE influence contribution -- one mask build for both.
+    ex_in  <- if (n_in  > 0L) .delta_ate_kernel_path(prepped, k, 1L, want_se,
+                                                      G_all, cluster_col) else NULL
+    ex_out <- if (n_out > 0L) .delta_ate_kernel_path(prepped, k, 0L, want_se,
+                                                      G_all, cluster_col) else NULL
+    da_in  <- if (!is.null(ex_in))  ex_in$delta_ate  else NA_real_
+    da_out <- if (!is.null(ex_out)) ex_out$delta_ate else NA_real_
     delta_ate[k] <- if (n_in == 0L) da_out
                     else if (n_out == 0L) da_in
                     else w_in * da_in + (1 - w_in) * da_out
+    if (isTRUE(want_se)) {
+      ucol <- numeric(G_all)
+      if (!is.null(ex_in)  && !is.null(ex_in$u_var))  ucol <- ucol + w_in * ex_in$u_var
+      if (!is.null(ex_out) && !is.null(ex_out$u_var)) ucol <- ucol - (1 - w_in) * ex_out$u_var
+      u_mat[, k] <- ucol
+      se_vec[k] <- .se_from_u(ucol, G_all, cog)
+    }
   }
-  list(effects = out, n_inc = n_inc, n_eff = n_eff, delta_ate = delta_ate)
+  list(effects = out, n_inc = n_inc, n_eff = n_eff, delta_ate = delta_ate,
+       se = se_vec, u_mat = u_mat, G = G_all, cluster_of_group = cog)
 }
 
 # Placebos still use the R backend (the C++ port is only the effects
@@ -317,8 +359,10 @@ didgpu_backend_info <- function() {
 # different diff_y formula and we haven't ported it).
 #' @keywords internal
 #' @noRd
-.compute_placebos_cpp <- function(prepped, placebo, switchers = "") {
-  .compute_placebos(prepped, placebo, switchers = switchers)
+.compute_placebos_cpp <- function(prepped, placebo, switchers = "",
+                                   want_se = FALSE, cluster_col = NULL) {
+  .compute_placebos(prepped, placebo, switchers = switchers,
+                     want_se = want_se, cluster_col = cluster_col)
 }
 
 # Build the prepped panel into the contiguous columnar shape the C++
@@ -472,8 +516,12 @@ didgpu_backend_info <- function() {
     h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
     # Run the per-event-time CUDA kernel. We mimic .compute_effects's
     # direction loop here so the result shape stays consistent.
-    ce <- .compute_effects_cuda(prepped, h$l_eff, switchers = sw)
-    cp <- .compute_placebos(prepped, h$l_pl, switchers = sw)  # placebos still r-side
+    ce <- .compute_effects_cuda(prepped, h$l_eff, switchers = sw,
+                                 want_se = (iter_seed == 0L),
+                                 cluster_col = args$cluster)
+    cp <- .compute_placebos(prepped, h$l_pl, switchers = sw,
+                            want_se = (iter_seed == 0L),
+                            cluster_col = args$cluster)  # placebos still r-side
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
     # This branch has had the ATE wrong twice. It first read
     #     ate <- if (h$l_eff == 1L) ce$effects[1] else NA_real_
@@ -485,12 +533,28 @@ didgpu_backend_info <- function() {
     # There is now one definition, in .ate_weighted() (core_r.R). This
     # backend rejects `normalized`, so ce$effects is already the raw DID.
     ate <- .ate_weighted(ce$effects, ce$n_inc, ce$delta_ate)
+    se_ate <- if (is.null(ce$u_mat)) NA_real_ else {
+      ok <- !is.na(ce$effects) & !is.na(ce$delta_ate) &
+            is.finite(ce$n_inc) & ce$n_inc > 0
+      den <- if (any(ok)) sum(ce$n_inc[ok] * ce$delta_ate[ok]) else 0
+      if (!any(ok) || !is.finite(den) || den == 0) NA_real_ else {
+        .se_from_u(as.numeric(ce$u_mat[, ok, drop = FALSE] %*% ce$n_inc[ok]) / den,
+                   ce$G, ce$cluster_of_group)
+      }
+    }
     list(
       effects        = ce$effects,
       ate            = ate,
       placebos       = cp$placebos,
       n_effects      = h$l_eff,
       n_placebos     = h$l_pl,
+      se_effects     = ce$se,
+      se_placebos    = cp$se,
+      se_ate         = se_ate,
+      u_mat_effects  = ce$u_mat,
+      u_mat_placebos = cp$u_mat,
+      se_G           = ce$G,
+      se_cluster_of_group = ce$cluster_of_group,
       n_inc_effects  = ce$n_inc,
       n_inc_placebos = cp$n_inc,
       n_eff_effects  = ce$n_inc,
@@ -504,13 +568,22 @@ didgpu_backend_info <- function() {
 
 # .compute_effects but using .cuda_one_event_time (R/cuda_glue.R) instead
 # of .core_one_event_time. Same Neyman pooling logic.
-.compute_effects_cuda <- function(prepped, effects, switchers = "") {
+.compute_effects_cuda <- function(prepped, effects, switchers = "",
+                                   want_se = FALSE, cluster_col = NULL) {
   out <- numeric(effects); n_inc <- integer(effects)
   delta_ate <- numeric(effects)
+  G_all <- length(unique(prepped$group_XX))
+  cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
+               cluster_col %in% names(prepped)) {
+    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+            .SDcols = cluster_col]$cl
+  } else NULL
+  u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = effects) else NULL
+  se_vec <- rep(NA_real_, effects)
   for (k in seq_len(effects)) {
-    res_in <- if (switchers != "out") .cuda_one_event_time(prepped, k = k, direction = 1L)
+    res_in <- if (switchers != "out") .cuda_one_event_time(prepped, k = k, direction = 1L, want_se = want_se, cluster_col = cluster_col)
               else list(att = NA_real_, N_inc = 0L, delta_ate = NA_real_)
-    res_out <- if (switchers != "in") .cuda_one_event_time(prepped, k = k, direction = 0L)
+    res_out <- if (switchers != "in") .cuda_one_event_time(prepped, k = k, direction = 0L, want_se = want_se, cluster_col = cluster_col)
                else list(att = NA_real_, N_inc = 0L, delta_ate = NA_real_)
     n_in <- res_in$N_inc; n_out <- res_out$N_inc
     if (n_in + n_out == 0L) {
@@ -527,8 +600,16 @@ didgpu_backend_info <- function() {
     delta_ate[k] <- if (n_in == 0L) da_out
                     else if (n_out == 0L) da_in
                     else w_in * da_in + (1 - w_in) * da_out
+    if (isTRUE(want_se)) {
+      ucol <- numeric(G_all)
+      if (n_in  > 0L && !is.null(res_in$u_var))  ucol <- ucol + w_in * res_in$u_var
+      if (n_out > 0L && !is.null(res_out$u_var)) ucol <- ucol - (1 - w_in) * res_out$u_var
+      u_mat[, k] <- ucol
+      se_vec[k] <- .se_from_u(ucol, G_all, cog)
+    }
   }
-  list(effects = out, n_inc = n_inc, delta_ate = delta_ate)
+  list(effects = out, n_inc = n_inc, delta_ate = delta_ate,
+       se = se_vec, u_mat = u_mat, G = G_all, cluster_of_group = cog)
 }
 
 

@@ -154,11 +154,27 @@
     })
   }
   z <- stats::qnorm(0.5 + (args$ci_level %||% 95) / 200)
+  # Analytic SEs, from the estimator's asymptotic linear representation,
+  # are what DIDmultiplegtDYN reports and are preferred whenever the
+  # point-estimate cell carries them. The bootstrap SD is the fallback
+  # for backends and option combinations that do not produce them.
+  # See R/analytic_se.R.
+  cell0 <- cells[["0"]]
+  se_an_e <- cell0$se_effects  %||% NULL
+  se_an_p <- cell0$se_placebos %||% NULL
   e_se <- if (nrow(e_mat) >= 2L) .col_sd(e_mat) else rep(NA_real_, n_e)
   p_se <- if (nrow(p_mat) >= 2L) .col_sd(p_mat) else rep(NA_real_, n_p)
+  if (!is.null(se_an_e) && length(se_an_e) == n_e) {
+    e_se <- ifelse(is.finite(se_an_e), se_an_e, e_se)
+  }
+  if (!is.null(se_an_p) && length(se_an_p) == n_p) {
+    p_se <- ifelse(is.finite(se_an_p), se_an_p, p_se)
+  }
   ate_ok <- ate_vec[is.finite(ate_vec)]
   ate_floor <- max(2L, min(30L, as.integer(length(ate_vec) %/% 2L)))
   ate_se <- if (length(ate_ok) >= ate_floor) stats::sd(ate_ok) else NA_real_
+  se_an_ate <- cell0$se_ate %||% NA_real_
+  if (is.finite(se_an_ate)) ate_se <- se_an_ate
 
   e_ci_lo <- e0 - z * e_se;  e_ci_hi <- e0 + z * e_se
   p_ci_lo <- p0 - z * p_se;  p_ci_hi <- p0 + z * p_se
@@ -223,8 +239,21 @@
                                   "N", "Switchers", "N.w", "Switchers.w")))
 
   # Joint chi-square p-values via the bootstrap empirical covariance.
-  p_joint_e <- .joint_pvalue(e0, e_mat)
-  p_joint_p <- if (n_p > 0L) .joint_pvalue(p0, p_mat) else NA_real_
+  # Joint nullity tests. The reference builds these from the same
+  # influence functions as the SEs, getting the off-diagonal covariances
+  # by polarisation rather than from a resample, so prefer that whenever
+  # the point-estimate cell carries the influence matrix; fall back to
+  # the bootstrap covariance otherwise.
+  p_joint_e <- .se_joint_test(e0, cell0$u_mat_effects, e_se,
+                               cell0$se_G %||% NA_real_,
+                               cell0$se_cluster_of_group)
+  if (!is.finite(p_joint_e)) p_joint_e <- .joint_pvalue(e0, e_mat)
+  p_joint_p <- if (n_p > 0L) {
+    pj <- .se_joint_test(p0, cell0$u_mat_placebos, p_se,
+                          cell0$se_G %||% NA_real_,
+                          cell0$se_cluster_of_group)
+    if (is.finite(pj)) pj else .joint_pvalue(p0, p_mat)
+  } else NA_real_
 
   # Coefficient vector + bootstrap vcov for the full b parameter
   # (effects then placebos).

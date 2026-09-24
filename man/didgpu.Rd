@@ -121,7 +121,13 @@ multivalued treatment, divides by the average per-switcher
 cumulative change in actual treatment magnitude over event-times
 \verb{1..k}. Mirrors \code{normalized} in DIDmultiplegtDYN.}
 
-\item{bootstrap_reps}{Integer. Number of bootstrap iterations.}
+\item{bootstrap_reps}{Integer. Number of bootstrap iterations, default
+\code{0}. Standard errors, confidence intervals and the joint nullity
+tests are computed analytically from the estimator's asymptotic linear
+representation, exactly as \code{DIDmultiplegtDYN} computes them, so no
+resampling is needed for them. Set this above zero only if you
+specifically want bootstrap quantities; it does not change the reported
+\code{SE} column.}
 
 \item{ci_level}{Numeric in (0, 100). Confidence level for CIs.}
 

@@ -60,7 +60,7 @@ Designed for long-running econometric work: per-cell checkpointing to disk, resu
 | CUDA backend                              | ✅ live on **Windows and Linux/WSL** (built + verified end-to-end on an RTX 4000 Ada — Windows needs no admin rights; see GPU acceleration below) |
 | Rcpp+Eigen CPU backend                    | ✅ done (binary-no-controls inner kernel in C++; bit-identical to `r`; ~1.5–3× on top; falls back to `r` for complex options) |
 
-For the supported subset (binary, no controls), the r-backend's output matches the reference bit-for-bit on point estimates, SEs, ATE, and the four sample-size columns. See `tests/testthat/test-r-backend.R`, `test-bidirectional.R`, and `test-reference-parity.R` (100+ assertions, all green).
+For the supported subset (binary, no controls), the r-backend's output matches the reference bit-for-bit on point estimates, standard errors (analytic, from the estimator's asymptotic linear representation -- not a bootstrap approximation), the ATE, the joint nullity tests, and the four sample-size columns. See `tests/testthat/test-r-backend.R`, `test-bidirectional.R`, and `test-reference-parity.R` (100+ assertions, all green).
 
 ## GPU acceleration
 
@@ -286,7 +286,8 @@ For every commonly-used DIDmultiplegtDYN option, the r-backend agrees with `DIDm
 
 - Per-event-time DID estimates (`Effects[, 1]`) — exact match (max abs diff `< 1e-10` across all tested seeds, panel shapes, and option combinations)
 - Per-event-time placebo estimates (`Placebos[, 1]`) — exact match
-- ATE — match to within a few machine epsilon
+- ATE (`Av_tot_eff`) — match to within a few machine epsilon
+- Standard errors, CIs and joint nullity tests — analytic, matching to within a few machine epsilon (clustered and unclustered)
 - Sample size columns (`N`, `Switchers`, `N.w`, `Switchers.w`) — exact match
 - `predict_het` regression block (`Estimate`, `SE`, `t`, `LB`, `UB`, `N`, `pF`) — exact match within 1e-10
 - Cluster bootstrap SEs — exact match when both backends are invoked through the same didgpu orchestrator (because both then use the same cluster-resampled panels with the same seed)

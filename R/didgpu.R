@@ -88,7 +88,13 @@
 #'   multivalued treatment, divides by the average per-switcher
 #'   cumulative change in actual treatment magnitude over event-times
 #'   `1..k`. Mirrors `normalized` in DIDmultiplegtDYN.
-#' @param bootstrap_reps Integer. Number of bootstrap iterations.
+#' @param bootstrap_reps Integer. Number of bootstrap iterations, default
+#'   `0`. Standard errors, confidence intervals and the joint nullity
+#'   tests are computed analytically from the estimator's asymptotic
+#'   linear representation, exactly as `DIDmultiplegtDYN` computes them,
+#'   so no resampling is needed for them. Set this above zero only if you
+#'   specifically want bootstrap quantities; it does not change the
+#'   reported `SE` column.
 #' @param ci_level Numeric in (0, 100). Confidence level for CIs.
 #' @param seed Integer. RNG seed for bootstrap iter 1 onward (iter 0 is
 #'   the deterministic point estimate). Per-iter seed is `seed + iter`.
@@ -173,7 +179,7 @@ didgpu <- function(
     dont_drop_larger_lower = FALSE,
     switchers      = "",
     normalized     = FALSE,
-    bootstrap_reps = 100L,
+    bootstrap_reps = 0L,
     ci_level       = 95,
     seed           = 1L,
     checkpoint_dir = NULL,
@@ -273,6 +279,19 @@ didgpu <- function(
     backend = backend
   )
 
+  # Analytic SEs cover everything except estimators carrying an
+  # estimated nuisance; those still need the bootstrap (see want_se in
+  # .backend_r_impl). Say so rather than returning a silent NA column.
+  if (bootstrap_reps == 0L &&
+      (!is.null(controls) || !is.null(continuous) || isTRUE(trends_lin))) {
+    which_opt <- c(if (!is.null(controls)) "controls",
+                   if (!is.null(continuous)) "continuous",
+                   if (isTRUE(trends_lin)) "trends_lin")
+    message("[didgpu] analytic standard errors are not available with ",
+            paste(which_opt, collapse = ", "),
+            "; the SE and CI columns will be NA. Pass bootstrap_reps > 0 ",
+            "for bootstrap standard errors.")
+  }
   ph <- .panel_hash(df, outcome, group, time, treatment)
 
   # ---- checkpoint init / load ----
@@ -453,6 +472,22 @@ didgpu <- function(
     bootstrap_reps = args$bootstrap_reps,
     seed           = args$seed
   )
+  # A checkpoint written by a different version of didgpu may hold cells
+  # computed by a different estimator. That has happened twice: the ATE
+  # changed when it was corrected to Av_tot_eff, and the SEs changed when
+  # they moved from bootstrap to analytic. Resuming into such a directory
+  # silently mixes old and new numbers in one result, which is worse than
+  # either, so refuse rather than warn.
+  have_v <- meta[["package_version"]]
+  want_v <- as.character(utils::packageVersion("didgpu"))
+  if (!is.null(have_v) && !identical(as.character(have_v), want_v)) {
+    stop("Checkpoint was written by didgpu ", have_v,
+         " but this is didgpu ", want_v,
+         ". Cells from a different version may come from a different ",
+         "estimator, so resuming would mix them. Re-run into a fresh ",
+         "checkpoint_dir, or pass resume = FALSE to discard and recompute.",
+         call. = FALSE)
+  }
   for (k in names(must_match)) {
     have <- meta[[k]]
     want <- must_match[[k]]

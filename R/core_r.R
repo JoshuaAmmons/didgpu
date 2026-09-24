@@ -233,6 +233,14 @@
   d[, L_g_XX := pmax(0L, as.integer(T_g_XX - F_g_XX + 1L))]
   d[is.na(L_g_XX), L_g_XX := 0L]
 
+  # d_fg_XX = treatment at F_g, i.e. the dose the group switches INTO.
+  # Only the analytic SEs use it: switcher cells there are pooled by
+  # treatment PATH (baseline dose AND the dose switched into), not by
+  # period. Reference: did_multiplegt_main.R:319-321.
+  d[, d_fg_XX := ifelse(time_XX == F_g_XX, treatment_XX, NA_real_)]
+  d[, d_fg_XX := mean(d_fg_XX, na.rm = TRUE), by = group_XX]
+  d[is.na(d_fg_XX) & F_g_XX == (T_max + 1L), d_fg_XX := d_sq_XX]
+
   # L_g_placebo_XX = max placebo horizon supported for this group.
   # Reference did_multiplegt_main.R:324: min(L_g, F_g - 2) when F_g >= 3.
   # This is the largest k such that BOTH t = F_g + k - 1 fits in the
@@ -306,6 +314,8 @@
                                   only_never_switchers = FALSE,
                                   normalized = FALSE,
                                   want_delta = FALSE,
+                                  want_se = FALSE,
+                                  cluster_col = NULL,
                                   skip_prep = FALSE) {
   k <- as.integer(k)
   stopifnot(k >= 1L)
@@ -423,7 +433,7 @@
     # No switchers reach event-time k; ATT is undefined.
     return(list(att = NA_real_, N_inc = 0L,
                 N_sw_unw = 0L, N_sw_w = 0, N_eff = 0L, N_eff_w = 0,
-                U_g = numeric(G)))
+                U_g = numeric(G), u_var = numeric(G)))
   }
 
   # The U-statistic kernel. From section 3 of reference_internals.md:
@@ -520,6 +530,13 @@
   delta_ate <- if (isTRUE(want_delta)) .delta_ate_from_mask(d, N_inc)
                else NA_real_
 
+  # Analytic-SE influence contribution, one value per group. Same kernel
+  # as the estimate with diff_y replaced by its within-cell residual --
+  # see R/analytic_se.R.
+  u_var <- if (isTRUE(want_se)) {
+    .se_u_g_var(d, k, G, N_inc, cohort_cols, cluster_col)
+  } else NULL
+
   list(att = att,
        N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
        N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
@@ -527,6 +544,7 @@
        N_eff    = N_eff,           # unweighted obs       -> N col
        N_eff_w  = N_eff_w,         # weighted   obs       -> N.w col
        U_g = U_g$U_g,
+       u_var = u_var,
        delta_norm = delta_norm,
        delta_ate = delta_ate)
 }
@@ -567,9 +585,14 @@
 # backend for those -- see .backend_cpu / .backend_cuda.
 #' @keywords internal
 #' @noRd
-.delta_ate_kernel_path <- function(prepped, k, direction) {
+.delta_ate_kernel_path <- function(prepped, k, direction,
+                                    want_se = FALSE, G = NULL,
+                                    cluster_col = NULL) {
   d <- prepped
   k <- as.integer(k)
+  if (is.null(G)) G <- length(unique(d$group_XX))
+  cohort_cols <- c("time_XX", "d_sq_XX")
+  if ("trends_np_XX" %in% names(d)) cohort_cols <- c(cohort_cols, "trends_np_XX")
   if (k == 1L) {
     d[, diff_y_k_XX := diff_y_XX]
   } else {
@@ -581,8 +604,7 @@
                                         N_gt_XX > 0 &
                                         !is.na(diff_y_k_XX))]
   d[is.na(never_change_k_XX), never_change_k_XX := 0L]
-  d[, N_t_control := sum(N_gt_XX * never_change_k_XX),
-    by = c("time_XX", "d_sq_XX")]
+  d[, N_t_control := sum(N_gt_XX * never_change_k_XX), by = cohort_cols]
   d[, dist_k_XX := as.integer(
        time_XX == (F_g_XX + k - 1L) &
        k <= L_g_XX &
@@ -593,10 +615,19 @@
      )]
   d[is.na(dist_k_XX), dist_k_XX := 0L]
   N_inc <- sum(d$N_gt_XX * d$dist_k_XX, na.rm = TRUE)
-  v <- .delta_ate_from_mask(d, N_inc)
+  delta <- .delta_ate_from_mask(d, N_inc)
+  u_var <- NULL
+  if (isTRUE(want_se)) {
+    # .se_u_g_var needs the switcher/control ratio the C++ and CUDA
+    # kernels compute internally and never hand back.
+    d[, N_t_switch := sum(N_gt_XX * dist_k_XX), by = cohort_cols]
+    d[, ratio_XX := ifelse(N_t_control > 0, N_t_switch / N_t_control, 0)]
+    u_var <- .se_u_g_var(d, k, G, N_inc, cohort_cols, cluster_col)
+    d[, c("N_t_switch", "ratio_XX") := NULL]
+  }
   d[, c("diff_y_k_XX", "never_change_k_XX", "N_t_control",
         "dist_k_XX") := NULL]
-  v
+  list(delta_ate = delta, u_var = u_var)
 }
 
 
@@ -791,6 +822,8 @@
 .core_one_placebo <- function(d_in, k, direction = 1L, prefit = NULL,
                                only_never_switchers = FALSE,
                                normalized = FALSE,
+                               want_se = FALSE,
+                               cluster_col = NULL,
                                skip_prep = FALSE) {
   k <- as.integer(k)
   stopifnot(k >= 1L)
@@ -886,7 +919,7 @@
   if (N_inc == 0) {
     return(list(att = NA_real_, N_inc = 0L,
                 N_sw_unw = 0L, N_sw_w = 0, N_eff = 0L, N_eff_w = 0,
-                U_g = numeric(G)))
+                U_g = numeric(G), u_var = numeric(G)))
   }
 
   d[, ratio_pl_XX := ifelse(N_t_control_pl > 0,
@@ -933,6 +966,14 @@
     val
   } else NA_real_
 
+  # Analytic-SE influence contribution for this placebo horizon. Same
+  # kernel as the placebo estimate with diff_y replaced by its
+  # within-cell residual (R/analytic_se.R).
+  u_var <- if (isTRUE(want_se)) {
+    .se_u_g_var(d, k, G, N_inc, cohort_cols, cluster_col,
+                 cols = .se_cols("placebo"))
+  } else NULL
+
   list(att = att,
        N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
        N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
@@ -940,6 +981,7 @@
        N_eff    = N_eff,           # unweighted obs       -> N col
        N_eff_w  = N_eff_w,         # weighted   obs       -> N.w col
        U_g = U_g$U_g,
+       u_var = u_var,
        delta_norm = delta_norm)
 }
 
@@ -950,12 +992,23 @@
 .compute_placebos <- function(prepped, placebo, switchers = "", prefit = NULL,
                                only_never_switchers = FALSE,
                                normalized = FALSE,
-                               same_switchers_pl = FALSE) {
+                               same_switchers_pl = FALSE,
+                               want_se = FALSE,
+                               cluster_col = NULL) {
   if (placebo == 0L) return(list(placebos = numeric(0), n_inc = integer(0),
                                   n_eff = integer(0),
                                   n_eff_w = numeric(0), n_sw_unw = integer(0),
                                   n_sw_w = numeric(0),
-                                  delta_D = numeric(0)))
+                                  delta_D = numeric(0),
+                                  se = numeric(0), u_mat = NULL))
+  G_all <- length(unique(prepped$group_XX))
+  cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
+               cluster_col %in% names(prepped)) {
+    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+            .SDcols = cluster_col]$cl
+  } else NULL
+  u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = placebo) else NULL
+  se_vec <- rep(NA_real_, placebo)
   # same_switchers_pl: only switchers who have valid pre-period diff_y at
   # every placebo horizon q in 1..placebo contribute. Reference:
   # did_multiplegt_dyn_core.R:177-215.
@@ -973,9 +1026,9 @@
   delta_D <- numeric(placebo)
   both_dirs <- (switchers == "")
   for (k in seq_len(placebo)) {
-    res_in  <- if (switchers != "out") .core_one_placebo(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized)
+    res_in  <- if (switchers != "out") .core_one_placebo(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_se = want_se, cluster_col = cluster_col)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
-    res_out <- if (switchers != "in")  .core_one_placebo(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, skip_prep = both_dirs)
+    res_out <- if (switchers != "in")  .core_one_placebo(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_se = want_se, cluster_col = cluster_col, skip_prep = both_dirs)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
     n_in  <- res_in$N_inc
     n_out <- res_out$N_inc
@@ -1022,8 +1075,25 @@
         out[k] <- NA_real_
       }
     }
+    # Analytic SE, pooled exactly as the effects are, with the
+    # out-direction negated (did_multiplegt_main.R:837, :1071-1075).
+    if (isTRUE(want_se)) {
+      uv_in  <- if (n_in  > 0L) res_in$u_var  else NULL
+      uv_out <- if (n_out > 0L) res_out$u_var else NULL
+      ucol <- numeric(G_all)
+      if (!is.null(uv_in))  ucol <- ucol + w_in * uv_in
+      if (!is.null(uv_out)) ucol <- ucol - (1 - w_in) * uv_out
+      u_mat[, k] <- ucol
+      se_k <- .se_from_u(ucol, G_all, cog)
+      if (isTRUE(normalized)) {
+        dk <- delta_D[k]
+        se_k <- if (!is.na(dk) && dk != 0) se_k / dk else NA_real_
+      }
+      se_vec[k] <- se_k
+    }
   }
-  list(placebos = out, n_inc = n_inc, n_eff = n_eff,
+  list(placebos = out, se = se_vec, u_mat = u_mat,
+       n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
        delta_D = delta_D)
 }
@@ -1043,8 +1113,23 @@
 .compute_effects <- function(prepped, effects, switchers = "", prefit = NULL,
                               only_never_switchers = FALSE,
                               same_switchers = FALSE,
-                              normalized = FALSE) {
+                              normalized = FALSE,
+                              want_se = FALSE,
+                              cluster_col = NULL) {
   out <- numeric(effects)
+  G_all <- length(unique(prepped$group_XX))
+  # One cluster id per group, in the order a by = group_XX reduction
+  # returns groups (the panel is sorted by group, so: sorted group order).
+  cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
+               cluster_col %in% names(prepped)) {
+    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+            .SDcols = cluster_col]$cl
+  } else NULL
+  # Per-group influence contributions, one column per event-time. Kept
+  # (not just reduced to an SE) because the joint nullity test needs the
+  # full covariance, which comes from these by polarisation.
+  u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = effects) else NULL
+  se_vec <- rep(NA_real_, effects)
   n_inc <- numeric(effects)        # EXACT weighted mass (pooling/ATE); fractional when weighted
   n_eff <- integer(effects)        # unweighted obs -> N
   n_eff_w  <- numeric(effects)     # weighted obs -> N.w
@@ -1069,9 +1154,9 @@
   # both-directions runs.
   both_dirs <- (switchers == "")
   for (k in seq_len(effects)) {
-    res_in  <- if (switchers != "out") .core_one_event_time(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE)
+    res_in  <- if (switchers != "out") .core_one_event_time(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, want_se = want_se, cluster_col = cluster_col)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
-    res_out <- if (switchers != "in")  .core_one_event_time(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, skip_prep = both_dirs)
+    res_out <- if (switchers != "in")  .core_one_event_time(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, want_se = want_se, cluster_col = cluster_col, skip_prep = both_dirs)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
     # Neyman pooling across directions, exactly as the reference does at
     # did_multiplegt_main.R:859-861. SIGN CONVENTION: at line 804 of
@@ -1131,11 +1216,32 @@
     delta_ate[k] <- if (n_in == 0L) da_out
                     else if (n_out == 0L) da_in
                     else w_in * da_in + (1 - w_in) * da_out
+
+    # Analytic SE. The influence vectors pool across directions with the
+    # SAME Neyman weights as the estimate, and the out-direction enters
+    # negated, exactly as the reference stores it
+    # (did_multiplegt_main.R:806, :1011-1014).
+    if (isTRUE(want_se)) {
+      uv_in  <- if (n_in  > 0L) res_in$u_var  else NULL
+      uv_out <- if (n_out > 0L) res_out$u_var else NULL
+      ucol <- numeric(G_all)
+      if (!is.null(uv_in))  ucol <- ucol + w_in * uv_in
+      if (!is.null(uv_out)) ucol <- ucol - (1 - w_in) * uv_out
+      u_mat[, k] <- ucol
+      se_k <- .se_from_u(ucol, G_all, cog)
+      # `normalized` rescales the estimate, so it rescales its SE too
+      # (did_multiplegt_main.R:1054-1056).
+      if (isTRUE(normalized)) {
+        se_k <- if (!is.na(delta_k) && delta_k != 0) se_k / delta_k else NA_real_
+      }
+      se_vec[k] <- se_k
+    }
   }
   list(effects = out, effects_raw = out_raw,
        n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
-       delta_D = delta_D, delta_ate = delta_ate)
+       delta_D = delta_D, delta_ate = delta_ate,
+       se = se_vec, u_mat = u_mat, G = G_all, cluster_of_group = cog)
 }
 
 
@@ -1491,6 +1597,14 @@
     sspl <- isTRUE(args$same_switchers_pl)
     nrm  <- isTRUE(args$normalized)
     h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
+    # Analytic SEs are available except when the estimator has an
+    # estimated nuisance in it. With `controls` (and with `continuous`,
+    # which adds polynomial controls of its own) the reference subtracts
+    # a control-estimation correction from the influence function --
+    # part2_switch in did_multiplegt_dyn_core.R:502-535 -- that didgpu
+    # does not compute. Reporting the uncorrected number would be wrong
+    # by ~1e-4, so the bootstrap remains the SE source there.
+    want_se <- (iter_seed == 0L) && is.null(prefit)
     if (tl) {
       ce <- .compute_effects_trends_lin(prepped, h$l_eff, switchers = sw,
                                           prefit = prefit,
@@ -1507,10 +1621,14 @@
       ce <- .compute_effects(prepped, h$l_eff, switchers = sw, prefit = prefit,
                               only_never_switchers = ons,
                               same_switchers = ss,
-                              normalized = nrm)
+                              normalized = nrm,
+                              want_se = want_se,
+                              cluster_col = args$cluster)
       cp <- .compute_placebos(prepped, h$l_pl, switchers = sw, prefit = prefit,
                                only_never_switchers = ons,
                                normalized = nrm,
+                               want_se = want_se,
+                               cluster_col = args$cluster,
                                same_switchers_pl = sspl)
     }
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
@@ -1524,6 +1642,21 @@
       NA_real_
     } else {
       .ate_weighted(ce$effects_raw, ce$n_inc, ce$delta_ate)
+    }
+    # The ATE's influence function collapses the same way its point
+    # estimate does (see .ate_weighted): the per-arm normalisations
+    # cancel, leaving one ratio over event-times. The per-event-time
+    # columns of ce$u_mat are already Neyman-pooled with weight n_inc,
+    # so sum_k n_inc[k] * u_mat[, k] is the numerator and the ATE's own
+    # denominator sum_k n_inc[k] * delta_ate[k] divides it.
+    se_ate <- if (tl || is.null(ce$u_mat)) NA_real_ else {
+      ok <- !is.na(ce$effects_raw) & !is.na(ce$delta_ate) &
+            is.finite(ce$n_inc) & ce$n_inc > 0
+      den <- if (any(ok)) sum(ce$n_inc[ok] * ce$delta_ate[ok]) else 0
+      if (!any(ok) || !is.finite(den) || den == 0) NA_real_ else {
+        u_ate <- as.numeric(ce$u_mat[, ok, drop = FALSE] %*% ce$n_inc[ok]) / den
+        .se_from_u(u_ate, ce$G, ce$cluster_of_group)
+      }
     }
 
     # predict_het: post-fit heterogeneity regression. Only run on the
@@ -1552,6 +1685,13 @@
       n_placebos     = h$l_pl,
       n_inc_effects  = ce$n_inc,
       n_inc_placebos = cp$n_inc,
+      se_effects     = ce$se,
+      se_placebos    = cp$se,
+      se_ate         = se_ate,
+      u_mat_effects  = ce$u_mat,
+      u_mat_placebos = cp$u_mat,
+      se_G           = ce$G,
+      se_cluster_of_group = ce$cluster_of_group,
       n_eff_effects  = ce$n_eff,
       n_eff_placebos = cp$n_eff,
       # Weighted/unweighted reported-count breakdown (4 output columns):

@@ -120,11 +120,12 @@ didgpu_compare <- function(
   report <- do.call(rbind, rows)
   report <- report[!is.na(report$max_abs_diff), ]
 
-  # For SE / CI columns the comparison is only meaningful when we
-  # provided a bootstrap (here we pass bootstrap_reps=0); reference
-  # SEs are analytical, ours are NA in that case. So mark them as
-  # informational and don't fail on them.
-  report$fails <- report$max_abs_diff > tolerance & report$col == "Estimate"
+  # Every reported column now counts. This used to fail only on
+  # `Estimate`, because didgpu bootstrapped its SEs while the reference
+  # derived them analytically, so the SE and CI rows were noise at best
+  # and NA at worst. didgpu computes the analytic SEs now, so those
+  # columns are held to the same tolerance as the estimates.
+  report$fails <- report$max_abs_diff > tolerance
 
   if (verbose) {
     cat(sprintf("didgpu_compare: tolerance = %.1e\n", tolerance))

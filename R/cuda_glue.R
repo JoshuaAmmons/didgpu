@@ -25,7 +25,7 @@
 #'   `.core_one_event_time` returns).
 #' @keywords internal
 #' @noRd
-.cuda_one_event_time <- function(prepped, k, direction = 1L) {
+.cuda_one_event_time <- function(prepped, k, direction = 1L, want_se = FALSE, cluster_col = NULL) {
   if (!isTRUE(didgpu_has_cuda_support())) {
     stop("CUDA backend not built. Install the NVIDIA CUDA Toolkit and ",
          "reinstall didgpu so nvcc compiles src/cuda_*.cu.")
@@ -106,13 +106,25 @@
   N_inc <- sum(d2$N_gt_XX * d2$dist_k_XX, na.rm = TRUE)
   if (N_inc == 0) {
     return(list(att = NA_real_, N_inc = 0L, N_eff = 0L,
-                U_g = numeric(n_groups), delta_ate = NA_real_))
+                U_g = numeric(n_groups), delta_ate = NA_real_,
+                u_var = NULL))
   }
   G_over_Ninc <- n_groups / N_inc
-  # Av_tot_eff's denominator. d2 already carries the (k, direction)
-  # switcher mask that N_inc was built from, so this is just the final
-  # reduction -- see .delta_ate_from_mask and .ate_weighted in core_r.R.
+  # Av_tot_eff's denominator, and the analytic-SE influence contribution.
+  # d2 already carries the (k, direction) switcher mask that N_inc was
+  # built from, so both are just reductions over it -- see
+  # .delta_ate_from_mask / .se_u_g_var in core_r.R and analytic_se.R.
   delta_ate <- .delta_ate_from_mask(d2, N_inc)
+  u_var <- NULL
+  if (isTRUE(want_se)) {
+    cohort_cols <- c("time_XX", "d_sq_XX")
+    if ("trends_np_XX" %in% names(d2)) {
+      cohort_cols <- c(cohort_cols, "trends_np_XX")
+    }
+    d2[, N_t_switch := sum(N_gt_XX * dist_k_XX), by = cohort_cols]
+    d2[, ratio_XX := ifelse(N_t_control > 0, N_t_switch / N_t_control, 0)]
+    u_var <- .se_u_g_var(d2, k, n_groups, N_inc, cohort_cols, cluster_col)
+  }
 
   did <- didgpu_cuda_did(
     outcome     = as.numeric(d$outcome_XX),
@@ -134,5 +146,5 @@
   # kernel doesn't yet expose the "contributing rows" count.
   list(att = did, N_inc = as.integer(N_inc),
        N_eff = as.integer(N_inc), U_g = numeric(n_groups),
-       delta_ate = delta_ate)
+       delta_ate = delta_ate, u_var = u_var)
 }

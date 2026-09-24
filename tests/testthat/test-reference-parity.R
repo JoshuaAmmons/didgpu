@@ -1,7 +1,10 @@
 # Numerical equivalence: didgpu (reference backend) must produce point
-# estimates identical to DIDmultiplegtDYN. SEs differ by construction
-# (bootstrap vs. analytic) and are not compared here -- see
-# test-bootstrap-converges.R for the SE convergence test.
+# estimates identical to DIDmultiplegtDYN.
+#
+# SEs used to differ by construction -- didgpu bootstrapped, the
+# reference used its asymptotic linear representation -- and this file
+# said so and skipped them. didgpu now computes the analytic SEs too, so
+# they ARE compared, in test-analytic-se.R.
 
 test_that("reference backend point estimate matches DIDmultiplegtDYN exactly", {
   skip_if_no_reference()

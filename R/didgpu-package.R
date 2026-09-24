@@ -69,6 +69,11 @@ utils::globalVariables(c(
   "ever_strict_increase_tmp", "ever_strict_decrease_tmp",
   # continuous scratch in .prep_panel
   "d_sq_XX_orig", "treatment_XX_orig", "S_g_het_XX", "delta_ate_XX",
+  "d_fg_XX", "dof_ns_XX", "dof_s_XX", "dof_ns_s_XX", "diff_y_N_XX",
+  "cnt_ns_XX", "tot_ns_XX", "mean_ns_XX", "dofc_ns_XX",
+  "cnt_s_XX", "tot_s_XX", "mean_s_XX", "dofc_s_XX",
+  "cnt_nss_XX", "tot_nss_XX", "mean_nss_XX", "dofc_nss_XX",
+  "E_hat_XX", "DOF_XX", "kern_var_XX", "cl_tmp_XX",
   # same_switchers pre-pass scratch
   "still_switcher_XX", "N_g_control_check_XX",
   "diff_y_last_XX", "never_change_d_last_XX",
