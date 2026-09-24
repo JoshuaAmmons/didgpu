@@ -100,8 +100,11 @@
   refused.** Cells carry whatever estimator produced them, and two have
   changed in this release (the ATE became `Av_tot_eff`; the SEs became
   analytic), so resuming would silently mix old and new numbers in one
-  result. `didgpu()` now compares the stored `package_version` and stops
-  with an explanation instead.
+  result. Every checkpoint now records an estimator revision, and
+  `didgpu()` refuses to resume one written under a different revision --
+  or one with no revision, which predates the stamp -- and explains why.
+  The package version alone could not do this: all of these changes
+  shipped as 0.1.2.
 
 
 - **`ATE` did not match `DIDmultiplegtDYN`'s `Av_tot_eff` unless treatment

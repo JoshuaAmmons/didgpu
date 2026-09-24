@@ -184,17 +184,29 @@ test_that("a checkpoint from another version is refused, not resumed", {
            backend = "r", verbose = FALSE, checkpoint_dir = cdir)))
   meta_path <- file.path(cdir, "meta.json")
   expect_true(file.exists(meta_path))
-  m <- jsonlite::fromJSON(meta_path)
-  m$package_version <- "0.0.1"
-  writeLines(jsonlite::toJSON(m, auto_unbox = TRUE, pretty = TRUE,
-                              null = "null"), meta_path, useBytes = TRUE)
-  expect_error(
-    suppressMessages(suppressWarnings(
-      didgpu(df = d, outcome = "Y", group = "unit", time = "period",
-             treatment = "D", effects = 2L, placebo = 0L,
-             bootstrap_reps = 2L, backend = "r", verbose = FALSE,
-             checkpoint_dir = cdir))),
-    "different version")
+  m0 <- jsonlite::fromJSON(meta_path)
+  expect_identical(as.integer(m0$cell_rev), didgpu:::.didgpu_cell_rev)
+  rerun <- function() suppressMessages(suppressWarnings(
+    didgpu(df = d, outcome = "Y", group = "unit", time = "period",
+           treatment = "D", effects = 2L, placebo = 0L,
+           bootstrap_reps = 2L, backend = "r", verbose = FALSE,
+           checkpoint_dir = cdir)))
+  put <- function(m) writeLines(jsonlite::toJSON(m, auto_unbox = TRUE,
+                                pretty = TRUE, null = "null"),
+                                meta_path, useBytes = TRUE)
+
+  # An unchanged checkpoint resumes.
+  expect_no_error(rerun())
+
+  # An older estimator revision is refused -- even under the SAME
+  # package version string, which is exactly the case a version-only
+  # check missed (every build this release reports 0.1.2).
+  m <- m0; m$cell_rev <- didgpu:::.didgpu_cell_rev - 1L; put(m)
+  expect_error(rerun(), "different didgpu build")
+
+  # A checkpoint from before the stamp existed is refused too.
+  m <- m0; m$cell_rev <- NULL; put(m)
+  expect_error(rerun(), "different didgpu build")
 })
 
 test_that("controls fall back to the bootstrap rather than a near-miss SE", {

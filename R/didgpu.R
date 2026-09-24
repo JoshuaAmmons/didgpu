@@ -308,7 +308,8 @@ didgpu <- function(
     } else {
       pkgv <- tryCatch(as.character(utils::packageVersion("didgpu")),
                        error = function(e) "0.0.0.dev")
-      meta <- c(args, list(panel_hash = ph, package_version = pkgv))
+      meta <- c(args, list(panel_hash = ph, package_version = pkgv,
+                           cell_rev = .didgpu_cell_rev))
       didgpu_init_checkpoint(checkpoint_dir, meta, force = !resume)
       manifest <- .empty_manifest()
     }
@@ -459,6 +460,16 @@ didgpu <- function(
   v
 }
 
+# Revision of what a saved cell MEANS. Bump it whenever an estimator
+# change alters the numbers a cell holds, so checkpoints written before
+# the change are refused on resume rather than silently mixed in.
+#   1  original
+#   2  ATE is Av_tot_eff, per unit of treatment
+#   3  analytic SEs and influence vectors carried in the point-estimate cell
+#' @keywords internal
+#' @noRd
+.didgpu_cell_rev <- 3L
+
 .check_meta_compatibility <- function(meta, panel_hash, args) {
   must_match <- list(
     panel_hash     = panel_hash,
@@ -478,13 +489,20 @@ didgpu <- function(
   # they moved from bootstrap to analytic. Resuming into such a directory
   # silently mixes old and new numbers in one result, which is worse than
   # either, so refuse rather than warn.
+  # The package version alone cannot do this job: several estimator
+  # changes shipped under the same version string (0.1.2), so a
+  # version-only check would wave stale cells through. Every checkpoint
+  # therefore also records .didgpu_cell_rev, bumped whenever a cell's
+  # contents change meaning, and a checkpoint without one predates the
+  # stamp and is treated as stale.
+  have_r <- meta[["cell_rev"]]
   have_v <- meta[["package_version"]]
-  want_v <- as.character(utils::packageVersion("didgpu"))
-  if (!is.null(have_v) && !identical(as.character(have_v), want_v)) {
-    stop("Checkpoint was written by didgpu ", have_v,
-         " but this is didgpu ", want_v,
-         ". Cells from a different version may come from a different ",
-         "estimator, so resuming would mix them. Re-run into a fresh ",
+  if (is.null(have_r) || !isTRUE(as.integer(have_r) == .didgpu_cell_rev)) {
+    stop("Checkpoint was written by a different didgpu build (didgpu ",
+         have_v %||% "unknown", ", estimator revision ",
+         have_r %||% "none", "; this build is revision ", .didgpu_cell_rev,
+         "). Its cells may come from a different estimator, so resuming ",
+         "would mix old and new numbers. Re-run into a fresh ",
          "checkpoint_dir, or pass resume = FALSE to discard and recompute.",
          call. = FALSE)
   }
