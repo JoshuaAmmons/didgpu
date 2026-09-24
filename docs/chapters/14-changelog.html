@@ -485,10 +485,11 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#didgpu-0.1.2" id="toc-didgpu-0.1.2" class="nav-link" data-scroll-target="#didgpu-0.1.2"><span class="header-section-number">17</span> didgpu 0.1.2</a>
   <ul class="collapse">
   <li><a href="#build" id="toc-build" class="nav-link" data-scroll-target="#build"><span class="header-section-number">17.1</span> Build</a></li>
-  <li><a href="#bug-fixes" id="toc-bug-fixes" class="nav-link" data-scroll-target="#bug-fixes"><span class="header-section-number">17.2</span> Bug fixes</a></li>
-  <li><a href="#new-features" id="toc-new-features" class="nav-link" data-scroll-target="#new-features"><span class="header-section-number">17.3</span> New features</a></li>
-  <li><a href="#new-features-1" id="toc-new-features-1" class="nav-link" data-scroll-target="#new-features-1"><span class="header-section-number">17.4</span> New features</a></li>
-  <li><a href="#cran-resubmission-fixes" id="toc-cran-resubmission-fixes" class="nav-link" data-scroll-target="#cran-resubmission-fixes"><span class="header-section-number">17.5</span> CRAN resubmission fixes</a></li>
+  <li><a href="#new-arguments-callaway-santanna" id="toc-new-arguments-callaway-santanna" class="nav-link" data-scroll-target="#new-arguments-callaway-santanna"><span class="header-section-number">17.2</span> New arguments (Callaway-Sant’Anna)</a></li>
+  <li><a href="#bug-fixes" id="toc-bug-fixes" class="nav-link" data-scroll-target="#bug-fixes"><span class="header-section-number">17.3</span> Bug fixes</a></li>
+  <li><a href="#new-features" id="toc-new-features" class="nav-link" data-scroll-target="#new-features"><span class="header-section-number">17.4</span> New features</a></li>
+  <li><a href="#new-features-1" id="toc-new-features-1" class="nav-link" data-scroll-target="#new-features-1"><span class="header-section-number">17.5</span> New features</a></li>
+  <li><a href="#cran-resubmission-fixes" id="toc-cran-resubmission-fixes" class="nav-link" data-scroll-target="#cran-resubmission-fixes"><span class="header-section-number">17.6</span> CRAN resubmission fixes</a></li>
   </ul></li>
   <li><a href="#didgpu-0.1.1" id="toc-didgpu-0.1.1" class="nav-link" data-scroll-target="#didgpu-0.1.1"><span class="header-section-number">18</span> didgpu 0.1.1</a>
   <ul class="collapse">
@@ -553,8 +554,18 @@ CPU-only build  Status: OK</code></pre>
 <p>The NOTE names only <code>cudart64_13.dll</code> and <code>didgpu_cuda.dll</code> – NVIDIA’s runtime and the package’s CUDA helper. Neither is an R extension, so neither calls <code>R_registerRoutines</code>, and neither exists in a CPU-only build. That the NOTE is CUDA-only is now demonstrable rather than asserted.</p></li>
 </ul>
 </section>
-<section id="bug-fixes" class="level2" data-number="17.2">
-<h2 data-number="17.2" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">17.2</span> Bug fixes</h2>
+<section id="new-arguments-callaway-santanna" class="level2" data-number="17.2">
+<h2 data-number="17.2" class="anchored" data-anchor-id="new-arguments-callaway-santanna"><span class="header-section-number">17.2</span> New arguments (Callaway-Sant’Anna)</h2>
+<ul>
+<li><strong><code>didgpu_cs(base_period = c("varying", "universal"))</code></strong>, defaulting to <code>"varying"</code> as <code>did::att_gt</code> does. didgpu previously always used the universal base period, so under defaults every pre-treatment cell of the event study differed from <code>did</code>. Post-treatment cells and the overall ATT are the same under both. <strong>Behavior change:</strong> to keep the previous output, pass <code>base_period = "universal"</code>.</li>
+<li><strong><code>didgpu_cs(allow_unbalanced_panel = FALSE)</code></strong>, as in <code>did</code>. On an unbalanced panel didgpu used, cell by cell, whatever units happened to be observed in both periods – which matched neither of <code>did</code>’s modes (on a real non-trade sales-growth panel, -0.060 against <code>did</code>’s -0.096). Now <code>FALSE</code> (the default) balances the panel first, dropping units not observed in every period, and <code>TRUE</code> uses the repeated-cross-section estimators of Sant’Anna and Zhao (2020): a port of <code>DRDID::reg_did_rc</code>, <code>std_ipw_did_rc</code> and <code>drdid_rc</code>, matching them to 2e-15 in the ATT and 3e-14 in the influence function. <strong>Behavior change</strong> on unbalanced panels.</li>
+<li><strong><code>didgpu_cs(first_treat = NULL)</code></strong>: the column holding each unit’s first-treatment period, <code>did</code>’s <code>gname</code>. Cohorts were always inferred from the treatment column, which puts a unit whose adoption-period row is missing into a later cohort; with <code>allow_unbalanced_panel = TRUE</code> that is common, and didgpu now warns when it happens without <code>first_treat</code>.</li>
+</ul>
+<p>Against <code>did</code> 2.5.1, <code>didgpu_cs()</code> now matches every ATT(g,t), the overall, event-study, group and calendar aggregates and all their SEs to &lt;= 6e-16, for OR / IPW / DR, both base periods, both control groups, and balanced, balanced-by-dropping and repeated-cross-section panels. Also fixed along the way: with <code>control_group = "notyet"</code> and a universal base period, controls are now chosen at the later of the two periods compared, as in <code>did</code>; and an aggregated SE that is numerically zero (the universal base period’s own event time) is reported as <code>NA</code>, as <code>aggte</code> does.</p>
+<p><code>did</code> 2.3.0 has two bugs, both fixed in 2.5.0, that make it disagree with this: an integer <code>gname</code> silently removes the never-treated group (bcallaway11/did#264), and under <code>allow_unbalanced_panel = TRUE</code> its influence functions land on the wrong units, so every SE that combines cells changes when the units are merely renumbered (overall SE 0.071487 vs 0.072007 on one test panel; <code>did</code> 2.5.1 and didgpu both give 0.071407 either way). <code>test-cs-unbalanced.R</code> compares those combined SEs only against <code>did</code> &gt;= 2.5.0.</p>
+</section>
+<section id="bug-fixes" class="level2" data-number="17.3">
+<h2 data-number="17.3" class="anchored" data-anchor-id="bug-fixes"><span class="header-section-number">17.3</span> Bug fixes</h2>
 <ul>
 <li><p><strong>dCDH disagreed with <code>DIDmultiplegtDYN</code> on panels with gaps or repeated firm-years.</strong> Every balanced-panel parity test passed, but on the annual tax panels of a real application – which drop loss-making years, leaving holes in 40-50% of firms’ histories – the estimates moved, most under <code>only_never_switchers = TRUE</code>:</p>
 <pre><code>tric_tax   Effect_2   didgpu -0.0156   reference -0.0145
@@ -626,8 +637,8 @@ L ~ 3.0     1.0    +1.00064   -0.17445        +0.94980</code></pre>
 <li><p><strong><code>didgpu_fect(method = "fe")</code> stopped before converging.</strong> The fit had a second stopping rule, <code>abs(loss - prev_loss) &lt; tol</code>, where <code>loss</code> is a SUM of squared residuals. Its absolute change falls below a tolerance meant for parameter units long before the parameters settle, so it fired first: on a 60x10 panel the fit exited after 6 iterations with <code>delta = 2.0e-04</code> against the requested <code>1e-05</code> and reported itself finished. Convergence is now judged on the parameters alone. <code>fe</code> converges in 9 iterations and its agreement with <code>fect::fect</code> improved from 2.81e-05 to 7.80e-07.</p></li>
 </ul>
 </section>
-<section id="new-features" class="level2" data-number="17.3">
-<h2 data-number="17.3" class="anchored" data-anchor-id="new-features"><span class="header-section-number">17.3</span> New features</h2>
+<section id="new-features" class="level2" data-number="17.4">
+<h2 data-number="17.4" class="anchored" data-anchor-id="new-features"><span class="header-section-number">17.4</span> New features</h2>
 <ul>
 <li><p><strong><code>didgpu_fect()</code> reports convergence diagnostics and warns when a fit does not converge.</strong> The solver already produced <code>iter</code>, <code>delta</code> and <code>lambda</code> per cell but nothing surfaced them, so a caller could not tell a converged fit from one that had exhausted <code>max_iter</code> – both returned a number and looked identical. Results now carry <code>$diagnostics</code> (<code>iter</code>, <code>delta</code>, <code>converged</code>, <code>tol</code>, <code>max_iter</code>, <code>lambda</code>, <code>n_nonzero_singular</code>) and a non-converged fit warns.</p>
 <p>This immediately exposed two problems that had been invisible: <code>fe</code> was exiting after 6 iterations (fixed above), and <code>method = "ife"</code> exhausts <code>max_iter</code> without converging at default settings. The latter is a known outstanding defect – <code>ife</code> is materially wrong as the factor structure strengthens – and is not yet fixed.</p></li>
@@ -652,8 +663,8 @@ cuda      8.465e-01</code></pre>
 <li><p><strong>The batched CUDA inner kernel for <code>didgpu_cs()</code> is disabled pending a matching rewrite.</strong> Its ATT agrees with the CPU path to ~4e-16, but it computes the OLD influence functions, and those now feed both the multiplier bootstrap and the aggregation SEs. After the CPU rewrite, per-cell <code>max |dSE|</code> against <code>did::att_gt()</code> was 1.11e-16 for backends <code>"r"</code> and <code>"cpu"</code> but 1.96e-01 for <code>"cuda"</code>. CS therefore routes through the validated CPU path, so all backends – <code>"r"</code>, <code>"cpu"</code> and <code>"cuda"</code> – now return identical numbers; verified at cell <code>max |dSE|</code> = 1.11e-16 and aggregate <code>max |dSE|</code> = 0 for every backend. Re-enable for kernel development with <code>options(didgpu.cs_cuda_inner = TRUE)</code>.</p></li>
 </ul>
 </section>
-<section id="new-features-1" class="level2" data-number="17.4">
-<h2 data-number="17.4" class="anchored" data-anchor-id="new-features-1"><span class="header-section-number">17.4</span> New features</h2>
+<section id="new-features-1" class="level2" data-number="17.5">
+<h2 data-number="17.5" class="anchored" data-anchor-id="new-features-1"><span class="header-section-number">17.5</span> New features</h2>
 <ul>
 <li><p><strong><code>didgpu_cs()</code> aggregations now carry standard errors and confidence intervals.</strong> <code>.cs_aggregate()</code> previously propagated point estimates only, so <code>$aggregation</code> had no <code>se</code> column (while its empty-result stub declared one) and <code>didgpu_tidy()</code> could only report <code>NA</code>. Aggregate SEs are now derived from the influence functions the same way <code>did::aggte()</code> derives them, including the correction for having ESTIMATED the aggregation weights (<code>did:::wif</code>) – without which SEs degrade badly at long event times, where few cohorts contribute (0.98x of correct at event 0, falling to 0.33x at event 9). Verified identical to <code>did::aggte(type = "dynamic")</code> for all three estimators, with and without covariates: max |diff| ~5e-16 on the aggregate estimate and ~3e-17 on its SE.</p>
 <p>Note that pre-treatment ATT(g, t) still differ from <code>did</code> by construction: didgpu uses a universal base period, <code>did</code> defaults to a varying one. Parity is asserted on post-treatment cells and non-negative event times.</p></li>
@@ -673,8 +684,8 @@ cuda      8.465e-01</code></pre>
 <li><p><strong>Bootstrap aggregation no longer crashes on degenerate resamples.</strong> Under sparse-switching treatments (few clean switchers), a bootstrap resample can contain no valid switcher cell at some horizon, yielding a zero-length effects vector. <code>.aggregate_to_result()</code>’s <code>vapply()</code> calls hard-required full-length vectors, so a single such iteration aborted the entire estimation with <code>values must be length K ... result is length 0</code> — and because the failure probability grows with <code>bootstrap_reps</code>, exactly the large-rep runs users want for final inference were the ones crashing. Degenerate iterations are now dropped with a warning that reports the count; SEs and the bootstrap covariance use the surviving iterations (standard failed-resample practice). Found while re-estimating thin subsamples at 2,000 reps; e.g.&nbsp;a 78-DAO/4-switcher spec had 103/2,000 degenerate resamples.</p></li>
 </ul>
 </section>
-<section id="cran-resubmission-fixes" class="level2" data-number="17.5">
-<h2 data-number="17.5" class="anchored" data-anchor-id="cran-resubmission-fixes"><span class="header-section-number">17.5</span> CRAN resubmission fixes</h2>
+<section id="cran-resubmission-fixes" class="level2" data-number="17.6">
+<h2 data-number="17.6" class="anchored" data-anchor-id="cran-resubmission-fixes"><span class="header-section-number">17.6</span> CRAN resubmission fixes</h2>
 <ul>
 <li><strong><code>test-parallel.R</code> now skips on CRAN.</strong> The previous submission’s pretest exceeded CRAN’s 2-core cap (<code>_R_CHECK_LIMIT_CORES_</code>) despite the test honouring the env var, producing the only test failure. Both <code>test_that</code> blocks in <code>test-parallel.R</code> now call <code>skip_on_cran()</code>. The parallel path is fully exercised in our GitHub Actions CI matrix on every push.</li>
 <li><strong>README links rewritten to absolute GitHub URLs.</strong> Two references (<code>WINDOWS_BUILD_STATUS.md</code>, <code>BENCHMARKS.md</code>) are intentionally excluded from the source tarball via <code>.Rbuildignore</code>; the README now points to their canonical GitHub URLs so they resolve from the rendered README on CRAN. One stale link (<code>../NOTES_did_gpu_checkpointed.Rmd</code>, an out-of-tree file that no longer exists) was removed.</li>
