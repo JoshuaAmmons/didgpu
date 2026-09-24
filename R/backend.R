@@ -152,10 +152,11 @@ didgpu_backend_info <- function() {
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
     # Pull the per-event-time point estimates. With bootstrap=NULL the
-    # reference still computes SEs analytically; we only consume the
-    # point estimates here (col 1 of Effects/Placebos) because the
-    # outer bootstrap loop is providing iteration replicates from which
-    # we will compute SEs ourselves at aggregate time.
+    # reference computes its SEs and joint nullity tests analytically, and
+    # on the point-estimate pass (iter_seed == 0) we keep those too, so
+    # backend = "reference" reports exactly what DIDmultiplegtDYN reports.
+    # It used to discard them and report the SD of didgpu's outer
+    # bootstrap instead, which is a different estimator.
     effects <- as.numeric(res$results$Effects[, 1])
     ate     <- if (!is.null(res$results$ATE)) as.numeric(res$results$ATE[1, 1])
                else NA_real_
@@ -202,6 +203,19 @@ didgpu_backend_info <- function() {
       n_sw_unw_placebos = n_sw_unw_placebos,
       n_sw_w_effects    = n_sw_w_effects,
       n_sw_w_placebos   = n_sw_w_placebos,
+      se_effects     = if (iter_seed == 0L)
+                         col_or_na(res$results$Effects, 2L, length(effects)) else NULL,
+      se_placebos    = if (iter_seed == 0L)
+                         col_or_na(pl_mat, 2L, length(placebos)) else NULL,
+      se_ate         = if (iter_seed == 0L && !is.null(res$results$ATE) &&
+                           ncol(res$results$ATE) >= 2L)
+                         as.numeric(res$results$ATE[1, 2]) else NA_real_,
+      p_joint_effects_ref = if (iter_seed == 0L)
+                              as.numeric(res$results$p_jointeffects %||% NA_real_)[1]
+                            else NA_real_,
+      p_joint_placebo_ref = if (iter_seed == 0L)
+                              as.numeric(res$results$p_jointplacebo %||% NA_real_)[1]
+                            else NA_real_,
       iter_seed      = as.integer(iter_seed),
       wall_seconds   = wall,
       backend        = "reference"

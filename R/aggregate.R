@@ -238,32 +238,57 @@
                                 c("Estimate", "SE", "LB.CI", "UB.CI",
                                   "N", "Switchers", "N.w", "Switchers.w")))
 
-  # Joint chi-square p-values via the bootstrap empirical covariance.
-  # Joint nullity tests. The reference builds these from the same
-  # influence functions as the SEs, getting the off-diagonal covariances
-  # by polarisation rather than from a resample, so prefer that whenever
-  # the point-estimate cell carries the influence matrix; fall back to
-  # the bootstrap covariance otherwise.
-  p_joint_e <- .se_joint_test(e0, cell0$u_mat_effects, e_se,
-                               cell0$se_G %||% NA_real_,
-                               cell0$se_cluster_of_group)
-  if (!is.finite(p_joint_e)) p_joint_e <- .joint_pvalue(e0, e_mat)
-  p_joint_p <- if (n_p > 0L) {
-    pj <- .se_joint_test(p0, cell0$u_mat_placebos, p_se,
-                          cell0$se_G %||% NA_real_,
-                          cell0$se_cluster_of_group)
-    if (is.finite(pj)) pj else .joint_pvalue(p0, p_mat)
-  } else NA_real_
-
-  # Coefficient vector + bootstrap vcov for the full b parameter
-  # (effects then placebos).
+  # Coefficient vector and its covariance, effects then placebos.
+  #
+  # When the point-estimate cell carries the influence vectors, the
+  # covariance is ANALYTIC: se^2 on the diagonal, polarisation off it,
+  # the way DIDmultiplegtDYN builds its joint tests. That one matrix then
+  # feeds vcov(), fit$results$p_jointeffects / p_jointplacebo, and
+  # didgpu_joint_placebo(), so the three can never disagree with each
+  # other or with the reported SE column. (They did: once the SEs became
+  # analytic, vcov() was still the bootstrap covariance, so its diagonal
+  # stopped matching SE^2 and the windowed placebo test stopped
+  # reproducing the headline one.) The bootstrap covariance is the
+  # fallback when no influence vectors exist -- controls, continuous,
+  # trends_lin.
   b <- c(e0, p0)
   names(b) <- c(effect_names, placebo_names)
-  V <- if (nrow(e_mat) >= 2L) {
-    full <- if (n_p > 0L) cbind(e_mat, p_mat) else e_mat
-    stats::cov(full, use = "pairwise.complete.obs")
-  } else matrix(NA_real_, nrow = length(b), ncol = length(b))
+  G_se <- cell0$se_G %||% NA_real_
+  cog  <- cell0$se_cluster_of_group
+  U_e <- .se_scale_u(cell0$u_mat_effects,  cell0$u_scale_effects)
+  U_p <- .se_scale_u(cell0$u_mat_placebos, cell0$u_scale_placebos)
+  have_an <- !is.null(U_e) && ncol(U_e) == n_e &&
+             (n_p == 0L || (!is.null(U_p) && ncol(U_p) == n_p)) &&
+             all(is.finite(c(e_se, p_se)))
+  V <- NULL
+  if (have_an) {
+    U_all <- if (n_p > 0L) cbind(U_e, U_p) else U_e
+    V <- .se_vcov_from_u(U_all, c(e_se, p_se), G_se, cog)
+    if (!all(is.finite(V))) V <- NULL
+  }
+  if (is.null(V)) {
+    V <- if (nrow(e_mat) >= 2L) {
+      full <- if (n_p > 0L) cbind(e_mat, p_mat) else e_mat
+      stats::cov(full, use = "pairwise.complete.obs")
+    } else matrix(NA_real_, nrow = length(b), ncol = length(b))
+  }
   dimnames(V) <- list(names(b), names(b))
+
+  # Joint nullity tests, from V when it is analytic.
+  ie <- seq_len(n_e); ip <- n_e + seq_len(n_p)
+  if (have_an && all(is.finite(V))) {
+    p_joint_e <- .se_chisq_p(e0, V[ie, ie, drop = FALSE])
+    p_joint_p <- if (n_p > 0L) .se_chisq_p(p0, V[ip, ip, drop = FALSE]) else NA_real_
+  } else {
+    p_joint_e <- .joint_pvalue(e0, e_mat)
+    p_joint_p <- if (n_p > 0L) .joint_pvalue(p0, p_mat) else NA_real_
+  }
+  # backend = "reference" carries DIDmultiplegtDYN's own analytic joint
+  # tests (it has no influence vectors to rebuild them from); use those.
+  pj_ref_e <- cell0$p_joint_effects_ref %||% NA_real_
+  pj_ref_p <- cell0$p_joint_placebo_ref %||% NA_real_
+  if (!have_an && is.finite(pj_ref_e)) p_joint_e <- pj_ref_e
+  if (!have_an && n_p > 0L && is.finite(pj_ref_p)) p_joint_p <- pj_ref_p
 
   # predict_het: carry the iter-0 cell's block (a data.frame) through
   # into results$predict_het. If absent, omit the field.
@@ -618,10 +643,13 @@ plot.didgpu_result <- function(x, ...,
 
 #' Variance-covariance matrix of estimates
 #'
-#' Returns the empirical covariance matrix of the bootstrap replicate
-#' distribution over `(Effects, Placebos)`, computed at fit time and
-#' stored on the result. When `bootstrap_reps = 0` (or only one rep),
-#' returns a square NA matrix because the covariance is undefined.
+#' Returns the covariance matrix of `(Effects, Placebos)`, computed at fit
+#' time and stored on the result. It is analytic -- built from the same
+#' influence functions as the reported SEs, so its diagonal equals
+#' `SE^2` exactly and it needs no bootstrap. Where analytic SEs are not
+#' available (`controls`, `continuous`, `trends_lin`) it is the empirical
+#' covariance of the bootstrap replicates instead, and a square NA matrix
+#' if `bootstrap_reps` is 0 or 1.
 #'
 #' The ordering matches `coef(object)`'s default (effects first, then
 #' placebos). The ATE row/column is NOT included — it is a linear

@@ -15,10 +15,13 @@
 A square matrix.
 }
 \description{
-Returns the empirical covariance matrix of the bootstrap replicate
-distribution over \verb{(Effects, Placebos)}, computed at fit time and
-stored on the result. When \code{bootstrap_reps = 0} (or only one rep),
-returns a square NA matrix because the covariance is undefined.
+Returns the covariance matrix of \code{(Effects, Placebos)}, computed at fit
+time and stored on the result. It is analytic -- built from the same
+influence functions as the reported SEs, so its diagonal equals
+\code{SE^2} exactly and it needs no bootstrap. Where analytic SEs are not
+available (\code{controls}, \code{continuous}, \code{trends_lin}) it is the empirical
+covariance of the bootstrap replicates instead, and a square NA matrix
+if \code{bootstrap_reps} is 0 or 1.
 }
 \details{
 The ordering matches \code{coef(object)}'s default (effects first, then

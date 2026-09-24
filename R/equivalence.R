@@ -209,7 +209,7 @@ didgpu_joint_placebo <- function(x, horizons = NULL) {
   b <- x$coef$b
   V <- x$coef$vcov
   if (is.null(b) || is.null(V))
-    stop("`x` lacks the stored coefficient vector / bootstrap covariance.")
+    stop("`x` lacks the stored coefficient vector / covariance.")
   if (!all(sel %in% names(b)))
     stop("internal: placebo names not found in the coefficient vector.")
 
@@ -218,7 +218,7 @@ didgpu_joint_placebo <- function(x, horizons = NULL) {
   k     <- length(sel)
 
   if (any(!is.finite(Vsub))) {
-    # Too few bootstrap reps to form a covariance (matches .joint_pvalue).
+    # No usable covariance (no analytic SEs and too few bootstrap reps).
     stat <- NA_real_; pval <- NA_real_
   } else {
     inv <- try(solve(Vsub), silent = TRUE)

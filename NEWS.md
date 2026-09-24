@@ -68,6 +68,29 @@
   returning a silent `NA` column. Point estimates with controls are
   unaffected and still match the reference exactly (1.1e-16).
 
+- **`vcov()`, the joint tests and `didgpu_joint_placebo()` now come from
+  one analytic covariance matrix.** When the SEs first became analytic,
+  `vcov()` was still the bootstrap covariance, so its diagonal stopped
+  matching `SE^2` (0.0039 vs 0.0132) and `didgpu_joint_placebo()`, which
+  reads it, stopped reproducing `p_jointplacebo` (0.641 vs 0.678). The
+  matrix is now built from the same influence vectors as the SEs -- `SE^2`
+  on the diagonal, polarisation off it -- and all three read it.
+
+- **Joint tests under `normalized = TRUE` were wrong in the first
+  analytic version.** The reference divides each influence vector by
+  `delta_k` before polarising (`did_multiplegt_main.R:1170-1175`); the
+  first version polarised the raw vectors against the normalised SEs. Now
+  pinned against `DIDmultiplegtDYN` on a multivalued design where
+  `delta_k != 1`.
+
+- **`backend = "reference"` reports `DIDmultiplegtDYN`'s own SEs and joint
+  tests.** It delegates to the reference for the point estimates but
+  discarded the reference's analytic SEs and reported the SD of didgpu's
+  outer bootstrap instead -- a different estimator, and one that no
+  longer matched `backend = "r"`. Its `vcov()` remains the bootstrap
+  covariance, since the reference exposes no covariances to build one
+  from.
+
 - **`didgpu_compare()` now fails on the `SE` and CI rows too.** It scored
   only the `Estimate` rows, on the since-removed grounds that "reference
   SEs are analytical, ours are NA in that case". Those columns now carry

@@ -229,33 +229,60 @@
 }
 
 
-# Joint nullity test over a block of estimates, from the analytic
-# covariance. Mirrors did_multiplegt_main.R:1163-1192: a generalised
-# inverse, then a chi-square on the full rank of the block.
+# Full analytic covariance matrix of a block of estimates, from their
+# per-group influence vectors: se^2 on the diagonal, polarisation off it.
+# Columns of U must already be on the scale of the reported estimate --
+# under `normalized` that means divided by delta_k, which is exactly what
+# the reference does before polarising (did_multiplegt_main.R:1170-1175).
 #' @keywords internal
 #' @noRd
-.se_joint_test <- function(est, U, se, G, cluster_of_group = NULL) {
-  n <- length(est)
-  if (n < 2L || is.null(U)) return(NA_real_)
-  if (!is.numeric(G) || length(G) != 1L || !is.finite(G) || G <= 0) {
-    return(NA_real_)
-  }
-  if (!is.matrix(U) || ncol(U) != n) return(NA_real_)
-  if (!all(is.finite(est)) || !all(is.finite(se))) return(NA_real_)
-  V <- matrix(0, n, n)
+.se_vcov_from_u <- function(U, se, G, cluster_of_group = NULL) {
+  n <- length(se)
+  V <- matrix(NA_real_, n, n)
+  if (n == 0L || is.null(U) || !is.matrix(U) || ncol(U) != n) return(V)
+  if (!is.numeric(G) || length(G) != 1L || !is.finite(G) || G <= 0) return(V)
   diag(V) <- se^2
-  for (i in seq_len(n - 1L)) {
-    for (j in (i + 1L):n) {
-      cv <- .se_cov_from_u(U[, i], U[, j], se[i], se[j], G,
-                            cluster_of_group)
-      if (!is.finite(cv)) return(NA_real_)
-      V[i, j] <- cv
-      V[j, i] <- cv
+  if (n >= 2L) {
+    for (i in seq_len(n - 1L)) {
+      for (j in (i + 1L):n) {
+        cv <- .se_cov_from_u(U[, i], U[, j], se[i], se[j], G,
+                              cluster_of_group)
+        V[i, j] <- cv
+        V[j, i] <- cv
+      }
     }
   }
+  V
+}
+
+
+# Joint nullity chi-square over a block, from its covariance. A
+# generalised inverse, as the reference uses (Ginv at
+# did_multiplegt_main.R:1188), and df = the size of the block.
+#' @keywords internal
+#' @noRd
+.se_chisq_p <- function(est, V) {
+  n <- length(est)
+  if (n < 2L || is.null(V)) return(NA_real_)
+  if (!all(is.finite(est)) || !all(is.finite(V))) return(NA_real_)
   Vinv <- tryCatch(MASS::ginv(V), error = function(e) NULL)
   if (is.null(Vinv)) return(NA_real_)
   chi2 <- as.numeric(t(est) %*% Vinv %*% est)
   if (!is.finite(chi2)) return(NA_real_)
   stats::pchisq(chi2, df = n, lower.tail = FALSE)
+}
+
+
+# Put an influence matrix on the reported estimate's scale: column k is
+# divided by scale[k] (delta_k under `normalized`, 1 otherwise). A
+# missing or zero scale makes that column NA rather than dividing by it.
+#' @keywords internal
+#' @noRd
+.se_scale_u <- function(U, scale) {
+  if (is.null(U) || is.null(scale)) return(U)
+  if (length(scale) != ncol(U)) return(U)
+  ok <- is.finite(scale) & scale != 0
+  U[, !ok] <- NA_real_
+  if (any(ok)) U[, ok] <- sweep(U[, ok, drop = FALSE], 2L, scale[ok], "/")
+  U
 }

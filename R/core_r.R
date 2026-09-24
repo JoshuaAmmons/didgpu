@@ -1093,6 +1093,7 @@
     }
   }
   list(placebos = out, se = se_vec, u_mat = u_mat,
+       u_scale = if (isTRUE(normalized)) delta_D else rep(1, placebo),
        n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
        delta_D = delta_D)
@@ -1241,7 +1242,8 @@
        n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
        delta_D = delta_D, delta_ate = delta_ate,
-       se = se_vec, u_mat = u_mat, G = G_all, cluster_of_group = cog)
+       se = se_vec, u_mat = u_mat, G = G_all, cluster_of_group = cog,
+       u_scale = if (isTRUE(normalized)) delta_D else rep(1, effects))
 }
 
 
@@ -1690,6 +1692,8 @@
       se_ate         = se_ate,
       u_mat_effects  = ce$u_mat,
       u_mat_placebos = cp$u_mat,
+      u_scale_effects  = ce$u_scale,
+      u_scale_placebos = cp$u_scale,
       se_G           = ce$G,
       se_cluster_of_group = ce$cluster_of_group,
       n_eff_effects  = ce$n_eff,

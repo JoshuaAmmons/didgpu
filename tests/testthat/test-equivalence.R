@@ -56,8 +56,22 @@ test_that("informative errors on misuse", {
   expect_error(didgpu_equivalence(fit, delta = 0.5, alpha = 1.5), "alpha")
   expect_error(didgpu_equivalence(list(), delta = 0.5), "didgpu_result")
 
-  # placebo > 0 but no bootstrap -> SEs are NA -> clear error.
-  fit_nose <- make_fit(reps = 0L)
+  # Without a bootstrap the SEs are analytic, so the test simply works --
+  # this used to be an error, when bootstrap_reps = 0 meant NA SEs.
+  fit_an <- make_fit(reps = 0L)
+  expect_true(all(is.finite(fit_an$results$Placebos[, "SE"])))
+  expect_s3_class(didgpu_equivalence(fit_an, delta = 0.5), "didgpu_equivalence")
+
+  # SEs are still NA where analytic ones are unavailable (here: controls)
+  # and no bootstrap was requested -> clear error pointing at the fix.
+  pc <- didgpu_simulate_panel(n_units = 80L, n_periods = 12L,
+                              tau_profile = c(0.5, 1.0), seed = 7L)
+  pc$D <- as.integer(pc$D >= 0.5)
+  set.seed(1); pc$X <- stats::rnorm(nrow(pc))
+  fit_nose <- suppressMessages(
+    didgpu(pc, "Y", "unit", "period", "D", effects = 2L, placebo = 2L,
+           controls = "X", bootstrap_reps = 0L, backend = "r",
+           verbose = FALSE))
   expect_error(didgpu_equivalence(fit_nose, delta = 0.5), "bootstrap_reps")
 
   # no placebos at all -> clear error.

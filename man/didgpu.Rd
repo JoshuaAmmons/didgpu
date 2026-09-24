@@ -25,7 +25,7 @@ didgpu(
   dont_drop_larger_lower = FALSE,
   switchers = "",
   normalized = FALSE,
-  bootstrap_reps = 100L,
+  bootstrap_reps = 0L,
   ci_level = 95,
   seed = 1L,
   checkpoint_dir = NULL,

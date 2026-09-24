@@ -237,3 +237,39 @@ test_that("controls fall back to the bootstrap rather than a near-miss SE", {
                  seed = 1L, controls = "X")
   expect_true(all(is.finite(fb$results$Effects[, "SE"])))
 })
+
+test_that("vcov(), the joint tests and didgpu_joint_placebo() agree", {
+  # Once the SEs became analytic, vcov() was still the bootstrap
+  # covariance: its diagonal stopped matching SE^2 (0.0039 vs 0.0132 in
+  # the R CMD check failure), and didgpu_joint_placebo() -- which reads
+  # vcov -- stopped reproducing p_jointplacebo (0.641 vs 0.678). All
+  # three now come from one analytic matrix.
+  f <- .ase_fit(.ase_panel(), "r", effects = 3L, placebo = 3L,
+                bootstrap_reps = 0L)
+  v <- vcov(f)
+  expect_true(all(is.finite(v)))
+  expect_true(isSymmetric(unname(v), tol = 1e-12))
+  expect_equal(unname(diag(v)),
+               c(as.numeric(f$results$Effects[, "SE"]),
+                 as.numeric(f$results$Placebos[, "SE"]))^2,
+               tolerance = 1e-12)
+  expect_equal(didgpu_joint_placebo(f)$p_value, f$results$p_jointplacebo,
+               tolerance = 1e-8)
+})
+
+test_that("joint tests under normalized = TRUE match DIDmultiplegtDYN", {
+  skip_if_not_installed("DIDmultiplegtDYN")
+  skip_if_not_installed("polars")
+  # The reference divides each influence vector by delta_k BEFORE
+  # polarising (did_multiplegt_main.R:1170-1175). Polarising the raw
+  # vectors against the normalised SEs gives a wrong covariance, so this
+  # is pinned on a design where delta_k != 1.
+  d <- .ase_panel(11L, kind = "dose")
+  ours <- .ase_fit(d, "r", effects = 4L, placebo = 3L, bootstrap_reps = 0L,
+                   normalized = TRUE)
+  theirs <- .ase_ref(d, effects = 4, placebo = 3, normalized = TRUE)
+  expect_equal(ours$results$p_jointeffects,
+               as.numeric(theirs$results$p_jointeffects), tolerance = 1e-10)
+  expect_equal(ours$results$p_jointplacebo,
+               as.numeric(theirs$results$p_jointplacebo), tolerance = 1e-10)
+})
