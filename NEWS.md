@@ -21,6 +21,54 @@
 
 ## Bug fixes
 
+- **`ATE` did not match `DIDmultiplegtDYN`'s `Av_tot_eff` unless treatment
+  was binary and absorbing.** didgpu reported the switcher-weighted mean
+  of the per-event-time effects,
+
+      ATE = sum_k (N_k * DID_k) / sum_k N_k
+
+  but the reference's `Av_tot_eff` is an average total effect **per unit
+  of treatment** and carries its own denominator (`U_Gg_den_XX`, built
+  from `delta_D_i_XX` in `did_multiplegt_dyn_core.R`):
+
+      ATE = sum_k (N_k * DID_k) / sum_k (N_k * delta_k)
+
+  where `delta_k` is the average treatment change among the event-time-k
+  switchers. When treatment is binary and absorbing every `delta_k` is
+  exactly 1, the denominators coincide, and the two agree to the last
+  bit -- which is why the test suite and every worked example missed
+  this.
+
+  On one panel, holding the outcome fixed and changing only how the
+  treatment is coded:
+
+      treatment coding             didgpu (old)   reference      ratio
+      binary, absorbing            +0.35616730    +0.35616730    1.000
+      binary, non-absorbing        +0.35616730    +0.47488973    0.750
+      multivalued dose (1, 3, 5)   +0.35616730    +0.12020646    2.963
+      non-monotone (0 -> 2 -> 1)   +0.35616730    +0.23744487    1.500
+
+  The old column is constant: the reported ATE did not respond to the
+  magnitude of the treatment at all, only to its timing. All four now
+  agree with `DIDmultiplegtDYN` to machine precision on every backend.
+  Two consequences, both matching the reference: `normalized` does not
+  affect the ATE (it rescales only the per-event-time effects), and
+  multiplying the treatment variable by a constant `c` now divides the
+  ATE by `c` instead of leaving it unchanged.
+
+  The old formula was duplicated in `.backend_cpu()` and
+  `.backend_cuda()` as well as the R core, and `backend = "auto"`
+  resolves to CUDA wherever a GPU is present, so this was the default
+  path on a CUDA machine. All three now call one `.ate_weighted()`.
+  `didgpu()`'s help gained a `@return` section stating what `ATE` is;
+  nothing in the docs had defined it before.
+
+  Note for anyone resuming a run: checkpoint cells written by an earlier
+  version store the old ATE, and nothing invalidates them on resume. If a
+  checkpoint directory predates this release, delete it and re-run rather
+  than resuming into it.
+
+
 - **A user column named after one of the arguments broke several entry
   points.** `[.data.table` evaluates its `i` and `j` expressions with
   the table's COLUMNS in scope, and the affected functions filtered

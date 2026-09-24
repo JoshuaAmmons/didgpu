@@ -305,6 +305,7 @@
 .core_one_event_time <- function(d_in, k, direction = 1L, prefit = NULL,
                                   only_never_switchers = FALSE,
                                   normalized = FALSE,
+                                  want_delta = FALSE,
                                   skip_prep = FALSE) {
   k <- as.integer(k)
   stopifnot(k >= 1L)
@@ -501,6 +502,24 @@
     val
   } else NA_real_
 
+  # delta_ate: the AVERAGE CURRENT-PERIOD treatment change among
+  # event-time-k switchers in this direction,
+  #     sum over dist_k == 1 of (N_gt / N_inc) * |D_gt - d_sq|,
+  # written with S_g so it mirrors the reference expression exactly.
+  #
+  # This is a DIFFERENT object from delta_norm above. The reference keeps
+  # both and uses them for different things:
+  #   delta_norm_i_XX (core:536-551) is CUMULATIVE -- it sums D_t - d_sq
+  #     over t in [F_g, F_g + k - 1] -- and divides the per-event-time
+  #     effect when normalized = TRUE. It is built only under `normalized`.
+  #   delta_D_i_XX (core:912-923) is the CURRENT period's change only, is
+  #     built unconditionally, and is the denominator U_Gg_den_XX behind
+  #     Av_tot_eff (main:930-933).
+  # Conflating the two makes the ATE wrong by a factor of the exposure
+  # length, so they stay separate here.
+  delta_ate <- if (isTRUE(want_delta)) .delta_ate_from_mask(d, N_inc)
+               else NA_real_
+
   list(att = att,
        N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
        N_sw_unw = N_sw_unw,        # unweighted switchers -> Switchers col
@@ -508,7 +527,127 @@
        N_eff    = N_eff,           # unweighted obs       -> N col
        N_eff_w  = N_eff_w,         # weighted   obs       -> N.w col
        U_g = U_g$U_g,
-       delta_norm = delta_norm)
+       delta_norm = delta_norm,
+       delta_ate = delta_ate)
+}
+
+
+# Average current-period treatment change among the switchers selected by
+# `dist_k_XX`, i.e. the reference's delta_D_i_XX. `d` must already carry
+# the (k, direction) switcher mask; every backend builds that mask on its
+# way to N_inc, so this is only the final reduction.
+# Reference: did_multiplegt_dyn_core.R:912-923.
+#' @keywords internal
+#' @noRd
+.delta_ate_from_mask <- function(d, N_inc) {
+  if (!is.finite(N_inc) || N_inc == 0) return(NA_real_)
+  has_orig <- all(c("treatment_XX_orig", "d_sq_XX_orig") %in% names(d))
+  t_col <- if (has_orig) "treatment_XX_orig" else "treatment_XX"
+  b_col <- if (has_orig) "d_sq_XX_orig"      else "d_sq_XX"
+  d[, delta_ate_XX := ifelse(
+        dist_k_XX == 1L,
+        (N_gt_XX / N_inc) *
+          ((get(t_col) - get(b_col)) * S_g_XX +
+           (1 - S_g_XX) * (get(b_col) - get(t_col))),
+        NA_real_)]
+  v <- sum(d$delta_ate_XX, na.rm = TRUE)
+  d[, "delta_ate_XX" := NULL]
+  v
+}
+
+
+# Same quantity for the C++ / CUDA kernel paths, which return only att and
+# N_inc and so have no mask left over to reduce. Rebuilds the (k, direction)
+# switcher mask on `prepped` by reference -- exactly the recipe those
+# backends use for N_inc -- and drops the scratch columns again.
+#
+# The simple form is exact here: both kernel backends reject every option
+# that would change the mask (controls, weights, same_switchers,
+# only_never_switchers, normalized, trends_*) and fall back to the R
+# backend for those -- see .backend_cpu / .backend_cuda.
+#' @keywords internal
+#' @noRd
+.delta_ate_kernel_path <- function(prepped, k, direction) {
+  d <- prepped
+  k <- as.integer(k)
+  if (k == 1L) {
+    d[, diff_y_k_XX := diff_y_XX]
+  } else {
+    d[, diff_y_k_XX := outcome_XX -
+        data.table::shift(outcome_XX, k, type = "lag"),
+      by = group_XX]
+  }
+  d[, never_change_k_XX := as.integer(time_XX < F_g_XX &
+                                        N_gt_XX > 0 &
+                                        !is.na(diff_y_k_XX))]
+  d[is.na(never_change_k_XX), never_change_k_XX := 0L]
+  d[, N_t_control := sum(N_gt_XX * never_change_k_XX),
+    by = c("time_XX", "d_sq_XX")]
+  d[, dist_k_XX := as.integer(
+       time_XX == (F_g_XX + k - 1L) &
+       k <= L_g_XX &
+       !is.na(S_g_XX) & S_g_XX == direction &
+       !is.na(diff_y_k_XX) &
+       N_gt_XX > 0 &
+       !is.na(N_t_control) & N_t_control > 0
+     )]
+  d[is.na(dist_k_XX), dist_k_XX := 0L]
+  N_inc <- sum(d$N_gt_XX * d$dist_k_XX, na.rm = TRUE)
+  v <- .delta_ate_from_mask(d, N_inc)
+  d[, c("diff_y_k_XX", "never_change_k_XX", "N_t_control",
+        "dist_k_XX") := NULL]
+  v
+}
+
+
+# -------- Av_tot_eff: the average total effect per unit of treatment --------
+#
+# The reference does NOT form its ATE as an N-weighted average of the
+# per-event-time DIDs. It builds, separately for each switching direction
+# s (in / out), a group-level ratio
+#
+#   U_Gg^s_g = ( sum_k w^s_k * U_Gg^s_{k,g} ) / ( sum_k w^s_k * Delta^s_k )
+#
+# with w^s_k = N^s_k / sum_j N^s_j, and Delta^s_k the average CURRENT-PERIOD
+# treatment change among event-time-k switchers in direction s
+# (did_multiplegt_dyn_core.R:899-934 -- note this is delta_D_i_XX, not the
+# cumulative delta_norm_i_XX that `normalized` uses). The two are pooled
+# with w_plus = den^+ * sum_N1 / (den^+ * sum_N1 + den^- * sum_N0) and
+# summed over groups (did_multiplegt_main.R:907-923).
+#
+# Substituting w^s_k and w_plus, the arm-level constants cancel and the
+# whole thing collapses to a single ratio over event-times:
+#
+#   ATE = sum_k ( N^+_k E^+_k + N^-_k E^-_k ) / sum_k ( N^+_k D^+_k + N^-_k D^-_k )
+#
+# Both sums are already available per event-time in pooled form, because
+#   N_k * DID_k_raw   = N^+_k E^+_k + N^-_k E^-_k   (Neyman pooling)
+#   N_k * delta_D_k   = N^+_k D^+_k + N^-_k D^-_k   (same weights)
+# so
+#   ATE = sum_k N_k * DID_k_raw / sum_k N_k * delta_D_k.
+#
+# The numerator is always the UNNORMALIZED DID: `normalized` divides the
+# reported per-event-time effects by delta_D_k, but Av_tot_eff carries its
+# own denominator and is unaffected by that argument.
+#
+# When treatment is binary and absorbing, every switcher is at dose 1 and
+# baseline 0 in its event-time-k cell, so Delta_k == 1 and this reduces to
+# the plain N-weighted average that didgpu used to report unconditionally.
+# That is why the two agreed exactly on absorbing binary designs and
+# diverged by the average dose on every other design.
+#' @keywords internal
+#' @noRd
+.ate_weighted <- function(effects_raw, n_inc, delta_D) {
+  if (length(effects_raw) == 0L) return(NA_real_)
+  if (is.null(delta_D) || length(delta_D) != length(effects_raw)) {
+    return(NA_real_)
+  }
+  valid <- !is.na(effects_raw) & !is.na(delta_D) &
+           is.finite(n_inc) & n_inc > 0
+  if (!any(valid)) return(NA_real_)
+  den <- sum(n_inc[valid] * delta_D[valid])
+  if (!is.finite(den) || den == 0) return(NA_real_)
+  sum(n_inc[valid] * effects_raw[valid]) / den
 }
 
 
@@ -911,6 +1050,7 @@
   n_eff_w  <- numeric(effects)     # weighted obs -> N.w
   n_sw_unw <- integer(effects)     # unweighted switchers -> Switchers
   n_sw_w   <- numeric(effects)     # weighted switchers -> Switchers.w
+  delta_ate <- numeric(effects)
   delta_D <- numeric(effects)
   # same_switchers gates dist on a per-group "still_switcher" indicator
   # that requires the switcher to qualify at EVERY event-time q in
@@ -929,9 +1069,9 @@
   # both-directions runs.
   both_dirs <- (switchers == "")
   for (k in seq_len(effects)) {
-    res_in  <- if (switchers != "out") .core_one_event_time(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized)
+    res_in  <- if (switchers != "out") .core_one_event_time(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
-    res_out <- if (switchers != "in")  .core_one_event_time(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, skip_prep = both_dirs)
+    res_out <- if (switchers != "in")  .core_one_event_time(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, skip_prep = both_dirs)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
     # Neyman pooling across directions, exactly as the reference does at
     # did_multiplegt_main.R:859-861. SIGN CONVENTION: at line 804 of
@@ -967,10 +1107,7 @@
     # divide DID_k by it (reference: did_multiplegt_main.R:1086-1090 +
     # 1124-1126). Per-direction delta_norm is already a positive magnitude
     # of treatment change (the sign flip is baked into .core_one_event_time
-    # via sign_dir), so we pool directly without flipping. Note: the
-    # reference does NOT normalize Av_tot_eff (ATE), only the per-event-time
-    # DIDs. We therefore keep an unnormalized copy in `out_raw` and use that
-    # for the ATE computation upstream.
+    # via sign_dir), so we pool directly without flipping.
     if (isTRUE(normalized)) {
       dn_in  <- if (n_in  > 0L) res_in$delta_norm  else NA_real_
       dn_out <- if (n_out > 0L) res_out$delta_norm else NA_real_
@@ -984,11 +1121,21 @@
         out[k] <- NA_real_
       }
     }
+    # Pool the ATE's own denominator (the current-period dose change) with
+    # the SAME Neyman weights, so that
+    #   n_inc[k] * delta_ate[k] = N_in_k * Delta_in_k + N_out_k * Delta_out_k,
+    # which is what Av_tot_eff's denominator sums over k. Built whether or
+    # not `normalized` is set -- see .ate_weighted.
+    da_in  <- if (n_in  > 0L) res_in$delta_ate  else NA_real_
+    da_out <- if (n_out > 0L) res_out$delta_ate else NA_real_
+    delta_ate[k] <- if (n_in == 0L) da_out
+                    else if (n_out == 0L) da_in
+                    else w_in * da_in + (1 - w_in) * da_out
   }
   list(effects = out, effects_raw = out_raw,
        n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
-       delta_D = delta_D)
+       delta_D = delta_D, delta_ate = delta_ate)
 }
 
 
@@ -1368,32 +1515,15 @@
     }
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
-    # ATE = N_inc-weighted average of per-event-time DIDs.
-    # Derivation (binary, delta_D = 1):
-    #   ATE = sum_g (sum_k w_k * U_Gg_k_g) / G
-    #       = sum_k w_k * (sum_g U_Gg_k_g) / G
-    #       = sum_k w_k * DID_k
-    # where w_k = N_inc_k / sum_j N_inc_j.
-    # For the both-directions case, the per-event-time DID_k_published
-    # already includes the cross-direction Neyman pooling, and the
-    # cumulative N_inc weight matches (see notes in .compute_effects).
-    #
-    # IMPORTANT: when normalized=TRUE the reference does NOT normalize the
-    # ATE (Av_tot_eff stays the same; reference main.R:1147-1163 builds it
-    # from per-row U_Gg contributions that are summed across event-times
-    # without ever being divided by delta_D). We mirror that by computing
-    # the ATE from `effects_raw` (pre-normalization) rather than `effects`.
-    ate_src <- if (isTRUE(nrm)) ce$effects_raw else ce$effects
+    # ATE (= the reference's Av_tot_eff): the average total effect PER UNIT
+    # OF TREATMENT. See .ate_weighted for the derivation and for why the
+    # denominator is sum_k N_k * delta_D_k rather than sum_k N_k.
     ate <- if (tl) {
       # Reference suppresses ATE under trends_lin (the linear-trends
       # identification doesn't pin down a single cumulative average).
       NA_real_
-    } else if (h$l_eff == 0L || sum(ce$n_inc) == 0L) {
-      NA_real_
     } else {
-      valid <- !is.na(ate_src) & ce$n_inc > 0L
-      if (!any(valid)) NA_real_ else
-        sum(ate_src[valid] * ce$n_inc[valid]) / sum(ce$n_inc[valid])
+      .ate_weighted(ce$effects_raw, ce$n_inc, ce$delta_ate)
     }
 
     # predict_het: post-fit heterogeneity regression. Only run on the

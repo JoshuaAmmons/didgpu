@@ -151,6 +151,23 @@ after each cell save. Useful for emailing/logging.}
 }
 \value{
 An object of class \code{didgpu_result} (see \code{\link[=print.didgpu_result]{print.didgpu_result()}}).
+Its \code{$results} holds three matrices, each laid out exactly as
+\code{DIDmultiplegtDYN::did_multiplegt_dyn()} lays out its own:
+\describe{
+  \item{\code{Effects}}{one row per event-time \code{k}: the cumulative DID
+    estimate, its SE, CI bounds and switcher / observation counts.}
+  \item{\code{ATE}}{a single row, the reference's \code{Av_tot_eff}: the average
+    total effect \strong{per unit of treatment}, namely
+    \code{sum_k (N_k * DID_k) / sum_k (N_k * delta_k)}, where \code{N_k} is the
+    switcher mass at event-time \code{k} and \code{delta_k} the average
+    treatment change among those switchers. That denominator is what
+    makes it a per-unit quantity, so the ATE is \strong{not} in general the
+    switcher-weighted mean of the \code{Effects} column: the two coincide
+    only when treatment is binary and absorbing, where every \code{delta_k}
+    is 1. \code{normalized} does not affect it, and it is suppressed
+    (\code{NA}) under \code{trends_lin}.}
+  \item{\code{Placebos}}{one row per placebo, same columns as \code{Effects}.}
+}
 }
 \description{
 Reimplementation entry point. See \code{vignette("reference_internals")}

@@ -109,6 +109,23 @@
 #'   after each cell save. Useful for emailing/logging.
 #'
 #' @return An object of class `didgpu_result` (see [print.didgpu_result()]).
+#'   Its `$results` holds three matrices, each laid out exactly as
+#'   `DIDmultiplegtDYN::did_multiplegt_dyn()` lays out its own:
+#'   \describe{
+#'     \item{`Effects`}{one row per event-time `k`: the cumulative DID
+#'       estimate, its SE, CI bounds and switcher / observation counts.}
+#'     \item{`ATE`}{a single row, the reference's `Av_tot_eff`: the average
+#'       total effect **per unit of treatment**, namely
+#'       `sum_k (N_k * DID_k) / sum_k (N_k * delta_k)`, where `N_k` is the
+#'       switcher mass at event-time `k` and `delta_k` the average
+#'       treatment change among those switchers. That denominator is what
+#'       makes it a per-unit quantity, so the ATE is **not** in general the
+#'       switcher-weighted mean of the `Effects` column: the two coincide
+#'       only when treatment is binary and absorbing, where every `delta_k`
+#'       is 1. `normalized` does not affect it, and it is suppressed (`NA`)
+#'       under `trends_lin`.}
+#'     \item{`Placebos`}{one row per placebo, same columns as `Effects`.}
+#'   }
 #' @examples
 #' # Simulate a small panel with a known event-time profile.
 #' p <- didgpu_simulate_panel(

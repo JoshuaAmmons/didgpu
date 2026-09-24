@@ -37,7 +37,7 @@ Designed for long-running econometric work: per-cell checkpointing to disk, resu
 | Pre-treatment placebos                    | ✅ done  |
 | Both switcher directions (in + out)       | ✅ done  |
 | `switchers = "in"` / `"out"` restriction  | ✅ done  |
-| ATE (cumulative effect)                   | ✅ done  |
+| ATE (`Av_tot_eff`, per unit of treatment) | ✅ done  |
 | Cluster bootstrap (group or custom)       | ✅ done  |
 | `weight=` column (weighted DiD)           | ✅ done (bit-identical to reference) |
 | Per-cell checkpoint + resume              | ✅ done  |

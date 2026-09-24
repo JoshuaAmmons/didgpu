@@ -68,7 +68,7 @@ utils::globalVariables(c(
   "d_sq_tmp", "diff_from_sq_tmp",
   "ever_strict_increase_tmp", "ever_strict_decrease_tmp",
   # continuous scratch in .prep_panel
-  "d_sq_XX_orig", "treatment_XX_orig", "S_g_het_XX",
+  "d_sq_XX_orig", "treatment_XX_orig", "S_g_het_XX", "delta_ate_XX",
   # same_switchers pre-pass scratch
   "still_switcher_XX", "N_g_control_check_XX",
   "diff_y_last_XX", "never_change_d_last_XX",

@@ -363,7 +363,7 @@ print.didgpu_result <- function(x, ...) {
     .print_coef_block(x$results$Placebos)
   }
   if (!is.null(x$results$ATE) && !is.na(x$results$ATE[1, "Estimate"])) {
-    cat("\nATE (cumulative across event-times):\n")
+    cat("\nATE (average total effect, per unit of treatment):\n")
     .print_coef_block(x$results$ATE)
   }
   cat("\n---\n")

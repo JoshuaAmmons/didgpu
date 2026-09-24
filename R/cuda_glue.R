@@ -106,9 +106,13 @@
   N_inc <- sum(d2$N_gt_XX * d2$dist_k_XX, na.rm = TRUE)
   if (N_inc == 0) {
     return(list(att = NA_real_, N_inc = 0L, N_eff = 0L,
-                U_g = numeric(n_groups)))
+                U_g = numeric(n_groups), delta_ate = NA_real_))
   }
   G_over_Ninc <- n_groups / N_inc
+  # Av_tot_eff's denominator. d2 already carries the (k, direction)
+  # switcher mask that N_inc was built from, so this is just the final
+  # reduction -- see .delta_ate_from_mask and .ate_weighted in core_r.R.
+  delta_ate <- .delta_ate_from_mask(d2, N_inc)
 
   did <- didgpu_cuda_did(
     outcome     = as.numeric(d$outcome_XX),
@@ -129,5 +133,6 @@
   # N_eff: we cheap-out and return N_inc as a placeholder. The CUDA
   # kernel doesn't yet expose the "contributing rows" count.
   list(att = did, N_inc = as.integer(N_inc),
-       N_eff = as.integer(N_inc), U_g = numeric(n_groups))
+       N_eff = as.integer(N_inc), U_g = numeric(n_groups),
+       delta_ate = delta_ate)
 }

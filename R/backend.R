@@ -255,13 +255,9 @@ didgpu_backend_info <- function() {
     cp <- .compute_placebos_cpp(prepped, h$l_pl, switchers = sw)
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
-    ate <- if (h$l_eff == 0L || sum(ce$n_inc) == 0L) {
-      NA_real_
-    } else {
-      valid <- !is.na(ce$effects) & ce$n_inc > 0L
-      if (!any(valid)) NA_real_ else
-        sum(ce$effects[valid] * ce$n_inc[valid]) / sum(ce$n_inc[valid])
-    }
+    # Av_tot_eff -- see .ate_weighted in core_r.R. Neither kernel backend
+    # accepts `normalized`, so ce$effects is already the raw DID here.
+    ate <- .ate_weighted(ce$effects, ce$n_inc, ce$delta_ate)
 
     list(
       effects        = ce$effects,
@@ -288,21 +284,32 @@ didgpu_backend_info <- function() {
 #' @noRd
 .compute_effects_cpp <- function(prepped, effects, switchers = "") {
   out <- numeric(effects); n_inc <- integer(effects); n_eff <- integer(effects)
+  delta_ate <- numeric(effects)
   for (k in seq_len(effects)) {
     res_in  <- if (switchers != "out") .cpu_one_event_time(prepped, k = k, direction = 1L)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L)
     res_out <- if (switchers != "in")  .cpu_one_event_time(prepped, k = k, direction = 0L)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L)
     n_in <- res_in$N_inc; n_out <- res_out$N_inc
-    if (n_in + n_out == 0L) { out[k] <- NA_real_; n_inc[k] <- 0L; n_eff[k] <- 0L; next }
+    if (n_in + n_out == 0L) {
+      out[k] <- NA_real_; n_inc[k] <- 0L; n_eff[k] <- 0L
+      delta_ate[k] <- NA_real_; next
+    }
     att_in       <- if (n_in  > 0L)  res_in$att      else 0
     att_out_pool <- if (n_out > 0L) -res_out$att     else 0
     w_in <- n_in / (n_in + n_out)
     out[k]   <- w_in * att_in + (1 - w_in) * att_out_pool
     n_inc[k] <- n_in + n_out
     n_eff[k] <- (res_in$N_eff %||% 0L) + (res_out$N_eff %||% 0L)
+    # Av_tot_eff's denominator, pooled with the same Neyman weights. The
+    # C++ kernel returns only att and N_inc, so the mask is rebuilt here.
+    da_in  <- if (n_in  > 0L) .delta_ate_kernel_path(prepped, k, 1L) else NA_real_
+    da_out <- if (n_out > 0L) .delta_ate_kernel_path(prepped, k, 0L) else NA_real_
+    delta_ate[k] <- if (n_in == 0L) da_out
+                    else if (n_out == 0L) da_in
+                    else w_in * da_in + (1 - w_in) * da_out
   }
-  list(effects = out, n_inc = n_inc, n_eff = n_eff)
+  list(effects = out, n_inc = n_inc, n_eff = n_eff, delta_ate = delta_ate)
 }
 
 # Placebos still use the R backend (the C++ port is only the effects
@@ -468,7 +475,16 @@ didgpu_backend_info <- function() {
     ce <- .compute_effects_cuda(prepped, h$l_eff, switchers = sw)
     cp <- .compute_placebos(prepped, h$l_pl, switchers = sw)  # placebos still r-side
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-    ate <- if (h$l_eff == 1L) ce$effects[1] else NA_real_
+    # This branch has had the ATE wrong twice. It first read
+    #     ate <- if (h$l_eff == 1L) ce$effects[1] else NA_real_
+    # so backend "cuda" returned NA whenever effects > 1 while the
+    # per-horizon effects themselves were fine; then it returned the
+    # switcher-weighted mean, which is Av_tot_eff only for binary
+    # absorbing treatment. Both were default-path bugs, because
+    # backend = "auto" resolves to "cuda" on any machine with a GPU.
+    # There is now one definition, in .ate_weighted() (core_r.R). This
+    # backend rejects `normalized`, so ce$effects is already the raw DID.
+    ate <- .ate_weighted(ce$effects, ce$n_inc, ce$delta_ate)
     list(
       effects        = ce$effects,
       ate            = ate,
@@ -490,20 +506,29 @@ didgpu_backend_info <- function() {
 # of .core_one_event_time. Same Neyman pooling logic.
 .compute_effects_cuda <- function(prepped, effects, switchers = "") {
   out <- numeric(effects); n_inc <- integer(effects)
+  delta_ate <- numeric(effects)
   for (k in seq_len(effects)) {
     res_in <- if (switchers != "out") .cuda_one_event_time(prepped, k = k, direction = 1L)
-              else list(att = NA_real_, N_inc = 0L)
+              else list(att = NA_real_, N_inc = 0L, delta_ate = NA_real_)
     res_out <- if (switchers != "in") .cuda_one_event_time(prepped, k = k, direction = 0L)
-               else list(att = NA_real_, N_inc = 0L)
+               else list(att = NA_real_, N_inc = 0L, delta_ate = NA_real_)
     n_in <- res_in$N_inc; n_out <- res_out$N_inc
-    if (n_in + n_out == 0L) { out[k] <- NA_real_; n_inc[k] <- 0L; next }
+    if (n_in + n_out == 0L) {
+      out[k] <- NA_real_; n_inc[k] <- 0L; delta_ate[k] <- NA_real_; next
+    }
     att_in       <- if (n_in  > 0L)  res_in$att  else 0
     att_out_pool <- if (n_out > 0L) -res_out$att else 0
     w_in <- n_in / (n_in + n_out)
     out[k] <- w_in * att_in + (1 - w_in) * att_out_pool
     n_inc[k] <- n_in + n_out
+    # Av_tot_eff's denominator, pooled with the same Neyman weights.
+    da_in  <- if (n_in  > 0L) res_in$delta_ate  else NA_real_
+    da_out <- if (n_out > 0L) res_out$delta_ate else NA_real_
+    delta_ate[k] <- if (n_in == 0L) da_out
+                    else if (n_out == 0L) da_in
+                    else w_in * da_in + (1 - w_in) * da_out
   }
-  list(effects = out, n_inc = n_inc)
+  list(effects = out, n_inc = n_inc, delta_ate = delta_ate)
 }
 
 
