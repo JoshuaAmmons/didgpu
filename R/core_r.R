@@ -43,7 +43,8 @@
                          trends_nonparam = NULL,
                          dont_drop_larger_lower = FALSE,
                          continuous = NULL,
-                         trends_lin = FALSE) {
+                         trends_lin = FALSE,
+                         drop_if_d_miss_before_first_switch = FALSE) {
   d <- data.table::as.data.table(df)
   if (!is.null(controls)) {
     missing_ctrl <- setdiff(controls, names(d))
@@ -57,6 +58,13 @@
   if (!is.null(trends_nonparam) && !trends_nonparam %in% names(d)) {
     stop("trends_nonparam column not found in df: ", trends_nonparam)
   }
+  # The reference keeps only rows with a group, a time and every control
+  # (did_multiplegt_main.R:90-95). A row missing a control is dropped
+  # outright -- the balancing below brings it back as an empty cell --
+  # rather than entering the estimate with its outcome but no control.
+  keep <- !is.na(d[[group]]) & !is.na(d[[time]])
+  for (cn in controls) keep <- keep & !is.na(d[[cn]])
+  if (!all(keep)) d <- d[keep]
   # Stash the weight column under a stable name so the rest of prep can
   # find it after we rename outcome/group/time/treatment.
   if (!is.null(weight)) {
@@ -74,6 +82,8 @@
   data.table::setnames(d, c(outcome, group, time, treatment),
                        c("outcome_XX", "group_XX", "time_XX", "treatment_XX"),
                        skip_absent = FALSE)
+  # The user's own labels, for save_sample.
+  d[, `:=`(grp_orig_XX = group_XX, time_orig_XX = time_XX)]
   # Recode group and time to consecutive integers so the U-statistic
   # arithmetic doesn't depend on raw labels.
   d[, group_XX := as.integer(factor(group_XX, levels = sort(unique(group_XX))))]
@@ -246,6 +256,13 @@
   } else if (!(is.finite(keep_g$v[1]) && keep_g$v[1] > 0)) {
     d <- d[0L]
   }
+  # Nothing left: the reference stops here, with the same words it uses
+  # when no switcher direction is estimable (main.R:225). The condition
+  # is classed so a bootstrap resample can be dropped instead.
+  if (nrow(d) == 0L) {
+    stop(structure(class = c("didgpu_no_effect", "error", "condition"),
+                   list(message = .dcdh_no_effect_msg, call = NULL)))
+  }
   # Removing whole groups leaves holes in group_XX. Everything downstream
   # assumes groups are numbered 1..G with no holes -- the C++ and CUDA
   # layouts size their per-group arrays and row offsets from that -- so
@@ -275,6 +292,21 @@
   d <- d[time_XX >= t_min & time_XX <= T_max]
   T_max1 <- as.integer(T_max + 1L)
   d[F_g_XX == 0L, F_g_XX := T_max1]
+  # drop_if_d_miss_before_first_switch (main.R:170-176, 240-244): once a
+  # group's treatment goes missing -- after its outcome is first seen --
+  # before its first switch, its outcomes from then on are dropped.
+  if (isTRUE(drop_if_d_miss_before_first_switch)) {
+    d[, mty_XX := {
+        x <- time_XX[present_XX & !is.na(outcome_XX)]
+        if (length(x)) min(x) else NA_integer_ }, by = group_XX]
+    d[, mtdm_XX := {
+        x <- time_XX[present_XX & is.na(treatment_XX) & !is.na(mty_XX) &
+                       time_XX >= mty_XX]
+        if (length(x)) min(x) else NA_integer_ }, by = group_XX]
+    d[!is.na(mtdm_XX) & mtdm_XX < F_g_XX & time_XX >= mtdm_XX,
+      outcome_XX := NA_real_]
+    d[, c("mty_XX", "mtdm_XX") := NULL]
+  }
   # A group with no surviving row does not reach the reference's balanced
   # panel at all, though it still counts in G.
   d[, ghost_XX := !any(present_XX), by = group_XX]
@@ -370,6 +402,11 @@
   d[, S_g_XX := ifelse(is.na(avg_post) | F_g_XX >= T_max1, NA_integer_,
                 ifelse(avg_post > d_sq_XX, 1L,
                 ifelse(avg_post < d_sq_XX, 0L, NA_integer_)))]
+  # Rows the reference has no weight for: its balancing fill-ins and
+  # the rows it drops (blanked here). Only fixest's note reads this.
+  d[, no_wt_XX := !present_XX]
+  # The user's weight on the rows the reference keeps (design tables).
+  d[, wt_in_XX := ifelse(present_XX, weight_XX_input, NA_real_)]
   d[, c("weight_XX_input", "present_XX", "ghost_XX", "min_t_dnm_XX",
         "max_t_dnm_XX", "last_obs_XX", "d_F_g_XX", "trunc_control_XX",
         "F_g_trunc_XX") := NULL]
@@ -505,7 +542,8 @@
                                   want_delta = FALSE,
                                   want_se = FALSE,
                                   cluster_col = NULL,
-                                  skip_prep = FALSE) {
+                                  skip_prep = FALSE,
+                                  less_conservative = FALSE) {
   k <- as.integer(k)
   stopifnot(k >= 1L)
   # We operate directly on `d_in` (data.table by reference). Per-call
@@ -723,8 +761,15 @@
   # as the estimate with diff_y replaced by its within-cell residual --
   # see R/analytic_se.R.
   u_var <- if (isTRUE(want_se)) {
-    .se_u_g_var(d, k, G, N_inc, cohort_cols, cluster_col)
+    .se_u_g_var(d, k, G, N_inc, cohort_cols, cluster_col,
+                less_conservative = less_conservative)
   } else NULL
+  # With controls, less the estimation error of their coefficients.
+  if (!is.null(u_var) && length(prefit$se)) {
+    u_var <- u_var - .controls_part2(d, prefit$se, prefit$controls, k, G,
+                                     N_inc, "dist_k_XX", "ratio_XX",
+                                     "never_change_k_XX")
+  }
 
   list(att = att,
        N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
@@ -1162,6 +1207,11 @@
     .se_u_g_var(d, k, G, N_inc, cohort_cols, cluster_col,
                  cols = .se_cols("placebo"))
   } else NULL
+  if (!is.null(u_var) && length(prefit$se)) {
+    u_var <- u_var - .controls_part2(d, prefit$se, prefit$controls, k, G,
+                                     N_inc, "dist_k_pl_XX", "ratio_pl_XX",
+                                     "never_change_k_pl_XX", placebo = TRUE)
+  }
 
   list(att = att,
        N_inc = N_inc,              # EXACT weighted switcher mass (Neyman pooling + ATE weight); never truncate
@@ -1193,7 +1243,7 @@
   G_all <- length(unique(prepped$group_XX))
   cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
                cluster_col %in% names(prepped)) {
-    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+    prepped[, list(cl = .first_cluster(.SD[[1L]])), by = group_XX,
             .SDcols = cluster_col]$cl
   } else NULL
   u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = placebo) else NULL
@@ -1305,14 +1355,15 @@
                               same_switchers = FALSE,
                               normalized = FALSE,
                               want_se = FALSE,
-                              cluster_col = NULL) {
+                              cluster_col = NULL,
+                              less_conservative = FALSE) {
   out <- numeric(effects)
   G_all <- length(unique(prepped$group_XX))
   # One cluster id per group, in the order a by = group_XX reduction
   # returns groups (the panel is sorted by group, so: sorted group order).
   cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
                cluster_col %in% names(prepped)) {
-    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+    prepped[, list(cl = .first_cluster(.SD[[1L]])), by = group_XX,
             .SDcols = cluster_col]$cl
   } else NULL
   # Per-group influence contributions, one column per event-time. Kept
@@ -1344,9 +1395,9 @@
   # both-directions runs.
   both_dirs <- (switchers == "")
   for (k in seq_len(effects)) {
-    res_in  <- if (switchers != "out") .core_one_event_time(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, want_se = want_se, cluster_col = cluster_col)
+    res_in  <- if (switchers != "out") .core_one_event_time(prepped, k = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, want_se = want_se, cluster_col = cluster_col, less_conservative = less_conservative)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
-    res_out <- if (switchers != "in")  .core_one_event_time(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, want_se = want_se, cluster_col = cluster_col, skip_prep = both_dirs)
+    res_out <- if (switchers != "in")  .core_one_event_time(prepped, k = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_delta = TRUE, want_se = want_se, cluster_col = cluster_col, less_conservative = less_conservative, skip_prep = both_dirs)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
     # Neyman pooling across directions, exactly as the reference does at
     # did_multiplegt_main.R:859-861. SIGN CONVENTION: at line 804 of
@@ -1455,7 +1506,9 @@
 .compute_effects_trends_lin <- function(prepped, effects, switchers = "",
                                           prefit = NULL,
                                           only_never_switchers = FALSE,
-                                          normalized = FALSE) {
+                                          normalized = FALSE,
+                                          want_se = FALSE, cluster_col = NULL,
+                                          less_conservative = FALSE) {
   out     <- numeric(effects)
   out_raw <- numeric(effects)
   n_inc   <- numeric(effects)      # EXACT weighted mass (pooling/ATE); fractional when weighted
@@ -1465,6 +1518,13 @@
   n_sw_w   <- numeric(effects)       # weighted switchers -> Switchers.w
   delta_D <- numeric(effects)
   G <- length(unique(prepped$group_XX))
+  cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
+               cluster_col %in% names(prepped)) {
+    prepped[, list(cl = .first_cluster(.SD[[1L]])), by = group_XX,
+            .SDcols = cluster_col]$cl
+  } else NULL
+  u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G, ncol = effects) else NULL
+  se_vec <- rep(NA_real_, effects)
 
   for (k in seq_len(effects)) {
     # Recompute still_switcher_XX for this outer-k (effects = k).
@@ -1475,9 +1535,9 @@
                              only_never_switchers = only_never_switchers)
 
     # Per-direction cumulative U_g across j = 1..k.
-    res_in  <- if (switchers != "out") .accumulate_u_g(prepped, k_max = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized)
+    res_in  <- if (switchers != "out") .accumulate_u_g(prepped, k_max = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_se = want_se, cluster_col = cluster_col, less_conservative = less_conservative)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
-    res_out <- if (switchers != "in")  .accumulate_u_g(prepped, k_max = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized)
+    res_out <- if (switchers != "in")  .accumulate_u_g(prepped, k_max = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_se = want_se, cluster_col = cluster_col, less_conservative = less_conservative)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
 
     n_in  <- res_in$N_inc
@@ -1513,11 +1573,27 @@
         out[k] <- NA_real_
       }
     }
+    # Analytic SE: the accumulated variance terms pool across directions
+    # like the estimate, the out-direction negated.
+    if (isTRUE(want_se)) {
+      ucol <- numeric(G)
+      if (n_in  > 0L && !is.null(res_in$u_var))  ucol <- ucol + w_in * res_in$u_var
+      if (n_out > 0L && !is.null(res_out$u_var)) ucol <- ucol - (1 - w_in) * res_out$u_var
+      u_mat[, k] <- ucol
+      se_k <- .se_from_u(ucol, G, cog)
+      if (isTRUE(normalized)) {
+        dk <- delta_D[k]
+        se_k <- if (!is.na(dk) && dk != 0) se_k / dk else NA_real_
+      }
+      se_vec[k] <- se_k
+    }
   }
   list(effects = out, effects_raw = out_raw,
        n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
-       delta_D = delta_D)
+       delta_D = delta_D,
+       se = se_vec, u_mat = u_mat, G = G, cluster_of_group = cog,
+       u_scale = if (isTRUE(normalized)) delta_D else rep(1, effects))
 }
 
 
@@ -1532,7 +1608,8 @@
 .compute_placebos_trends_lin <- function(prepped, placebo, switchers = "",
                                            prefit = NULL,
                                            only_never_switchers = FALSE,
-                                           normalized = FALSE) {
+                                           normalized = FALSE,
+                                           want_se = FALSE, cluster_col = NULL) {
   if (placebo == 0L) return(list(placebos = numeric(0), n_inc = integer(0),
                                   n_eff = integer(0),
                                   n_eff_w = numeric(0), n_sw_unw = integer(0),
@@ -1546,17 +1623,34 @@
   n_sw_w   <- numeric(placebo)       # weighted switchers -> Switchers.w
   delta_D <- numeric(placebo)
   G <- length(unique(prepped$group_XX))
+  cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
+               cluster_col %in% names(prepped)) {
+    prepped[, list(cl = .first_cluster(.SD[[1L]])), by = group_XX,
+            .SDcols = cluster_col]$cl
+  } else NULL
+  u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G, ncol = placebo) else NULL
+  se_vec <- rep(NA_real_, placebo)
 
   for (k in seq_len(placebo)) {
+    # The reference runs each trends_lin placebo k as its own core call
+    # with effects = placebo = k and both same_switchers and
+    # same_switchers_pl forced on (did_multiplegt_main.R:889-900), so
+    # the placebo switchers must qualify at effect horizons 1..k AND at
+    # placebo horizons 1..k.
     if ("still_switcher_XX" %in% names(prepped)) {
       prepped[, still_switcher_XX := NULL]
     }
     .compute_still_switcher(prepped, effects = k,
                              only_never_switchers = only_never_switchers)
+    if ("still_switcher_pl_XX" %in% names(prepped)) {
+      prepped[, still_switcher_pl_XX := NULL]
+    }
+    .compute_still_switcher_pl(prepped, placebo = k,
+                                only_never_switchers = only_never_switchers)
 
-    res_in  <- if (switchers != "out") .accumulate_u_g_placebo(prepped, k_max = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized)
+    res_in  <- if (switchers != "out") .accumulate_u_g_placebo(prepped, k_max = k, direction = 1L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_se = want_se, cluster_col = cluster_col)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
-    res_out <- if (switchers != "in")  .accumulate_u_g_placebo(prepped, k_max = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized)
+    res_out <- if (switchers != "in")  .accumulate_u_g_placebo(prepped, k_max = k, direction = 0L, prefit = prefit, only_never_switchers = only_never_switchers, normalized = normalized, want_se = want_se, cluster_col = cluster_col)
                else list(att = NA_real_, N_inc = 0L, N_eff = 0L, delta_norm = NA_real_)
 
     n_in  <- res_in$N_inc
@@ -1599,10 +1693,26 @@
         out[k] <- NA_real_
       }
     }
+    # Analytic SE: the accumulated variance terms pool across directions
+    # like the estimate, the out-direction negated.
+    if (isTRUE(want_se)) {
+      ucol <- numeric(G)
+      if (n_in  > 0L && !is.null(res_in$u_var))  ucol <- ucol + w_in * res_in$u_var
+      if (n_out > 0L && !is.null(res_out$u_var)) ucol <- ucol - (1 - w_in) * res_out$u_var
+      u_mat[, k] <- ucol
+      se_k <- .se_from_u(ucol, G, cog)
+      if (isTRUE(normalized)) {
+        dk <- delta_D[k]
+        se_k <- if (!is.na(dk) && dk != 0) se_k / dk else NA_real_
+      }
+      se_vec[k] <- se_k
+    }
   }
   list(placebos = out, n_inc = n_inc, n_eff = n_eff,
        n_eff_w = n_eff_w, n_sw_unw = n_sw_unw, n_sw_w = n_sw_w,
-       delta_D = delta_D)
+       delta_D = delta_D,
+       se = se_vec, u_mat = u_mat, G = G, cluster_of_group = cog,
+       u_scale = if (isTRUE(normalized)) delta_D else rep(1, placebo))
 }
 
 
@@ -1612,9 +1722,14 @@
 .accumulate_u_g_placebo <- function(prepped, k_max, direction = 1L,
                                       prefit = NULL,
                                       only_never_switchers = FALSE,
-                                      normalized = FALSE) {
+                                      normalized = FALSE,
+                                      want_se = FALSE, cluster_col = NULL) {
   G <- length(unique(prepped$group_XX))
   cum_U <- numeric(G)
+  # Under trends_lin the reference sums the event-time variance terms
+  # over j = 1..k exactly as it sums U_g (did_multiplegt_dyn_core.R:
+  # 626-641 for effects, 664-693 for placebos).
+  cum_var <- numeric(G)
   any_valid <- FALSE
   last_N_inc <- 0L
   last_N_eff <- 0L
@@ -1626,10 +1741,12 @@
     r <- .core_one_placebo(prepped, k = j, direction = direction,
                              prefit = prefit,
                              only_never_switchers = only_never_switchers,
-                             normalized = normalized)
+                             normalized = normalized,
+                                want_se = want_se, cluster_col = cluster_col)
     if (r$N_inc > 0L) {
       any_valid <- TRUE
       cum_U <- cum_U + r$U_g
+      if (!is.null(r$u_var)) cum_var <- cum_var + r$u_var
     }
     if (j == k_max) {
       last_N_inc <- r$N_inc %||% 0L
@@ -1651,7 +1768,8 @@
        N_eff_w  = last_N_eff_w,
        N_sw_unw = last_N_sw_unw,
        N_sw_w   = last_N_sw_w,
-       delta_norm = last_delta_norm)
+       delta_norm = last_delta_norm,
+       u_var = if (isTRUE(want_se)) cum_var else NULL)
 }
 
 
@@ -1661,9 +1779,15 @@
 #' @noRd
 .accumulate_u_g <- function(prepped, k_max, direction = 1L, prefit = NULL,
                               only_never_switchers = FALSE,
-                              normalized = FALSE) {
+                              normalized = FALSE,
+                              want_se = FALSE, cluster_col = NULL,
+                              less_conservative = FALSE) {
   G <- length(unique(prepped$group_XX))
   cum_U <- numeric(G)
+  # Under trends_lin the reference sums the event-time variance terms
+  # over j = 1..k exactly as it sums U_g (did_multiplegt_dyn_core.R:
+  # 626-641 for effects, 664-693 for placebos).
+  cum_var <- numeric(G)
   any_valid <- FALSE
   # Reported counts: the reference publishes N_k = count of switcher
   # cells at event-time k (with same_switchers gated on effects=k), so
@@ -1680,10 +1804,13 @@
     r <- .core_one_event_time(prepped, k = j, direction = direction,
                                 prefit = prefit,
                                 only_never_switchers = only_never_switchers,
-                                normalized = normalized)
+                                normalized = normalized,
+                                want_se = want_se, cluster_col = cluster_col,
+                                less_conservative = less_conservative)
     if (r$N_inc > 0L) {
       any_valid <- TRUE
       cum_U <- cum_U + r$U_g
+      if (!is.null(r$u_var)) cum_var <- cum_var + r$u_var
     }
     if (j == k_max) {
       last_N_inc <- r$N_inc %||% 0L
@@ -1705,7 +1832,8 @@
        N_eff_w  = last_N_eff_w,
        N_sw_unw = last_N_sw_unw,
        N_sw_w   = last_N_sw_w,
-       delta_norm = last_delta_norm)
+       delta_norm = last_delta_norm,
+       u_var = if (isTRUE(want_se)) cum_var else NULL)
 }
 
 
@@ -1725,38 +1853,280 @@
 #'
 #' @keywords internal
 #' @noRd
-.clamp_horizons <- function(prepped, effects, placebo, switchers = "") {
+.clamp_horizons <- function(prepped, effects, placebo, switchers = "",
+                            trends_lin = FALSE) {
   # One row per group for the group-level quantities.
-  g <- unique(prepped[, list(group_XX, S_g_XX, L_g_XX, L_g_placebo_XX)])
-
-  L_u <- suppressWarnings(max(g$L_g_XX[!is.na(g$S_g_XX) & g$S_g_XX == 1L], na.rm = TRUE))
-  L_a <- suppressWarnings(max(g$L_g_XX[!is.na(g$S_g_XX) & g$S_g_XX == 0L], na.rm = TRUE))
-  if (!is.finite(L_u)) L_u <- 0L
-  if (!is.finite(L_a)) L_a <- 0L
-
-  # Reference main.R:526-557: cap by max horizon of the requested
-  # switcher direction(s).
-  L_for_eff <- switch(switchers,
-                      "in"  = L_u,
-                      "out" = L_a,
-                      max(L_u, L_a, 0L))
-  l_eff <- min(as.integer(effects), L_for_eff)
-
-  if (placebo == 0L) {
-    l_pl <- 0L
-  } else {
-    Lp_u <- suppressWarnings(max(g$L_g_placebo_XX[!is.na(g$S_g_XX) & g$S_g_XX == 1L], na.rm = TRUE))
-    Lp_a <- suppressWarnings(max(g$L_g_placebo_XX[!is.na(g$S_g_XX) & g$S_g_XX == 0L], na.rm = TRUE))
-    if (!is.finite(Lp_u)) Lp_u <- 0L
-    if (!is.finite(Lp_a)) Lp_a <- 0L
-    L_for_pl <- switch(switchers,
-                       "in"  = Lp_u,
-                       "out" = Lp_a,
-                       max(Lp_u, Lp_a, 0L))
-    l_pl <- min(as.integer(placebo), L_for_pl, as.integer(effects))
+  g <- unique(prepped[, list(group_XX, S_g_XX, F_g_XX, L_g_XX, L_g_placebo_XX)])
+  is_in  <- !is.na(g$S_g_XX) & g$S_g_XX == 1L
+  is_out <- !is.na(g$S_g_XX) & g$S_g_XX == 0L
+  .mx <- function(v) {
+    v <- v[!is.na(v)]
+    if (length(v)) max(v) else NA_real_
   }
 
-  list(l_eff = as.integer(l_eff), l_pl = as.integer(l_pl))
+  # did_multiplegt_main.R:565-610. A direction with no switchers has
+  # L = 0, and its placebo horizon stays NA.
+  L_u <- L_a <- Lp_u <- Lp_a <- NA_real_
+  if (switchers %in% c("", "in")) {
+    L_u <- if (any(is_in)) .mx(g$L_g_XX[is_in]) else 0
+    if (is.na(L_u) || is.infinite(L_u)) L_u <- 0
+    if (placebo != 0L && any(is_in)) {
+      Lp_u <- .mx(g$L_g_placebo_XX[is_in])
+      Lp_u <- if (is.na(Lp_u) || Lp_u < 0) 0 else Lp_u
+      if (isTRUE(trends_lin)) Lp_u <- Lp_u - 1
+    }
+  }
+  if (switchers %in% c("", "out")) {
+    L_a <- if (any(is_out)) .mx(g$L_g_XX[is_out]) else 0
+    if (is.na(L_a) || is.infinite(L_a)) L_a <- 0
+    if (placebo != 0L && any(is_out)) {
+      Lp_a <- .mx(g$L_g_placebo_XX[is_out])
+      Lp_a <- if (is.na(Lp_a) || Lp_a < 0) 0 else Lp_a
+      if (isTRUE(trends_lin)) Lp_a <- Lp_a - 1
+    }
+  }
+  none <- switch(switchers,
+                 "in"  = is.na(L_u) || L_u == 0,
+                 "out" = is.na(L_a) || L_a == 0,
+                 (is.na(L_u) || L_u == 0) && (is.na(L_a) || L_a == 0))
+
+  # did_multiplegt_main.R:617-648: the reported horizons.
+  .mn <- function(...) suppressWarnings(min(..., na.rm = TRUE))
+  .mxr <- function(...) suppressWarnings(max(..., na.rm = TRUE))
+  l_eff <- 0; l_pl <- 0
+  if (!none) {
+    if (switchers == "") {
+      l_eff <- min(.mxr(L_a, L_u), effects)
+      if (placebo != 0L) l_pl <- min(.mn(.mxr(Lp_a, Lp_u), placebo), effects)
+    } else if (switchers == "in") {
+      l_eff <- .mn(effects, L_u)
+      if (placebo != 0L) l_pl <- min(.mn(placebo, Lp_u), effects)
+    } else {
+      l_eff <- .mn(effects, L_a)
+      if (placebo != 0L) l_pl <- min(.mn(placebo, Lp_a), effects)
+    }
+  }
+  if (!is.finite(l_pl) || l_pl < 0) l_pl <- 0
+
+  # What DIDmultiplegtDYN says about the horizons it settles on
+  # (did_multiplegt_main.R:651-664), in its own words.
+  notes <- character(0)
+  if (!none) {
+    if (l_eff < effects) {
+      notes <- c(notes, sprintf(paste0(
+        "The number of effects requested is too large. The number of ",
+        "effects which can be estimated is at most %.0f. The command will ",
+        "therefore try to estimante %.0f effect(s)"), l_eff, l_eff))
+    }
+    if (placebo != 0L) {
+      if (l_pl < placebo && effects >= placebo) {
+        notes <- c(notes, sprintf(paste0(
+          "The number of placebos which can be estimated is at most %.0f.",
+          "The command will therefore try to estimate %.0f placebo(s)."),
+          l_pl, l_pl))
+      }
+      if (effects < placebo) {
+        notes <- c(notes, sprintf(paste0(
+          "The number of placebo requested cannot be larger than the number ",
+          "of effects requested. The command cannot compute more than %.0f ",
+          "placebo(s)."), l_pl))
+      }
+    }
+  }
+
+  # max_pl / max_pl_gap (did_multiplegt_main.R:666-690): the longest
+  # pre-period any switcher has, with and without the effect window.
+  .dir_max <- function(sel) {
+    if (!any(sel)) return(c(0, 0))
+    a <- .mx(g$F_g_XX[sel] - 2)
+    b <- .mx(g$F_g_XX[sel] - 2 - g$L_g_XX[sel])
+    c(if (is.na(a)) 0 else a, if (is.na(b)) 0 else b)
+  }
+  mu <- if (switchers %in% c("", "in"))  .dir_max(is_in)  else c(0, 0)
+  ma <- if (switchers %in% c("", "out")) .dir_max(is_out) else c(0, 0)
+
+  list(l_eff = as.integer(l_eff), l_pl = as.integer(l_pl),
+       none_estimable = none, notes = notes,
+       max_pl = max(mu[1], ma[1]), max_pl_gap = max(mu[2], ma[2]))
+}
+
+
+# normalized_weights (did_multiplegt_dyn_normweights.R): the weight that
+# normalized effect l puts on the effect of the k-th treatment lag, for
+# k = 0..l-1, with a Total row. Numeric here; formatted in .aggregate.
+.dcdh_norm_weights <- function(prepped, l_eff, delta_D, sw_w,
+                               same_switchers = FALSE,
+                               only_never_switchers = FALSE) {
+  if (l_eff < 1L) return(NULL)
+  d <- prepped
+  cohort_cols <- c("time_XX", "d_sq_XX")
+  if ("trends_np_XX" %in% names(d)) cohort_cols <- c(cohort_cols, "trends_np_XX")
+  has_orig <- all(c("treatment_XX_orig", "d_sq_XX_orig") %in% names(d))
+  dose <- abs(if (has_orig) d$treatment_XX_orig - d$d_sq_XX_orig
+              else d$treatment_XX - d$d_sq_XX)
+  T_max <- max(d$time_XX)
+  W <- matrix(NA_real_, l_eff, l_eff)
+  for (i in seq_len(l_eff)) {
+    dy_ok <- !is.na(d$outcome_XX - data.table::shift(d$outcome_XX, i, type = "lag")) &
+             d$group_XX == data.table::shift(d$group_XX, i, type = "lag")
+    dy_ok[is.na(dy_ok)] <- FALSE
+    never <- d$time_XX < d$F_g_XX & d$N_gt_XX > 0 & dy_ok
+    if (isTRUE(only_never_switchers)) never[d$F_g_XX < T_max + 1L] <- FALSE
+    nctl <- stats::ave(d$N_gt_XX * never, interaction(d[, cohort_cols, with = FALSE], drop = TRUE), FUN = sum)
+    at_i <- d$time_XX == d$F_g_XX - 1L + i & i <= d$L_g_XX & nctl > 0 & dy_ok
+    ngt_i <- stats::ave(ifelse(at_i, d$N_gt_XX, NA_real_), d$group_XX,
+                        FUN = function(x) mean(x, na.rm = TRUE))
+    for (k in 0:(i - 1L)) {
+      dk <- ifelse(d$time_XX == d$F_g_XX - 1L + i - k & d$F_g_XX - 1L + i <= d$T_g_XX,
+                   dose, NA_real_)
+      if (isTRUE(same_switchers)) dk <- ifelse(d$F_g_XX - 1L + l_eff > d$T_g_XX, 0, dk)
+      W[k + 1L, i] <- (sum(dk * ngt_i, na.rm = TRUE) / delta_D[i]) / sw_w[i]
+    }
+  }
+  W
+}
+
+
+# save_sample (did_save_sample.R): per (group, time) of the estimation
+# panel, whether the group is a control, a switcher-in or a switcher-out,
+# and the event-study horizon a switcher's cell is used for.
+.dcdh_sample_tags <- function(prepped, tag) {
+  if (is.null(tag)) return(NULL)
+  keep <- !is.na(prepped$grp_orig_XX) & !is.na(prepped$time_orig_XX)
+  if ("no_wt_XX" %in% names(prepped)) keep <- keep & !prepped$no_wt_XX
+  s <- prepped$S_g_XX[keep]
+  s <- ifelse(is.na(s), 0, ifelse(s == 0, -1, s))
+  data.frame(g = prepped$grp_orig_XX[keep], t = prepped$time_orig_XX[keep],
+             did_sample = factor(s, levels = c(0, 1, -1),
+                                 labels = c("Control", "Switcher-in", "Switcher-out")),
+             did_effect = as.numeric(tag[keep]),
+             stringsAsFactors = FALSE)
+}
+
+
+# The design / date_first_switch tables, when asked for (R/design.R).
+.dcdh_desc_tables <- function(prepped, args, l_eff) {
+  if (is.null(args$design) && is.null(args$date_first_switch)) return(NULL)
+  pan <- .dcdh_desc_panel(prepped)
+  list(design = if (!is.null(args$design))
+                  .dcdh_design(pan, args$design, args$weight, l_eff),
+       dfs = if (!is.null(args$date_first_switch))
+               .dcdh_dfs(pan, args$date_first_switch, max(prepped$time_XX)))
+}
+
+
+# DIDmultiplegtDYN's error when Design Restriction 1 fails for every
+# requested switcher direction (did_multiplegt_main.R:225 and :614).
+.dcdh_no_effect_msg <- paste0(
+  "No treatment effect can be estimated.\n",
+  "  This is because Design Restriction 1 in de Chaisemartin & ",
+  "D'Haultfoeuille (2024) is not satisfied in the data, given the options ",
+  "requested.\n",
+  "  This may be due to the fact that groups' period-one treatment is ",
+  "continuous, or takes a large number of values, and you have not ",
+  "specified the continuous option.\n",
+  "  If so, you can try to specify this option.\n",
+  "  If the issue persists even with this option, this means that all ",
+  "groups experience their first treatment change at the same date.\n",
+  "  In this situation, estimators of de Chaisemartin & D'Haultfoeuille ",
+  "(2024) cannot be used.")
+
+# Stop exactly as the reference does when nothing is estimable. Only the
+# point estimate stops: a bootstrap resample with no switchers is dropped
+# by the aggregator instead.
+.dcdh_stop_if_none <- function(h, iter_seed) {
+  if (isTRUE(h$none_estimable) && iter_seed == 0L) {
+    stop(.dcdh_no_effect_msg, call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+
+# Counts the per-event-time pass does not produce, computed once on the
+# point estimate:
+#   - each event-time's N and N.w, counting a row once even when it
+#     serves both switching directions;
+#   - the ATE row's N and N.w: the observations that enter ANY
+#     event-time's estimate (the reference's count_global_XX,
+#     did_multiplegt_main.R:1505-1512);
+#   - delta_D_avg_total: the average number of periods over which a
+#     dose is accumulated (did_multiplegt_main.R:1688-1709).
+# The masks are the ones .core_one_event_time builds, so these counts
+# agree with the per-event-time N columns by construction.
+.dcdh_ate_extras <- function(prepped, l_eff, switchers = "",
+                             only_never_switchers = FALSE) {
+  out <- list(ate_N = NA_real_, ate_N_w = NA_real_,
+              delta_D_avg_total = NA_real_,
+              n_eff = integer(0), n_eff_w = numeric(0))
+  if (l_eff < 1L) return(out)
+  d <- prepped[, intersect(c("group_XX", "time_XX", "outcome_XX", "F_g_XX",
+                             "T_g_XX", "L_g_XX", "S_g_XX", "N_gt_XX",
+                             "d_sq_XX", "treatment_XX", "trends_np_XX",
+                             "treatment_XX_orig", "d_sq_XX_orig",
+                             "still_switcher_XX"), names(prepped)),
+               with = FALSE]
+  cohort_cols <- c("time_XX", "d_sq_XX")
+  if ("trends_np_XX" %in% names(d)) cohort_cols <- c(cohort_cols, "trends_np_XX")
+  has_orig <- all(c("treatment_XX_orig", "d_sq_XX_orig") %in% names(d))
+  dose <- if (has_orig) d$treatment_XX_orig - d$d_sq_XX_orig
+          else d$treatment_XX - d$d_sq_XX
+  T_max <- max(d$time_XX)
+  dirs <- switch(switchers, "in" = 1L, "out" = 0L, c(1L, 0L))
+  used <- logical(nrow(d))
+  tag  <- rep(NA_integer_, nrow(d))
+  n_eff <- integer(l_eff); n_eff_w <- numeric(l_eff)
+  for (k in seq_len(l_eff)) {
+    used_k <- logical(nrow(d))
+    dy_ok <- !is.na(d$outcome_XX - data.table::shift(d$outcome_XX, k,
+                                                     type = "lag")) &
+             d$group_XX == data.table::shift(d$group_XX, k, type = "lag")
+    dy_ok[is.na(dy_ok)] <- FALSE
+    never <- d$time_XX < d$F_g_XX & d$N_gt_XX > 0 & dy_ok
+    if (isTRUE(only_never_switchers)) never[d$F_g_XX < T_max + 1L] <- FALSE
+    d[, nev_XX := as.integer(never)]
+    d[, N_ctl_XX := sum(N_gt_XX * nev_XX), by = cohort_cols]
+    win <- d$time_XX >= (k + 1L) & d$time_XX <= d$T_g_XX
+    for (dir in dirs) {
+      dist <- d$time_XX == (d$F_g_XX + k - 1L) & k <= d$L_g_XX &
+              !is.na(d$S_g_XX) & d$S_g_XX == dir & dy_ok &
+              d$N_gt_XX > 0 & d$N_ctl_XX > 0
+      if ("still_switcher_XX" %in% names(d)) {
+        dist <- dist & d$still_switcher_XX == 1L
+      }
+      dist[is.na(dist)] <- FALSE
+      if (!any(dist)) next
+      d[, dist_XX := as.integer(dist)]
+      d[, N_sw_XX := sum(N_gt_XX * dist_XX), by = cohort_cols]
+      contrib <- win & (dist | (never & d$N_sw_XX > 0))
+      contrib[is.na(contrib)] <- FALSE
+      used_k <- used_k | contrib
+      tag[dist] <- k
+    }
+    # A control row can serve the in- and the out-switchers of the same
+    # (time, baseline) cell; the reference counts it once
+    # (count_global_XX is the larger of the two, main.R:1225-1227).
+    pos_k <- used_k & d$N_gt_XX > 0
+    n_eff[k]   <- sum(pos_k)
+    n_eff_w[k] <- sum(d$N_gt_XX[pos_k])
+    used <- used | used_k
+  }
+  out$n_eff <- n_eff
+  out$n_eff_w <- n_eff_w
+  out$tag <- tag
+  d[, c("nev_XX", "N_ctl_XX", intersect(c("dist_XX", "N_sw_XX"), names(d))) := NULL]
+  pos <- used & d$N_gt_XX > 0
+  out$ate_N   <- sum(pos)
+  out$ate_N_w <- sum(d$N_gt_XX[pos])
+  # A dose of zero is NA in the reference (main.R:1700), so it drops out
+  # of both sums; S_g turns a switch-out's dose positive.
+  sw <- !is.na(tag)
+  mag <- ifelse(d$S_g_XX[sw] == 1L, dose[sw], -dose[sw])
+  mag[mag == 0] <- NA_real_
+  M_g <- pmin(l_eff, d$T_g_XX[sw] - d$F_g_XX[sw] + 1)
+  num <- sum(mag * (M_g - (tag[sw] - 1L)), na.rm = TRUE)
+  den <- sum(mag, na.rm = TRUE)
+  out$delta_D_avg_total <- num / den
+  out
 }
 
 
@@ -1771,7 +2141,9 @@
                            trends_nonparam = args$trends_nonparam,
                            dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower),
                            continuous = args$continuous,
-                           trends_lin = tl)
+                           trends_lin = tl,
+                           drop_if_d_miss_before_first_switch =
+                             isTRUE(args$drop_if_d_miss_before_first_switch))
     # Auto-include polynomial features (from continuous=) in the FWL
     # control set. Reference: main.R:202-208 + the controls-residualization
     # block — the polynomial baseline becomes additional regressors.
@@ -1780,6 +2152,12 @@
     prefit <- if (length(eff_controls) > 0L) {
       .prefit_controls(prepped, eff_controls)
     } else NULL
+    if (!is.null(prefit) && iter_seed == 0L) {
+      prefit$se <- .controls_se_prep(prepped, prefit)
+    }
+    pre_notes <- if (!is.null(prefit) && iter_seed == 0L) {
+      .controls_na_notes(prepped, eff_controls)
+    } else character(0)
     # Auto-clamp to the feasible horizons, matching the reference.
     sw   <- args$switchers %||% ""
     ons  <- isTRUE(args$only_never_switchers)
@@ -1787,34 +2165,42 @@
     ss   <- isTRUE(args$same_switchers) || tl
     sspl <- isTRUE(args$same_switchers_pl)
     nrm  <- isTRUE(args$normalized)
-    h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
-    # Analytic SEs are available except when the estimator has an
-    # estimated nuisance in it. With `controls` (and with `continuous`,
-    # which adds polynomial controls of its own) the reference subtracts
-    # a control-estimation correction from the influence function --
-    # part2_switch in did_multiplegt_dyn_core.R:502-535 -- that didgpu
-    # does not compute. Reporting the uncorrected number would be wrong
-    # by ~1e-4, so the bootstrap remains the SE source there.
-    want_se <- (iter_seed == 0L) && is.null(prefit)
+    h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw,
+                         trends_lin = tl)
+    .dcdh_stop_if_none(h, iter_seed)
+    # Analytic SEs on the point estimate. With `controls` (and with
+    # `continuous`, which adds polynomial controls of its own) the
+    # influence function carries the reference's correction for the
+    # estimated control coefficients (.controls_part2).
+    want_se <- iter_seed == 0L
+    # more_granular_demeaning switches less_conservative_se on, as in the
+    # reference (did_multiplegt_dyn.R, before estimation).
+    lcse <- isTRUE(args$less_conservative_se) || isTRUE(args$more_granular_demeaning)
     if (tl) {
       ce <- .compute_effects_trends_lin(prepped, h$l_eff, switchers = sw,
                                           prefit = prefit,
                                           only_never_switchers = ons,
-                                          normalized = nrm)
+                                          normalized = nrm,
+                                          want_se = want_se,
+                                          cluster_col = args$cluster,
+                                          less_conservative = lcse)
       # Placebos under trends_lin: same accumulator pattern as effects,
       # summing per-event-time placebo U_g across j = 1..k. Reference:
       # main.R:882-906.
       cp <- .compute_placebos_trends_lin(prepped, h$l_pl, switchers = sw,
                                           prefit = prefit,
                                           only_never_switchers = ons,
-                                          normalized = nrm)
+                                          normalized = nrm,
+                                          want_se = want_se,
+                                          cluster_col = args$cluster)
     } else {
       ce <- .compute_effects(prepped, h$l_eff, switchers = sw, prefit = prefit,
                               only_never_switchers = ons,
                               same_switchers = ss,
                               normalized = nrm,
                               want_se = want_se,
-                              cluster_col = args$cluster)
+                              cluster_col = args$cluster,
+                              less_conservative = lcse)
       cp <- .compute_placebos(prepped, h$l_pl, switchers = sw, prefit = prefit,
                                only_never_switchers = ons,
                                normalized = nrm,
@@ -1857,16 +2243,27 @@
     het_block <- if (!is.null(args$predict_het) && iter_seed == 0L) {
       het_vars    <- unlist(args$predict_het[[1L]])
       het_effects <- as.integer(unlist(args$predict_het[[2L]]))
-      tryCatch(
-        .compute_predict_het(prepped, het_vars, het_effects,
-                              l_eff = h$l_eff,
-                              trends_nonparam_col = args$trends_nonparam,
-                              ci_level = args$ci_level %||% 95),
-        error = function(e) {
-          warning("predict_het failed: ", conditionMessage(e))
-          NULL
-        })
+      # Errors stop the fit, as they do in the reference.
+      .compute_predict_het(prepped, het_vars, het_effects,
+                            l_eff = h$l_eff, l_pl = h$l_pl,
+                            trends_nonparam_col = args$trends_nonparam,
+                            ci_level = args$ci_level %||% 95,
+                            hc2bm = isTRUE(args$predict_het_hc2bm),
+                            cluster_col = args$cluster)
     } else NULL
+
+    norm_w <- if (iter_seed == 0L && nrm && isTRUE(args$normalized_weights) && !tl) {
+      .dcdh_norm_weights(prepped, h$l_eff, ce$delta_D, ce$n_sw_w,
+                         same_switchers = ss, only_never_switchers = ons)
+    } else NULL
+
+    # The reference leaves the whole ATE row empty under trends_lin.
+    extras <- if (iter_seed == 0L && (!tl || isTRUE(args$save_sample))) {
+      .dcdh_ate_extras(prepped, h$l_eff, switchers = sw,
+                       only_never_switchers = ons)
+    } else NULL
+    if (tl && !is.null(extras)) extras[c("ate_N", "ate_N_w", "delta_D_avg_total",
+                                         "n_eff", "n_eff_w")] <- list(NULL)
 
     list(
       effects        = ce$effects,
@@ -1874,6 +2271,20 @@
       placebos       = cp$placebos,
       n_effects      = h$l_eff,
       n_placebos     = h$l_pl,
+      horizon_notes  = c(pre_notes, h$notes),
+      norm_weights   = norm_w,
+      desc_tables    = if (iter_seed == 0L) .dcdh_desc_tables(prepped, args, h$l_eff),
+      avg_cumul      = if (iter_seed == 0L && isTRUE(args$avg_time_periods))
+                         .dcdh_avg_cumul(prepped, h$l_eff, same_switchers = ss,
+                                         switchers = sw, continuous = args$continuous),
+      save_sample    = if (isTRUE(args$save_sample)) .dcdh_sample_tags(prepped, extras$tag),
+      max_pl         = h$max_pl,
+      max_pl_gap     = h$max_pl_gap,
+      ate_N          = extras$ate_N,
+      ate_N_w        = extras$ate_N_w,
+      n_eff_union    = extras$n_eff,
+      n_eff_w_union  = extras$n_eff_w,
+      delta_D_avg_total = extras$delta_D_avg_total,
       n_inc_effects  = ce$n_inc,
       n_inc_placebos = cp$n_inc,
       se_effects     = ce$se,

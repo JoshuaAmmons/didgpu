@@ -39,9 +39,10 @@
 #' @keywords internal
 #' @noRd
 .compute_predict_het <- function(prepped, het_vars, het_effects,
-                                   l_eff,
+                                   l_eff, l_pl = 0L,
                                    trends_nonparam_col = NULL,
-                                   ci_level = 95) {
+                                   ci_level = 95,
+                                   hc2bm = FALSE, cluster_col = NULL) {
   if (length(het_vars) == 0L) {
     return(data.frame(effect = integer(0), covariate = character(0),
                       Estimate = numeric(0), SE = numeric(0),
@@ -51,33 +52,30 @@
   }
   d <- prepped
 
-  # Resolve het_effects: -1 means "all 1..l_eff".
-  if (any(het_effects == -1L)) {
-    het_effects <- seq_len(l_eff)
-  } else {
-    het_effects <- sort(unique(as.integer(het_effects)))
-    bad <- het_effects[het_effects < 1L | het_effects > l_eff]
-    if (length(bad)) {
-      stop("predict_het: requested event-times out of range 1..", l_eff,
-           ": ", paste(bad, collapse = ", "))
+  # Which event-times and placebos, as the reference resolves them
+  # (did_multiplegt_main.R:1907-1913 and 2028-2037): -1 means all.
+  all_minus1 <- any(het_effects == -1L)
+  eff_set <- if (all_minus1) seq_len(l_eff) else seq_len(l_eff)[het_effects]
+  if (anyNA(eff_set)) {
+    stop("Error in predict_het second argument: please specify only numbers ",
+         "that are smaller or equal to the number you request in effects()")
+  }
+  pl_set <- integer(0)
+  if (l_pl > 0L) {
+    if (all_minus1) {
+      pl_set <- seq_len(l_pl)
+    } else if (max(het_effects) > l_pl) {
+      stop("You specified some numbers in predict_het that exceed the ",
+           "number of placebos possible to estimate! Please specify only ",
+           "numbers that are smaller or equal to the number of placebos you ",
+           "requested.")
+    } else {
+      pl_set <- het_effects
     }
   }
-
-  # Validate that het_vars are time-invariant per group (reference checks
-  # this at main.R:99-110 and warns otherwise).
   for (v in het_vars) {
     if (!v %in% names(d)) {
       stop("predict_het: covariate '", v, "' not in prepped data.")
-    }
-    sd_by_g <- d[, list(s = stats::sd(get(v), na.rm = TRUE)),
-                 by = group_XX]
-    sd_by_g$s[is.na(sd_by_g$s)] <- 0
-    if (mean(sd_by_g$s) > 0) {
-      warning(sprintf(
-        "predict_het: variable '%s' is time-varying within group; ",
-        v),
-        "using its per-group mean. Reference would drop the variable; ",
-        "we keep it for visibility.")
     }
   }
 
@@ -99,14 +97,21 @@
   # Use the raw N_gt_XX (which is 0 for rows that should be excluded).
   d[, weight_XX := N_gt_XX]
 
-  results <- vector("list", length(het_effects))
-  ci_z <- stats::qnorm(0.5 + ci_level / 200)  # for normal-based CI fallback
+  # Effects regress Y_{F_g-1+i} - Y_{F_g-1}, placebos Y_{F_g-1-i} -
+  # Y_{F_g-1} (reported as effect = -i). Both keep the groups with
+  # F_g - 1 + i <= T_g: the reference's placebo block reuses the
+  # effects' sample condition (main.R:2039).
+  jobs <- c(lapply(eff_set, function(i) list(i = i, lab = i,  off = i)),
+            lapply(pl_set,  function(i) list(i = i, lab = -i, off = -i)))
+  results <- vector("list", length(jobs))
 
-  for (idx in seq_along(het_effects)) {
-    i <- het_effects[idx]
+  for (idx in seq_along(jobs)) {
+    i <- jobs[[idx]]$i
+    lab <- jobs[[idx]]$lab
+    off <- jobs[[idx]]$off
 
-    # Per-group outcome at F_g + i - 1 (the i-th post-switch period).
-    d[, Yg_Fg_i_XX := ifelse(time_XX == F_g_XX - 1L + i, outcome_XX,
+    # Per-group outcome at F_g - 1 + off.
+    d[, Yg_Fg_i_XX := ifelse(time_XX == F_g_XX - 1L + off, outcome_XX,
                                NA_real_)]
     d[, Yg_Fg_i_XX := mean(Yg_Fg_i_XX, na.rm = TRUE),
       by = group_XX]
@@ -135,7 +140,7 @@
       # Too few observations to fit anything meaningful.
       for (v in het_vars) {
         results[[idx]] <- rbind(results[[idx]], data.frame(
-          effect = i, covariate = v,
+          effect = lab, covariate = v,
           Estimate = NA_real_, SE = NA_real_, t = NA_real_,
           LB = NA_real_, UB = NA_real_,
           N = as.integer(N_sample), pF = NA_real_,
@@ -169,7 +174,7 @@
     if (is.null(fit)) {
       for (v in het_vars) {
         results[[idx]] <- rbind(results[[idx]], data.frame(
-          effect = i, covariate = v,
+          effect = lab, covariate = v,
           Estimate = NA_real_, SE = NA_real_, t = NA_real_,
           LB = NA_real_, UB = NA_real_,
           N = as.integer(N_sample), pF = NA_real_,
@@ -180,7 +185,13 @@
 
     # HC2 robust covariance (matches DIDmultiplegtDYN 2.3.x default:
     # sandwich::vcovHC(model, type = "HC2")). Cascades into SE/t/LB/UB/pF.
-    bread <- .hc2_vcov(fit)
+    # predict_het_hc2bm: HC2 clustered by the cluster variable, or by
+    # group, with the small-sample adjustment (main.R:1990-1999).
+    cl_vec <- if (isTRUE(hc2bm)) {
+      if (!is.null(cluster_col) && cluster_col %in% names(sample)) sample[[cluster_col]]
+      else sample$group_XX
+    } else NULL
+    bread <- .hc2_vcov(fit, cluster = cl_vec)
     coefs <- stats::coef(fit)
     # Identify rows in beta corresponding to het_vars.
     var_pos <- match(het_vars, names(coefs))
@@ -192,7 +203,7 @@
         pos <- var_pos[j]
         if (is.na(pos)) {
           results[[idx]] <- rbind(results[[idx]], data.frame(
-            effect = i, covariate = v,
+            effect = lab, covariate = v,
             Estimate = NA_real_, SE = NA_real_, t = NA_real_,
             LB = NA_real_, UB = NA_real_,
             N = as.integer(N_sample), pF = NA_real_,
@@ -229,7 +240,7 @@
           else stats::pf(f_stat, q, df_resid, lower.tail = FALSE)
 
     results[[idx]] <- rbind(results[[idx]], data.frame(
-      effect    = i,
+      effect    = lab,
       covariate = het_vars_kept,
       Estimate  = est,
       SE        = se,
@@ -247,6 +258,8 @@
         "weight_XX") := NULL]
 
   out <- do.call(rbind, results)
+  # The reference's row order (main.R:2020, 2116).
+  out <- out[order(out$covariate, out$effect), , drop = FALSE]
   rownames(out) <- NULL
   out
 }
@@ -268,7 +281,7 @@
 #'
 #' @keywords internal
 #' @noRd
-.hc2_vcov <- function(fit) {
+.hc2_vcov <- function(fit, cluster = NULL) {
   coef_full <- stats::coef(fit)
   alive <- !is.na(coef_full)
   X  <- stats::model.matrix(fit)
@@ -289,7 +302,8 @@
                            response = ".y_XX", intercept = has_int)
   fitr <- stats::lm(fr, data = dat, weights = dat$.w_XX)
 
-  Vr <- sandwich::vcovHC(fitr, type = "HC2")
+  Vr <- if (is.null(cluster)) sandwich::vcovHC(fitr, type = "HC2")
+        else sandwich::vcovCL(fitr, cluster = cluster, type = "HC2", cadjust = TRUE)
   # Vr is ordered like fitr's coefs == colnames(Xr); relabel to the
   # original (alive) names so callers can index by coefficient name.
   dimnames(Vr) <- list(colnames(Xr), colnames(Xr))

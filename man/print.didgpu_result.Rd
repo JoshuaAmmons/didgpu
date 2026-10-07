@@ -15,5 +15,8 @@
 The input invisibly.
 }
 \description{
-Print method for didgpu_result
+Prints the estimation tables exactly as
+\code{DIDmultiplegtDYN::did_multiplegt_dyn()} prints its own: the event-study
+effects and their joint test, the average total effect, and the
+placebos and their joint test.
 }

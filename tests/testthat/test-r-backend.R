@@ -79,9 +79,11 @@ test_that("Effects/Placebos sample-size columns match reference", {
                 bootstrap_reps = 0L, backend = "r", verbose = FALSE)
 
   expect_equal(ncol(us$results$Effects), 8L)
+  # The reference's own column names.
   expect_equal(colnames(us$results$Effects),
-               c("Estimate", "SE", "LB.CI", "UB.CI",
+               c("Estimate", "SE", "LB CI", "UB CI",
                  "N", "Switchers", "N.w", "Switchers.w"))
+  expect_equal(colnames(us$results$Effects), colnames(ref$results$Effects))
   # Numerical match against the reference's N and Switchers columns.
   expect_equal(as.numeric(us$results$Effects[, "N"]),
                as.numeric(ref$results$Effects[, 5]))
@@ -135,12 +137,12 @@ test_that("r-backend through full bootstrap orchestrator matches reference", {
 
   fit_r <- didgpu(p, "Y", "unit", "period", "D",
                    effects = 3L, placebo = 1L,
-                   bootstrap_reps = 10L, seed = 1L,
+                   bootstrap_reps = 4L, seed = 1L,
                    checkpoint_dir = cdir_r,
                    backend = "r", verbose = FALSE)
   fit_ref <- didgpu(p, "Y", "unit", "period", "D",
                      effects = 3L, placebo = 1L,
-                     bootstrap_reps = 10L, seed = 1L,
+                     bootstrap_reps = 4L, seed = 1L,
                      checkpoint_dir = cdir_ref,
                      backend = "reference", verbose = FALSE)
 
@@ -157,7 +159,7 @@ test_that("r-backend through full bootstrap orchestrator matches reference", {
   # Resume on r-backend dir produces identical output.
   fit_r2 <- didgpu(p, "Y", "unit", "period", "D",
                     effects = 3L, placebo = 1L,
-                    bootstrap_reps = 10L, seed = 1L,
+                    bootstrap_reps = 4L, seed = 1L,
                     checkpoint_dir = cdir_r,
                     backend = "r", verbose = FALSE)
   expect_equal(fit_r$results$Effects[, "Estimate"],

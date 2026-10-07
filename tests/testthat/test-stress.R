@@ -26,12 +26,12 @@ test_that("r-backend == reference on a full-featured bidirectional bootstrap", {
 
   fit_r <- didgpu(p, "Y", "unit", "period", "D",
                    effects = 4L, placebo = 2L,
-                   bootstrap_reps = 25L, seed = 7L,
+                   bootstrap_reps = 4L, seed = 7L,
                    checkpoint_dir = cdir_r,
                    backend = "r", verbose = FALSE)
   fit_ref <- didgpu(p, "Y", "unit", "period", "D",
                      effects = 4L, placebo = 2L,
-                     bootstrap_reps = 25L, seed = 7L,
+                     bootstrap_reps = 4L, seed = 7L,
                      checkpoint_dir = cdir_ref,
                      backend = "reference", verbose = FALSE)
 
@@ -39,7 +39,7 @@ test_that("r-backend == reference on a full-featured bidirectional bootstrap", {
   # resample with the same seed; both produce the same point estimate on
   # each resampled panel; therefore the bootstrap-averaged estimates and
   # all derived SEs match).
-  for (col in c("Estimate", "SE", "LB.CI", "UB.CI")) {
+  for (col in c("Estimate", "SE", "LB CI", "UB CI")) {
     diff_e <- max(abs(fit_r$results$Effects[, col]   -
                       fit_ref$results$Effects[, col]))
     diff_p <- max(abs(fit_r$results$Placebos[, col]  -

@@ -32,8 +32,25 @@ didgpu(
   resume = TRUE,
   backend = "auto",
   n_workers = 1L,
-  verbose = TRUE,
-  on_iter = NULL
+  verbose = FALSE,
+  on_iter = NULL,
+  bootstrap = NULL,
+  graph_off = FALSE,
+  ggplot_args = NULL,
+  less_conservative_se = FALSE,
+  more_granular_demeaning = FALSE,
+  drop_if_d_miss_before_first_switch = FALSE,
+  effects_equal = FALSE,
+  predict_het_hc2bm = FALSE,
+  normalized_weights = FALSE,
+  save_results = NULL,
+  save_sample = FALSE,
+  design = NULL,
+  date_first_switch = NULL,
+  by = NULL,
+  by_path = NULL,
+  reset = 0,
+  avg_time_periods = FALSE
 )
 }
 \arguments{
@@ -150,10 +167,61 @@ uses \code{parallel::makeCluster()} to distribute bootstrap iters across
 cores. Each cell is saved to disk atomically so resume still works.
 The point estimate (cell 0) always runs sequentially first.}
 
-\item{verbose}{Logical. Print one line per completed cell.}
+\item{verbose}{Logical. Print one line per completed cell. Default
+\code{FALSE}, so that a fit prints what \code{DIDmultiplegtDYN} prints and
+nothing else.}
 
 \item{on_iter}{Optional function called as \code{on_iter(iter, value)}
 after each cell save. Useful for emailing/logging.}
+
+\item{bootstrap}{\code{DIDmultiplegtDYN}'s way of asking for a bootstrap:
+the number of replications, \code{c(reps, seed)}, \code{c(reps = , seed = )}
+or \code{list(reps, seed)}. When given it sets \code{bootstrap_reps} (and
+\code{seed}).}
+
+\item{graph_off}{Logical. As in \code{DIDmultiplegtDYN}, the event-study
+graph is drawn after the fit unless this is \code{TRUE}; either way it is
+returned in \code{$plot} (a ggplot, when ggplot2 and cowplot are
+installed).}
+
+\item{ggplot_args}{A list of ggplot2 layers added to that graph.}
+
+\item{less_conservative_se}{Logical. As in \code{DIDmultiplegtDYN}: demean each switcher's outcome change within switchers sharing its full treatment path, rather than its (baseline, switch date, dose) cell, which gives smaller standard errors.}
+
+\item{more_granular_demeaning}{Logical. Turns \code{less_conservative_se} on, as in \code{DIDmultiplegtDYN}.}
+
+\item{drop_if_d_miss_before_first_switch}{Logical. Drop a group's outcomes from the first period, before its first switch, at which its treatment is missing.}
+
+\item{effects_equal}{\code{TRUE}, \code{"all"} or \code{"lb, ub"}: test that all effects, or effects \code{lb} to \code{ub}, are equal. Reported in \code{$results$p_equality_effects}.}
+
+\item{predict_het_hc2bm}{Logical. With \code{predict_het}, cluster its HC2 standard errors (by \code{cluster}, or by group) with the Bell-McCaffrey small-sample adjustment.}
+
+\item{normalized_weights}{Logical, requires \code{normalized = TRUE}. Report the weight each normalized effect puts on the current treatment and on each of its lags, in \code{$normalized_weights}.}
+
+\item{save_results}{Path of a CSV file to which the estimates, standard errors, confidence intervals and counts are written.}
+
+\item{save_sample}{Logical. Return, in \code{$save_sample}, the data with \code{did_sample} (control, switcher-in or switcher-out) and \code{did_effect} (the effect a switcher's cell is used for).}
+
+\item{design}{\code{c(p, path)}: tabulate the switchers' treatment paths over the effects' window, the most common paths that together cover share \code{p} of switchers, in \code{$design}; \code{path} is \code{"console"} or an Excel file.}
+
+\item{date_first_switch}{\code{c(option, path)}: tabulate the switchers' first switch dates, overall (\code{option = ""}) or by baseline treatment (\code{"by_baseline_treat"}), in \code{$date_first_switch}; \code{path} is \code{"console"} or an Excel file.}
+
+\item{by}{Name of a group-level, time-invariant variable: the estimation is run separately for each of its levels, in \code{$by_level_1}, \code{$by_level_2}, ..., with a combined plot.}
+
+\item{by_path}{A positive integer, \code{-1} or \code{"all"}: the estimation is run separately for the switchers following each of the most common \code{by_path} treatment paths (all of them with \code{-1} or \code{"all"}), with the not-yet-switched groups of the same baseline as controls.}
+
+\item{reset}{Non-negative integer, as in \code{DIDmultiplegtDYN} 2.4.0. With \code{reset = k > 0}, the panel is restricted to the groups with the most non-missing treatment observations, and a group is split into a new sub-group whenever its treatment has stayed unchanged for \code{k} periods after a change; standard errors are then clustered by the original groups unless \code{cluster} is given.}
+
+\item{avg_time_periods}{Logical, as in \code{DIDmultiplegtDYN} 2.4.0: report the average number of periods over which the effect of a dose is accumulated, in \code{$avg_time_periods} and \code{$avg_cumul}.}
+}
+\details{
+\code{didgpu()} behaves as \code{DIDmultiplegtDYN::did_multiplegt_dyn()} does
+around the estimates too: it stops with the reference's error when no
+effect can be estimated, prints the reference's messages (horizons cut
+to what the data allow, effects or placebos that cannot be estimated,
+fixest's note on rows dropped from the control regressions), records
+the joint tests' caveats in \code{$results$vcov_warnings}, and prints the
+same tables.
 }
 \value{
 An object of class \code{didgpu_result} (see \code{\link[=print.didgpu_result]{print.didgpu_result()}}).

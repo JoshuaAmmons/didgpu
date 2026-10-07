@@ -97,3 +97,4 @@ tests/testthat/testthat-problems.rds
 /_site/
 /_book/
 /.quarto/
+tests/testthat/Rplots.pdf

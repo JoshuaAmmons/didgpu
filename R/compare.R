@@ -69,10 +69,12 @@ didgpu_compare <- function(
     }
   }
 
-  fit_r <- didgpu(df = df, outcome = outcome, group = group, time = time,
-                   treatment = treatment, effects = effects, placebo = placebo,
-                   cluster = cluster, switchers = switchers,
-                   bootstrap_reps = 0L, backend = "r", verbose = FALSE)
+  fit_r <- suppressMessages(
+    didgpu(df = df, outcome = outcome, group = group, time = time,
+           treatment = treatment, effects = effects, placebo = placebo,
+           cluster = cluster, switchers = switchers,
+           bootstrap_reps = 0L, backend = "r", verbose = FALSE,
+           graph_off = TRUE))
   fit_ref_pkg <- suppressMessages(suppressWarnings(
     DIDmultiplegtDYN::did_multiplegt_dyn(
       df = as.data.frame(df), outcome = outcome, group = group,

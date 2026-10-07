@@ -78,6 +78,9 @@ utils::globalVariables(c(
   "trunc_control_XX", "d_F_g_XX", "F_g_trunc_XX",
   "ghost_XX", "chg_XX", "never_chg_XX", "ctl_cell_XX", "v",
   "ft_row_XX",
+  "nev_XX", "N_ctl_XX", "dist_XX", "N_sw_XX", "g_", "y_", "d_", "no_wt_XX", "Time", "Estimate", "LB.CI", "UB.CI", "mty_XX", "mtdm_XX", "grp_orig_XX", "time_orig_XX", "wt_in_XX", "lab_XX", "count_d_non_miss_XX", "changed_XX",
+  "spell_XX", "periods_since_change_XX", "reset_dummy_XX", "reset_count_XX",
+  "new_group_XX", "old_group_XX",
   # same_switchers pre-pass scratch
   "still_switcher_XX", "N_g_control_check_XX",
   "diff_y_last_XX", "never_change_d_last_XX",

@@ -15,5 +15,5 @@
 The input invisibly.
 }
 \description{
-Summary method for didgpu_result
+The same display as \code{\link[=print.didgpu_result]{print.didgpu_result()}}, as in DIDmultiplegtDYN.
 }

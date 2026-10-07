@@ -100,15 +100,15 @@ test_that("predict_het with bad covariates errors clearly", {
   )
 })
 
-test_that("predict_het with normalized = TRUE is ignored (returns NULL)", {
+test_that("predict_het with normalized = TRUE stops, as in the reference", {
   p <- build_het_panel()
-  # Capture the validation message but don't require its exact text.
-  fit <- suppressMessages(
+  expect_error(
     didgpu(p, "Y", "unit", "period", "D",
             effects = 2L, normalized = TRUE,
             predict_het = list("size", -1L),
-            bootstrap_reps = 0L, backend = "r", verbose = FALSE))
-  expect_null(fit$results$predict_het)
+            bootstrap_reps = 0L, backend = "r", verbose = FALSE),
+    "The options predict_het and normalized cannot be specified together!",
+    fixed = TRUE)
 })
 
 test_that("predict_het wrong shape errors", {
@@ -117,6 +117,7 @@ test_that("predict_het wrong shape errors", {
     didgpu(p, "Y", "unit", "period", "D",
             effects = 2L, predict_het = "size",
             bootstrap_reps = 0L, backend = "r", verbose = FALSE),
-    "must be a list of length 2"
+    "Syntax error in predict_het option. List with two arguments required.",
+    fixed = TRUE
   )
 })

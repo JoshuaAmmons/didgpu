@@ -63,19 +63,22 @@ test_that("same_switchers_pl without same_switchers errors with clear message", 
             effects = 2L, placebo = 1L,
             same_switchers_pl = TRUE,
             bootstrap_reps = 0L, backend = "r", verbose = FALSE),
-    "same_switchers_pl.*requires.*same_switchers"
+    "The same_switchers_pl option only works if same_switchers is specified as well!",
+    fixed = TRUE
   )
 })
 
-test_that("same_switchers_pl with placebo = 0 errors", {
+test_that("same_switchers_pl with placebo = 0 runs, as in the reference", {
+  # The reference accepts it; with no placebos it changes nothing.
   p <- build_pl_panel()
-  expect_error(
-    didgpu(p, "Y", "unit", "period", "D",
-            effects = 2L, placebo = 0L,
-            same_switchers = TRUE, same_switchers_pl = TRUE,
-            bootstrap_reps = 0L, backend = "r", verbose = FALSE),
-    "requires .placebo > 0"
-  )
+  a <- didgpu(p, "Y", "unit", "period", "D",
+              effects = 2L, placebo = 0L,
+              same_switchers = TRUE, same_switchers_pl = TRUE,
+              bootstrap_reps = 0L, backend = "r", verbose = FALSE, graph_off = TRUE)
+  b <- didgpu(p, "Y", "unit", "period", "D",
+              effects = 2L, placebo = 0L, same_switchers = TRUE,
+              bootstrap_reps = 0L, backend = "r", verbose = FALSE, graph_off = TRUE)
+  expect_equal(a$results$Effects, b$results$Effects)
 })
 
 test_that("same_switchers_pl = FALSE (default) is unchanged", {

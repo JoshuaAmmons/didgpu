@@ -43,8 +43,8 @@ didgpu_event_study_data <- function(x) {
       event_time = -seq_len(nrow(pl)),
       estimate   = as.numeric(pl[, "Estimate"]),
       std.error  = as.numeric(pl[, "SE"]),
-      conf.low   = as.numeric(pl[, "LB.CI"]),
-      conf.high  = as.numeric(pl[, "UB.CI"]),
+      conf.low   = as.numeric(pl[, 3L]),
+      conf.high  = as.numeric(pl[, 4L]),
       kind       = "placebo",
       stringsAsFactors = FALSE
     )
@@ -56,8 +56,8 @@ didgpu_event_study_data <- function(x) {
       event_time = seq_len(nrow(e)),
       estimate   = as.numeric(e[, "Estimate"]),
       std.error  = as.numeric(e[, "SE"]),
-      conf.low   = as.numeric(e[, "LB.CI"]),
-      conf.high  = as.numeric(e[, "UB.CI"]),
+      conf.low   = as.numeric(e[, 3L]),
+      conf.high  = as.numeric(e[, 4L]),
       kind       = "effect",
       stringsAsFactors = FALSE
     )

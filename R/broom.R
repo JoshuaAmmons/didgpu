@@ -59,11 +59,11 @@ didgpu_tidy <- function(x, conf.int = TRUE, conf.level = NULL, ...) {
   if (!is.null(x$results$Effects) && nrow(x$results$Effects) > 0L) {
     eff <- x$results$Effects
     rows[[length(rows) + 1L]] <- .row_block(
-      term       = rownames(eff) %||% paste0("Effect_", seq_len(nrow(eff))),
+      term       = trimws(rownames(eff) %||% paste0("Effect_", seq_len(nrow(eff)))),
       estimate   = eff[, "Estimate"],
       std.error  = eff[, "SE"],
-      conf.low   = eff[, "LB.CI"],
-      conf.high  = eff[, "UB.CI"],
+      conf.low   = eff[, 3L],
+      conf.high  = eff[, 4L],
       kind       = "effect"
     )
   }
@@ -73,19 +73,19 @@ didgpu_tidy <- function(x, conf.int = TRUE, conf.level = NULL, ...) {
       term       = "ATE",
       estimate   = ate[1, "Estimate"],
       std.error  = ate[1, "SE"],
-      conf.low   = ate[1, "LB.CI"],
-      conf.high  = ate[1, "UB.CI"],
+      conf.low   = ate[1, 3L],
+      conf.high  = ate[1, 4L],
       kind       = "ate"
     )
   }
   if (!is.null(x$results$Placebos) && nrow(x$results$Placebos) > 0L) {
     pl <- x$results$Placebos
     rows[[length(rows) + 1L]] <- .row_block(
-      term       = rownames(pl) %||% paste0("Placebo_", seq_len(nrow(pl))),
+      term       = trimws(rownames(pl) %||% paste0("Placebo_", seq_len(nrow(pl)))),
       estimate   = pl[, "Estimate"],
       std.error  = pl[, "SE"],
-      conf.low   = pl[, "LB.CI"],
-      conf.high  = pl[, "UB.CI"],
+      conf.low   = pl[, 3L],
+      conf.high  = pl[, 4L],
       kind       = "placebo"
     )
   }

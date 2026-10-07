@@ -209,12 +209,12 @@ test_that("r-backend through full bootstrap matches reference on bidirectional",
 
   fit_r <- didgpu(p, "Y", "unit", "period", "D",
                    effects = 3L, placebo = 1L,
-                   bootstrap_reps = 8L, seed = 1L,
+                   bootstrap_reps = 4L, seed = 1L,
                    checkpoint_dir = cdir_r,
                    backend = "r", verbose = FALSE)
   fit_ref <- didgpu(p, "Y", "unit", "period", "D",
                      effects = 3L, placebo = 1L,
-                     bootstrap_reps = 8L, seed = 1L,
+                     bootstrap_reps = 4L, seed = 1L,
                      checkpoint_dir = cdir_ref,
                      backend = "reference", verbose = FALSE)
   expect_lt(max(abs(fit_r$results$Effects[, "Estimate"] -

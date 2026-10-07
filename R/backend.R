@@ -118,13 +118,29 @@ didgpu_backend_info <- function() {
     df_use <- if (iter_seed == 0L) df else .cluster_resample(df, args, iter_seed)
 
     t0 <- Sys.time()
-    suppressMessages(suppressWarnings({
+    # Record what the reference says on the point estimate so didgpu()
+    # can say the same, in the same order; resamples stay quiet, as in
+    # the reference's own bootstrap. Errors propagate unchanged.
+    ref_notes <- list()
+    # avg_time_periods exists from DIDmultiplegtDYN 2.4.0 on.
+    ref_formals <- names(formals(DIDmultiplegtDYN::did_multiplegt_dyn))
+    extra <- list()
+    if (isTRUE(args$avg_time_periods)) {
+      if (!"avg_time_periods" %in% ref_formals) {
+        stop("backend = 'reference' needs DIDmultiplegtDYN >= 2.4.0 for ",
+             "avg_time_periods; the installed version is ",
+             as.character(utils::packageVersion("DIDmultiplegtDYN")), ".",
+             call. = FALSE)
+      }
+      if (iter_seed == 0L) extra$avg_time_periods <- TRUE
+    }
+    withCallingHandlers({
       # Call the orchestrator. We force graph_off=TRUE and bootstrap=NULL
       # because we are providing our own bootstrap loop on the outside.
       # NOTE: DIDmultiplegtDYN's arg validator uses inherits(x, "numeric")
       # which is FALSE for integer storage. We coerce numerics to double
       # to keep the reference's brittle check happy.
-      res <- DIDmultiplegtDYN::did_multiplegt_dyn(
+      res <- do.call(DIDmultiplegtDYN::did_multiplegt_dyn, c(list(
         df         = as.data.frame(df_use),
         outcome    = args$outcome,
         group      = args$group,
@@ -145,11 +161,41 @@ didgpu_backend_info <- function() {
         switchers  = args$switchers %||% "",
         normalized = isTRUE(args$normalized),
         predict_het = args$predict_het,
+        predict_het_hc2bm = isTRUE(args$predict_het_hc2bm),
+        normalized_weights = isTRUE(args$normalized_weights),
+        save_sample = isTRUE(args$save_sample) && iter_seed == 0L,
+        # didgpu writes any Excel file itself, once.
+        design = if (iter_seed == 0L && !is.null(args$design))
+                   c(args$design[1], "console"),
+        date_first_switch = if (iter_seed == 0L && !is.null(args$date_first_switch))
+                              c(args$date_first_switch[1], "console"),
+        less_conservative_se = isTRUE(args$less_conservative_se),
+        drop_if_d_miss_before_first_switch = isTRUE(args$drop_if_d_miss_before_first_switch),
+        effects_equal = if (isTRUE(args$effects_equal) && !is.null(args$effects_equal_lb))
+                          paste(args$effects_equal_lb, args$effects_equal_ub, sep = ", ")
+                        else isTRUE(args$effects_equal),
+        more_granular_demeaning = isTRUE(args$more_granular_demeaning),
         ci_level   = as.double(args$ci_level %||% 95),
         graph_off  = TRUE
-      )
-    }))
+      ), extra))
+    },
+    message = function(m) {
+      if (iter_seed == 0L) {
+        ref_notes[[length(ref_notes) + 1L]] <<-
+          list(type = "message", text = sub("\n$", "", conditionMessage(m)))
+      }
+      invokeRestart("muffleMessage")
+    },
+    warning = function(w) {
+      if (iter_seed == 0L) {
+        ref_notes[[length(ref_notes) + 1L]] <<-
+          list(type = "warning", text = conditionMessage(w))
+      }
+      invokeRestart("muffleWarning")
+    })
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    rr <- res$results
+    ate_row <- rr$ATE
 
     # Pull the per-event-time point estimates. With bootstrap=NULL the
     # reference computes its SEs and joint nullity tests analytically, and
@@ -216,6 +262,19 @@ didgpu_backend_info <- function() {
       p_joint_placebo_ref = if (iter_seed == 0L)
                               as.numeric(res$results$p_jointplacebo %||% NA_real_)[1]
                             else NA_real_,
+      ref_notes      = if (iter_seed == 0L) ref_notes else NULL,
+      p_equality_ref = rr$p_equality_effects %||% NA_real_,
+      avg_cumul      = if (iter_seed == 0L) res$avg_time_periods else NULL,
+      save_sample_df = if (iter_seed == 0L) res$save_sample else NULL,
+      desc_tables    = if (iter_seed == 0L && (!is.null(res$design) || !is.null(res$date_first_switch)))
+                         list(design = res$design, dfs = res$date_first_switch),
+      norm_weights_ref = if (iter_seed == 0L) res$normalized_weights else NULL,
+      vcov_warnings_ref = if (iter_seed == 0L) rr$vcov_warnings else NULL,
+      max_pl         = rr$max_pl %||% NA_real_,
+      max_pl_gap     = rr$max_pl_gap %||% NA_real_,
+      ate_N          = if (!is.null(ate_row) && ncol(ate_row) >= 7L) ate_row[1, 5] else NA_real_,
+      ate_N_w        = if (!is.null(ate_row) && ncol(ate_row) >= 7L) ate_row[1, 7] else NA_real_,
+      delta_D_avg_total = rr$delta_D_avg_total %||% NA_real_,
       iter_seed      = as.integer(iter_seed),
       wall_seconds   = wall,
       backend        = "reference"
@@ -252,7 +311,9 @@ didgpu_backend_info <- function() {
       same_switchers         = isTRUE(args$same_switchers),
       same_switchers_pl      = isTRUE(args$same_switchers_pl),
       only_never_switchers   = isTRUE(args$only_never_switchers),
-      predict_het            = !is.null(args$predict_het)
+      predict_het            = !is.null(args$predict_het),
+      less_conservative_se   = isTRUE(args$less_conservative_se) ||
+                               isTRUE(args$more_granular_demeaning)
     )
     if (any(vapply(unsupported, isTRUE, logical(1)))) {
       return(.backend_r_impl()(df, args, iter_seed))
@@ -262,9 +323,12 @@ didgpu_backend_info <- function() {
     t0 <- Sys.time()
     prepped <- .prep_panel(df_use, args$outcome, args$group, args$time,
                             args$treatment,
-                            dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower))
+                            dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower),
+                            drop_if_d_miss_before_first_switch =
+                              isTRUE(args$drop_if_d_miss_before_first_switch))
     sw <- args$switchers %||% ""
     h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
+    .dcdh_stop_if_none(h, iter_seed)
     ce <- .compute_effects_cpp(prepped, h$l_eff, switchers = sw,
                                 want_se = (iter_seed == 0L),
                                 cluster_col = args$cluster)
@@ -272,6 +336,7 @@ didgpu_backend_info <- function() {
                             want_se = (iter_seed == 0L),
                             cluster_col = args$cluster)
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    extras <- if (iter_seed == 0L) .dcdh_ate_extras(prepped, h$l_eff, switchers = sw) else NULL
 
     # Av_tot_eff -- see .ate_weighted in core_r.R. Neither kernel backend
     # accepts `normalized`, so ce$effects is already the raw DID here.
@@ -303,6 +368,18 @@ didgpu_backend_info <- function() {
       n_inc_placebos = cp$n_inc,
       n_eff_effects  = ce$n_eff,
       n_eff_placebos = cp$n_eff,
+      horizon_notes  = h$notes,
+      max_pl         = h$max_pl,
+      max_pl_gap     = h$max_pl_gap,
+      ate_N          = extras$ate_N,
+      ate_N_w        = extras$ate_N_w,
+      n_eff_union    = extras$n_eff,
+      n_eff_w_union  = extras$n_eff_w,
+      delta_D_avg_total = extras$delta_D_avg_total,
+      save_sample    = if (isTRUE(args$save_sample)) .dcdh_sample_tags(prepped, extras$tag),
+      desc_tables    = if (iter_seed == 0L) .dcdh_desc_tables(prepped, args, h$l_eff),
+      avg_cumul      = if (iter_seed == 0L && isTRUE(args$avg_time_periods))
+                         .dcdh_avg_cumul(prepped, h$l_eff, switchers = sw),
       iter_seed      = as.integer(iter_seed),
       wall_seconds   = wall,
       backend        = "cpu"
@@ -323,7 +400,7 @@ didgpu_backend_info <- function() {
   G_all <- length(unique(prepped$group_XX))
   cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
                cluster_col %in% names(prepped)) {
-    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+    prepped[, list(cl = .first_cluster(.SD[[1L]])), by = group_XX,
             .SDcols = cluster_col]$cl
   } else NULL
   u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = effects) else NULL
@@ -508,7 +585,9 @@ didgpu_backend_info <- function() {
       same_switchers         = isTRUE(args$same_switchers),
       same_switchers_pl      = isTRUE(args$same_switchers_pl),
       only_never_switchers   = isTRUE(args$only_never_switchers),
-      predict_het            = !is.null(args$predict_het)
+      predict_het            = !is.null(args$predict_het),
+      less_conservative_se   = isTRUE(args$less_conservative_se) ||
+                               isTRUE(args$more_granular_demeaning)
     )
     if (any(vapply(unsupported, isTRUE, logical(1)))) {
       if (iter_seed == 0L) {
@@ -525,9 +604,12 @@ didgpu_backend_info <- function() {
     # ignored on this backend (it is honoured on r and cpu).
     prepped <- .prep_panel(df_use, args$outcome, args$group, args$time,
                             args$treatment,
-                            dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower))
+                            dont_drop_larger_lower = isTRUE(args$dont_drop_larger_lower),
+                            drop_if_d_miss_before_first_switch =
+                              isTRUE(args$drop_if_d_miss_before_first_switch))
     sw <- args$switchers %||% ""
     h <- .clamp_horizons(prepped, args$effects, args$placebo, switchers = sw)
+    .dcdh_stop_if_none(h, iter_seed)
     # Run the per-event-time CUDA kernel. We mimic .compute_effects's
     # direction loop here so the result shape stays consistent.
     ce <- .compute_effects_cuda(prepped, h$l_eff, switchers = sw,
@@ -537,6 +619,7 @@ didgpu_backend_info <- function() {
                             want_se = (iter_seed == 0L),
                             cluster_col = args$cluster)  # placebos still r-side
     wall <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    extras <- if (iter_seed == 0L) .dcdh_ate_extras(prepped, h$l_eff, switchers = sw) else NULL
     # This branch has had the ATE wrong twice. It first read
     #     ate <- if (h$l_eff == 1L) ce$effects[1] else NA_real_
     # so backend "cuda" returned NA whenever effects > 1 while the
@@ -573,6 +656,18 @@ didgpu_backend_info <- function() {
       n_inc_placebos = cp$n_inc,
       n_eff_effects  = ce$n_inc,
       n_eff_placebos = cp$n_eff,
+      horizon_notes  = h$notes,
+      max_pl         = h$max_pl,
+      max_pl_gap     = h$max_pl_gap,
+      ate_N          = extras$ate_N,
+      ate_N_w        = extras$ate_N_w,
+      n_eff_union    = extras$n_eff,
+      n_eff_w_union  = extras$n_eff_w,
+      delta_D_avg_total = extras$delta_D_avg_total,
+      save_sample    = if (isTRUE(args$save_sample)) .dcdh_sample_tags(prepped, extras$tag),
+      desc_tables    = if (iter_seed == 0L) .dcdh_desc_tables(prepped, args, h$l_eff),
+      avg_cumul      = if (iter_seed == 0L && isTRUE(args$avg_time_periods))
+                         .dcdh_avg_cumul(prepped, h$l_eff, switchers = sw),
       iter_seed      = as.integer(iter_seed),
       wall_seconds   = wall,
       backend        = "cuda"
@@ -589,7 +684,7 @@ didgpu_backend_info <- function() {
   G_all <- length(unique(prepped$group_XX))
   cog <- if (!is.null(cluster_col) && nzchar(cluster_col) &&
                cluster_col %in% names(prepped)) {
-    prepped[, list(cl = .SD[[1L]][1L]), by = group_XX,
+    prepped[, list(cl = .first_cluster(.SD[[1L]])), by = group_XX,
             .SDcols = cluster_col]$cl
   } else NULL
   u_mat <- if (isTRUE(want_se)) matrix(0, nrow = G_all, ncol = effects) else NULL

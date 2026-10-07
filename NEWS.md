@@ -19,6 +19,131 @@
   in a CPU-only build. That the NOTE is CUDA-only is now demonstrable
   rather than asserted.
 
+## `didgpu()` behaves as `DIDmultiplegtDYN` does, not only computes what it computes
+
+Everything a user sees from a fit now matches `did_multiplegt_dyn()`
+(2.4.0; its estimator is unchanged since 2.3.3):
+
+- **It stops when nothing is estimable**, with the reference's error
+  ("No treatment effect can be estimated. This is because Design
+  Restriction 1 ..."), where didgpu used to return an empty result with
+  no message. **Behavior change:** a script that relied on getting the
+  empty result back needs a `tryCatch()` there.
+- **The same messages**: horizons cut to what the data allow ("The
+  number of effects requested is too large ..."), effects and placebos
+  that cannot be estimated, joint tests that cannot be computed, the
+  bootstrap and `continuous` advice, a `predict_het` covariate that
+  varies within groups, and fixest's note on rows dropped from the
+  control regressions. A bootstrap prints the reference's header and
+  progress line.
+- **The same tables.** `print()` and `summary()` reproduce the
+  reference's layout line for line, including the "Average number of
+  time periods over which a treatment effect is accumulated" line and
+  the "Warnings" block. Only the closing acknowledgement of the EU grant
+  that funded `DIDmultiplegtDYN` is left out.
+- **The same result object**: `results$Effects`, `$ATE`, `$Placebos` with
+  the reference's column names (`"LB CI"`, `"UB CI"`) and padded row
+  names (`"Effect_1    "`, `"Av_tot_eff  "`); `delta_D_avg_total`,
+  `max_pl`, `max_pl_gap` and `vcov_warnings`; no `Placebos` block when
+  there are no placebos; a joint test only where the reference reports
+  one. `coef()` and `confint()` still return bare names.
+- **The event-study graph**: drawn after the fit unless `graph_off =
+  TRUE`, and returned in `$plot` (needs ggplot2 and cowplot, which
+  `DIDmultiplegtDYN` installs). `ggplot_args` adds layers.
+- **`bootstrap = `** is accepted in the reference's forms (`100`,
+  `c(100, 42)`, `list(100, 42)`) alongside `bootstrap_reps`.
+- **`verbose` now defaults to `FALSE`**, so a fit prints only what the
+  reference prints. **Behavior change:** pass `verbose = TRUE` for the
+  per-cell timing lines.
+- The reference's argument checks and wording for the options the two
+  share; a cluster equal to the group is ignored, and rows missing the
+  cluster are dropped, as there.
+
+## Every `did_multiplegt_dyn()` option
+
+`didgpu()` now takes all of `DIDmultiplegtDYN`'s arguments, with its
+defaults, checks and messages, and gives its numbers for each:
+
+- `less_conservative_se` and `more_granular_demeaning` (switcher cells
+  pooled by treatment path in the variance);
+- `drop_if_d_miss_before_first_switch`;
+- `effects_equal` (`TRUE`, `"all"` or `"lb, ub"`; `p_equality_effects`);
+- `predict_het_hc2bm` (clustered HC2 with the Bell-McCaffrey
+  adjustment);
+- `normalized_weights` (the weights on treatment lags);
+- `save_results` (the results matrix as a CSV) and `save_sample` (the
+  data tagged control / switcher-in / switcher-out, with the effect each
+  switcher cell serves);
+- `design` and `date_first_switch` (tables of treatment paths and of
+  switching dates, on the console or in an Excel file via openxlsx);
+- `by` and `by_path` (one run per level or per treatment path, combined
+  plot, combined `save_sample`);
+- `reset` and `avg_time_periods`, new in `DIDmultiplegtDYN` 2.4.0, and
+  2.4.0's top-level `N_switchers_effect_k` (`avg_time_periods`' routines
+  are in `src/avg_cumul.cpp`). Checked against 2.4.0: estimates, SEs,
+  messages, printed tables and result fields all match.
+
+Two places where `didgpu` deliberately does not copy the reference:
+
+- Under `trends_lin`, the reference's (unweighted) `Switchers` column for
+  placebos repeats the last placebo's count in every row, a value left
+  over from its last per-placebo run; its `Switchers.w` column, equal to
+  `Switchers` without weights, has the right counts. didgpu reports
+  those.
+- A character `by` variable makes the reference's time-invariance check
+  fail ("missing value where TRUE/FALSE needed"); didgpu runs it.
+
+## Fixes to estimates and standard errors found doing this
+
+A note first: `DIDmultiplegtDYN` (2.3.3 and 2.4.0 alike) holds on to
+about 4 GB of memory per `did_multiplegt_dyn()` call on a 1,800-row
+panel, which `gc()` does not release, so a long loop of calls -- or
+`didgpu(backend = "reference")` with a bootstrap -- can exhaust the
+machine. didgpu's own backends do not. The tests that bootstrap the
+reference backend now use 4 replications.
+
+- **Analytic standard errors with `controls`, `continuous` and
+  `trends_lin`.** These were NA unless a bootstrap was run. With
+  controls, the influence function now carries the reference's
+  correction for the estimated control coefficients (`part2_switch`,
+  for effects and placebos); under `trends_lin` the event-time variance
+  terms are summed as the estimates are. Both match the reference to
+  ~1e-16, as do the joint tests.
+- **`trends_lin` placebos were wrong** (by up to 0.28 on test panels):
+  the reference forces both `same_switchers` and `same_switchers_pl` on
+  each `trends_lin` placebo, and didgpu applied only the first.
+- **Clustered standard errors dropped a group whose first period was
+  missing.** A group's cluster was read from its first row, which for a
+  late entrant is a balancing fill-in with no cluster, so the group fell
+  out of the clustered variance (0.117 vs the reference's 0.178 on a
+  test panel). It is now the group's first non-missing cluster.
+- **A missing control dropped too little.** The reference removes every
+  row with a missing control before anything else; didgpu kept the row's
+  outcome, which moved estimates (0.328 vs 0.373 on a test panel).
+- **The `N` column double-counted** a control observation that serves
+  both switching directions (same period, same baseline, groups moving
+  up and down): 500 vs the reference's 289 on a test panel. It is now
+  counted once, on every backend.
+- **`backend = "cuda"` reported the switcher count as `N`.**
+- **The ATE row** now carries the reference's `N`, `Switchers`, `N.w`
+  and `Switchers.w`; they were NA or missing.
+- **Joint tests on a singular covariance** are NA, with the reference's
+  caveat, instead of a generalised-inverse p-value; a near-singular one
+  carries the reference's caveat.
+- **Horizons** are clamped exactly as the reference clamps them, so a
+  horizon nobody reaches is reported as an NA row with its message
+  rather than silently dropped.
+- **`predict_het`** now also runs the placebo heterogeneity regressions,
+  orders its rows as the reference does, drops a covariate that varies
+  within groups (with the reference's message), and stops on an
+  out-of-range horizon instead of warning.
+- `coef$vcov` intentionally differs from the reference's. That matrix
+  (`did_multiplegt_main.R:2259-2296`, unchanged in 2.4.0) builds its
+  off-diagonal terms from `ifelse(is.null(col), NA, col)`, which keeps
+  only each influence column's first element: its covariances change
+  when the groups are relabelled, and it is not positive semi-definite.
+  didgpu's is the covariance the reference's own joint tests use.
+
 ## New arguments (Callaway-Sant'Anna)
 
 - **`didgpu_cs(base_period = c("varying", "universal"))`**, defaulting to

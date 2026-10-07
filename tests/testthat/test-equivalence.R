@@ -62,17 +62,17 @@ test_that("informative errors on misuse", {
   expect_true(all(is.finite(fit_an$results$Placebos[, "SE"])))
   expect_s3_class(didgpu_equivalence(fit_an, delta = 0.5), "didgpu_equivalence")
 
-  # SEs are still NA where analytic ones are unavailable (here: controls)
-  # and no bootstrap was requested -> clear error pointing at the fix.
+  # With controls the SEs are analytic too now, so the test works there
+  # as well (it used to be an error pointing at bootstrap_reps).
   pc <- didgpu_simulate_panel(n_units = 80L, n_periods = 12L,
                               tau_profile = c(0.5, 1.0), seed = 7L)
   pc$D <- as.integer(pc$D >= 0.5)
   set.seed(1); pc$X <- stats::rnorm(nrow(pc))
-  fit_nose <- suppressMessages(
+  fit_ctrl <- suppressMessages(
     didgpu(pc, "Y", "unit", "period", "D", effects = 2L, placebo = 2L,
            controls = "X", bootstrap_reps = 0L, backend = "r",
-           verbose = FALSE))
-  expect_error(didgpu_equivalence(fit_nose, delta = 0.5), "bootstrap_reps")
+           verbose = FALSE, graph_off = TRUE))
+  expect_s3_class(didgpu_equivalence(fit_ctrl, delta = 0.5), "didgpu_equivalence")
 
   # no placebos at all -> clear error.
   p <- didgpu_simulate_panel(n_units = 60L, n_periods = 10L,
@@ -119,7 +119,8 @@ test_that("single-horizon joint test equals the two-sided z-test", {
   j1  <- didgpu_joint_placebo(fit, horizons = 1L)
   expect_equal(j1$df, 1L)
   v11 <- fit$coef$vcov["Placebo_1", "Placebo_1"]
-  est <- as.numeric(fit$coef$b["Placebo_1"])
+  # coef$b carries the reference's padded names ("Placebo_1   ").
+  est <- as.numeric(fit$coef$b[trimws(names(fit$coef$b)) == "Placebo_1"])
   expect_equal(j1$p_value, 2 * stats::pnorm(-abs(est / sqrt(v11))),
                tolerance = 1e-8)
 })

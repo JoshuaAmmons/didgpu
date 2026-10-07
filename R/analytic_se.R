@@ -70,7 +70,7 @@
 #' @keywords internal
 #' @noRd
 .se_build_cells <- function(d, cohort_cols, cluster_col = NULL,
-                             cols = .se_cols()) {
+                             cols = .se_cols(), paths = NULL) {
   clustered <- !is.null(cluster_col) && nzchar(cluster_col) &&
                  cluster_col %in% names(d)
 
@@ -114,7 +114,11 @@
     d[, (nm) := NA_real_]
   }
   .cell("dof_ns_XX",   "cnt_ns_XX",  "tot_ns_XX",  "mean_ns_XX",  "dofc_ns_XX",  cohort_cols)
-  .cell("dof_s_XX",    "cnt_s_XX",   "tot_s_XX",   "mean_s_XX",   "dofc_s_XX",   s_cols)
+  if (is.null(paths)) {
+    .cell("dof_s_XX",  "cnt_s_XX",   "tot_s_XX",   "mean_s_XX",   "dofc_s_XX",   s_cols)
+  } else {
+    .se_path_cells(d, paths, cols, setdiff(cohort_cols, c("time_XX", "d_sq_XX")))
+  }
   .cell("dof_ns_s_XX", "cnt_nss_XX", "tot_nss_XX", "mean_nss_XX", "dofc_nss_XX", cohort_cols)
   invisible(d)
 }
@@ -172,9 +176,10 @@
 #' @keywords internal
 #' @noRd
 .se_u_g_var <- function(d, k, G, N_inc, cohort_cols, cluster_col = NULL,
-                         cols = .se_cols()) {
+                         cols = .se_cols(), less_conservative = FALSE) {
   if (!is.finite(N_inc) || N_inc == 0) return(numeric(G))
-  .se_build_cells(d, cohort_cols, cluster_col, cols)
+  paths <- if (isTRUE(less_conservative)) .se_paths(d, k) else NULL
+  .se_build_cells(d, cohort_cols, cluster_col, cols, paths)
   .se_build_ehat(d, k)
   .se_build_dof(d, k)
   k <- as.integer(k)
@@ -285,4 +290,79 @@
   U[, !ok] <- NA_real_
   if (any(ok)) U[, ok] <- sweep(U[, ok, drop = FALSE], 2L, scale[ok], "/")
   U
+}
+
+
+# -------- less_conservative_se --------
+#
+# With less_conservative_se (or more_granular_demeaning) the reference
+# pools switcher cells by treatment PATH rather than by (baseline,
+# switch date, dose) (did_multiplegt_dyn_core.R:89-117, 436-487):
+#   path_0 = (d_sq, F_g);  path_i = (path_{i-1}, D at F_g - 1 + i),
+# the dose carried forward when unobserved. A switcher at horizon k is
+# demeaned within path_k if another group shares it, else within path_1
+# if one shares that, else within path_0. Its cells count observations
+# even when standard errors are clustered.
+
+# Path ids up to horizon k, and whether more than one group shares them.
+.se_paths <- function(d, k) {
+  k <- as.integer(k)
+  g <- d$group_XX
+  dfg_prev <- d$d_sq_XX
+  path <- as.integer(factor(paste(d$d_sq_XX, d$F_g_XX, sep = "|")))
+  shared <- function(pth) {
+    n <- tapply(g, pth, function(x) length(unique(x)))
+    as.integer(n[as.character(pth)] > 1L)
+  }
+  out <- list(p0 = path, c0 = shared(path))
+  for (i in seq_len(k)) {
+    at <- ifelse(d$time_XX == d$F_g_XX + i - 1L, d$treatment_XX, NA_real_)
+    dfg <- stats::ave(at, g, FUN = function(x) {
+      x <- x[!is.na(x)]; if (length(x)) mean(x) else NA_real_
+    })
+    dfg[is.na(dfg)] <- dfg_prev[is.na(dfg)]
+    path <- as.integer(factor(paste(path, dfg, sep = "|")))
+    if (i == 1L) { out$p1 <- path; out$c1 <- shared(path) }
+    dfg_prev <- dfg
+  }
+  out$pk <- path; out$ck <- shared(path)
+  out
+}
+
+.se_path_cells <- function(d, paths, cols, extra_cols) {
+  dy <- cols$diff_y; dk <- cols$dist
+  sw <- !is.na(d[[dk]]) & d[[dk]] == 1L
+  dofy <- as.numeric(d$N_gt_XX != 0 & !is.na(d[[dy]]))
+  stat <- function(pid) {
+    key <- if (length(extra_cols)) {
+      do.call(paste, c(list(pid), lapply(extra_cols, function(cn) d[[cn]]), sep = "|"))
+    } else pid
+    key_s <- key[sw]
+    cnt <- tapply(d$N_gt_XX[sw], key_s, sum)
+    tot <- tapply(d$diff_y_N_XX[sw], key_s, sum, na.rm = TRUE)
+    dof <- tapply(dofy[sw], key_s, sum)
+    k <- as.character(key)
+    list(mean = ifelse(sw, tot[k] / cnt[k], NA_real_),
+         dof  = ifelse(sw, dof[k], NA_real_))
+  }
+  s0 <- stat(paths$p0); s1 <- stat(paths$p1); s2 <- stat(paths$pk)
+  m  <- ifelse(paths$ck == 1L, s2$mean, NA_real_)
+  df <- ifelse(paths$ck == 1L, s2$dof,  NA_real_)
+  use1 <- paths$ck == 0L & paths$c1 == 1L
+  m[use1] <- s1$mean[use1]; df[use1] <- s1$dof[use1]
+  use0 <- paths$c1 == 0L
+  m[use0] <- s0$mean[use0]; df[use0] <- s0$dof[use0]
+  d[, mean_s_XX := m]
+  d[, dofc_s_XX := df]
+  invisible(d)
+}
+
+
+# A group's cluster: its first non-missing value. The balancing fill-in
+# rows carry no cluster, and a group whose first period is one of them --
+# a late entrant, or a `reset` sub-group -- would otherwise get NA and
+# drop out of the clustered variance.
+.first_cluster <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x)) x[1L] else NA
 }

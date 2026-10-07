@@ -190,8 +190,10 @@ didgpu_joint_placebo <- function(x, horizons = NULL) {
   if (is.null(pl) || nrow(pl) == 0L)
     stop("`x` has no placebo estimates. Re-run didgpu() with placebo > 0.")
   n_p <- nrow(pl)
-  pl_names <- rownames(pl)
-  if (is.null(pl_names)) pl_names <- paste0("Placebo_", seq_len(n_p))
+  # Row names carry the reference's padding ("Placebo_1   "); the
+  # covariance is indexed by the bare names.
+  pl_names <- trimws(rownames(pl))
+  if (!length(pl_names)) pl_names <- paste0("Placebo_", seq_len(n_p))
 
   if (is.null(horizons)) {
     idx <- seq_len(n_p)
@@ -210,6 +212,7 @@ didgpu_joint_placebo <- function(x, horizons = NULL) {
   V <- x$coef$vcov
   if (is.null(b) || is.null(V))
     stop("`x` lacks the stored coefficient vector / covariance.")
+  names(b) <- trimws(names(b))
   if (!all(sel %in% names(b)))
     stop("internal: placebo names not found in the coefficient vector.")
 

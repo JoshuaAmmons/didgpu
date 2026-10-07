@@ -209,15 +209,15 @@ test_that("a checkpoint from another version is refused, not resumed", {
   expect_error(rerun(), "different didgpu build")
 })
 
-test_that("controls fall back to the bootstrap rather than a near-miss SE", {
+test_that("analytic SEs with controls and trends_lin match the reference", {
   skip_if_not_installed("DIDmultiplegtDYN")
   skip_if_not_installed("polars")
-  # With `controls` the reference subtracts a control-estimation
-  # correction from the influence function (part2_switch,
-  # did_multiplegt_dyn_core.R:502-535) that didgpu does not compute.
-  # Reporting the uncorrected number would be wrong by ~9e-05, so the
-  # analytic path is switched off there: SEs are NA unless a bootstrap
-  # is requested, and the user is told.
+  # With `controls` the reference subtracts a correction for the
+  # estimated control coefficients from each group's influence term
+  # (part2_switch, did_multiplegt_dyn_core.R:254-347, 544-590, and its
+  # placebo twin). Under trends_lin it sums the event-time variance
+  # terms. didgpu used to report NA for both and point to the
+  # bootstrap; both are now analytic and exact.
   set.seed(13); nu <- 150L; np <- 16L
   ufe <- stats::rnorm(nu, 0, 1); tfe <- stats::rnorm(np, 0, 0.3)
   Fg <- rep(Inf, nu); tr <- sort(sample(seq_len(nu), 90L))
@@ -225,29 +225,24 @@ test_that("controls fall back to the bootstrap rather than a near-miss SE", {
   g <- expand.grid(period = seq_len(np), unit = seq_len(nu))
   g <- g[order(g$unit, g$period), ]
   g$D <- as.numeric(g$period >= Fg[g$unit])
-  g$X <- stats::rnorm(nrow(g))
+  g$X <- stats::rnorm(nrow(g)); g$X2 <- stats::rnorm(nrow(g))
   g$Y <- ufe[g$unit] + tfe[g$period] + 0.3 * g$D + 0.5 * g$X +
-         stats::rnorm(nrow(g), 0, 0.4)
-  g <- g[, c("unit", "period", "D", "Y", "X")]
+         0.02 * g$unit %% 5 * g$period + stats::rnorm(nrow(g), 0, 0.4)
+  g <- g[, c("unit", "period", "D", "Y", "X", "X2")]
 
-  expect_message(
-    didgpu(df = g, outcome = "Y", group = "unit", time = "period",
-           treatment = "D", effects = 3L, placebo = 0L, bootstrap_reps = 0L,
-           backend = "r", verbose = FALSE, controls = "X"),
-    "analytic standard errors are not available")
-
-  f <- .ase_fit(g, "r", effects = 3L, placebo = 0L, bootstrap_reps = 0L,
-                controls = "X")
-  expect_true(all(is.na(f$results$Effects[, "SE"])))
-  # The point estimates are still exact against the reference.
-  theirs <- .ase_ref(g, effects = 3, placebo = 0, controls = "X")
-  expect_equal(as.numeric(f$results$Effects[, "Estimate"]),
-               as.numeric(theirs$results$Effects[, "Estimate"]),
-               tolerance = 1e-12)
-  # And a bootstrap still gives a usable SE.
-  fb <- .ase_fit(g, "r", effects = 3L, placebo = 0L, bootstrap_reps = 10L,
-                 seed = 1L, controls = "X")
-  expect_true(all(is.finite(fb$results$Effects[, "SE"])))
+  for (a in list(list(controls = "X"), list(controls = c("X", "X2")),
+                 list(trends_lin = TRUE), list(controls = "X", trends_lin = TRUE))) {
+    f <- do.call(.ase_fit, c(list(g, "r", effects = 3L, placebo = 2L,
+                                  bootstrap_reps = 0L), a))
+    theirs <- do.call(.ase_ref, c(list(g, effects = 3, placebo = 2), a))
+    for (blk in c("Effects", "Placebos")) {
+      expect_equal(unname(f$results[[blk]][, 1:2]),
+                   unname(theirs$results[[blk]][, 1:2]), tolerance = 1e-10,
+                   label = paste(blk, deparse(a)))
+    }
+    expect_equal(f$results$p_jointeffects, theirs$results$p_jointeffects,
+                 tolerance = 1e-10)
+  }
 })
 
 test_that("vcov(), the joint tests and didgpu_joint_placebo() agree", {

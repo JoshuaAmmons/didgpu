@@ -11,6 +11,50 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// didgpu_compute_Tg_cpp
+NumericVector didgpu_compute_Tg_cpp(IntegerVector G, IntegerVector Tvec, NumericVector Y, NumericVector F_vec, NumericVector TGC, IntegerVector EV, IntegerVector CLS, IntegerVector NGT);
+RcppExport SEXP _didgpu_didgpu_compute_Tg_cpp(SEXP GSEXP, SEXP TvecSEXP, SEXP YSEXP, SEXP F_vecSEXP, SEXP TGCSEXP, SEXP EVSEXP, SEXP CLSSEXP, SEXP NGTSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type G(GSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type Tvec(TvecSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type F_vec(F_vecSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type TGC(TGCSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type EV(EVSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type CLS(CLSSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type NGT(NGTSEXP);
+    rcpp_result_gen = Rcpp::wrap(didgpu_compute_Tg_cpp(G, Tvec, Y, F_vec, TGC, EV, CLS, NGT));
+    return rcpp_result_gen;
+END_RCPP
+}
+// didgpu_avg_cumul_cpp
+List didgpu_avg_cumul_cpp(IntegerVector G, IntegerVector Tvec, NumericVector D, NumericVector Y, NumericVector D1, NumericVector F_vec, NumericVector Tg_ph, IntegerVector EV, IntegerVector CLS, NumericVector Mg_ph, IntegerVector NGT, NumericVector SG, NumericVector W, int ell, int ssw_flag, std::string sw_dir);
+RcppExport SEXP _didgpu_didgpu_avg_cumul_cpp(SEXP GSEXP, SEXP TvecSEXP, SEXP DSEXP, SEXP YSEXP, SEXP D1SEXP, SEXP F_vecSEXP, SEXP Tg_phSEXP, SEXP EVSEXP, SEXP CLSSEXP, SEXP Mg_phSEXP, SEXP NGTSEXP, SEXP SGSEXP, SEXP WSEXP, SEXP ellSEXP, SEXP ssw_flagSEXP, SEXP sw_dirSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type G(GSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type Tvec(TvecSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type D(DSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type D1(D1SEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type F_vec(F_vecSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type Tg_ph(Tg_phSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type EV(EVSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type CLS(CLSSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type Mg_ph(Mg_phSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type NGT(NGTSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type SG(SGSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type W(WSEXP);
+    Rcpp::traits::input_parameter< int >::type ell(ellSEXP);
+    Rcpp::traits::input_parameter< int >::type ssw_flag(ssw_flagSEXP);
+    Rcpp::traits::input_parameter< std::string >::type sw_dir(sw_dirSEXP);
+    rcpp_result_gen = Rcpp::wrap(didgpu_avg_cumul_cpp(G, Tvec, D, Y, D1, F_vec, Tg_ph, EV, CLS, Mg_ph, NGT, SG, W, ell, ssw_flag, sw_dir));
+    return rcpp_result_gen;
+END_RCPP
+}
 // didgpu_cpp_core_one_event_time
 List didgpu_cpp_core_one_event_time(NumericVector outcome, NumericVector N_gt, IntegerVector group_id, IntegerVector time_id, IntegerVector cohort_id, IntegerVector F_g, IntegerVector S_g, IntegerVector T_g, IntegerVector L_g, IntegerVector group_offset, int n_cohorts, int k, int direction);
 RcppExport SEXP _didgpu_didgpu_cpp_core_one_event_time(SEXP outcomeSEXP, SEXP N_gtSEXP, SEXP group_idSEXP, SEXP time_idSEXP, SEXP cohort_idSEXP, SEXP F_gSEXP, SEXP S_gSEXP, SEXP T_gSEXP, SEXP L_gSEXP, SEXP group_offsetSEXP, SEXP n_cohortsSEXP, SEXP kSEXP, SEXP directionSEXP) {
@@ -195,6 +239,8 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_didgpu_didgpu_compute_Tg_cpp", (DL_FUNC) &_didgpu_didgpu_compute_Tg_cpp, 8},
+    {"_didgpu_didgpu_avg_cumul_cpp", (DL_FUNC) &_didgpu_didgpu_avg_cumul_cpp, 16},
     {"_didgpu_didgpu_cpp_core_one_event_time", (DL_FUNC) &_didgpu_didgpu_cpp_core_one_event_time, 13},
     {"_didgpu_didgpu_cpu_hello", (DL_FUNC) &_didgpu_didgpu_cpu_hello, 0},
     {"_didgpu_didgpu_has_cuda_support", (DL_FUNC) &_didgpu_didgpu_has_cuda_support, 0},

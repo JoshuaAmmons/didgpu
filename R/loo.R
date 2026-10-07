@@ -345,7 +345,7 @@ didgpu_loo <- function(fit, by = "cohort", df = NULL, verbose = TRUE) {
 #' @noRd
 .loo_refit <- function(df, args, family) {
   switch(family,
-    "didgpu" = didgpu(df,
+    "didgpu" = suppressMessages(didgpu(df,
                       outcome = args$outcome, group = args$group,
                       time = args$time, treatment = args$treatment,
                       effects = args$effects %||% 1L,
@@ -356,7 +356,7 @@ didgpu_loo <- function(fit, by = "cohort", df = NULL, verbose = TRUE) {
                       switchers = args$switchers %||% "",
                       bootstrap_reps = 0L,
                       backend = args$backend %||% "r",
-                      verbose = FALSE),
+                      verbose = FALSE, graph_off = TRUE)),
     "cs"     = didgpu_cs(df,
                           outcome = args$outcome, group = args$group,
                           time = args$time, treatment = args$treatment,

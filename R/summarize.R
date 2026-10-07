@@ -70,7 +70,7 @@ didgpu_estimate_runtime <- function(
   times <- numeric(probes)
   for (i in seq_len(probes)) {
     t0 <- Sys.time()
-    invisible(didgpu(df = df, outcome = outcome, group = group, time = time,
+    invisible(suppressMessages(didgpu(df = df, outcome = outcome, group = group, time = time,
                       treatment = treatment, effects = effects, placebo = placebo,
                       cluster = cluster, controls = controls, weight = weight,
                       trends_nonparam = trends_nonparam,
@@ -78,7 +78,7 @@ didgpu_estimate_runtime <- function(
                       same_switchers = same_switchers,
                       dont_drop_larger_lower = dont_drop_larger_lower,
                       switchers = switchers, bootstrap_reps = 0L,
-                      backend = backend, verbose = FALSE))
+                      backend = backend, verbose = FALSE, graph_off = TRUE)))
     times[i] <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
   }
   wall_per_iter <- stats::median(times)

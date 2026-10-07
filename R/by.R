@@ -72,13 +72,14 @@ didgpu_by <- function(df, by_var,
       file.path(checkpoint_dir,
                 gsub("[^A-Za-z0-9_.-]", "_", as.character(lvl)))
     } else NULL
+    # One graph per subgroup is not drawn unless asked for.
+    sub_args <- utils::modifyList(list(graph_off = TRUE), list(...))
     out[[i]] <- tryCatch(
-      didgpu(
-        sub_df, outcome = outcome, group = group,
-        time = time, treatment = treatment,
-        ...,
-        checkpoint_dir = sub_cdir,
-        verbose = FALSE),
+      do.call(didgpu, c(
+        list(sub_df, outcome = outcome, group = group,
+             time = time, treatment = treatment),
+        sub_args,
+        list(checkpoint_dir = sub_cdir, verbose = FALSE))),
       error = function(e) {
         warning(sprintf(
           "[didgpu_by] subgroup %s = %s failed: %s",

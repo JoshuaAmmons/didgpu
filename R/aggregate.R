@@ -106,28 +106,10 @@
   } else matrix(numeric(0), nrow = n_p, ncol = 0L)
   p_mat <- t(p_mat)
 
-  # ---- Match the reference's reported horizon count ----
-  # didgpu's data-availability horizon clamp (max L_g per group) can be one
-  # step more permissive than the reference's cohort-level T_g clamp, so it may
-  # attempt one extra horizon the reference deems infeasible. When that horizon
-  # has no switcher reaching it, the point estimate is NA (N_inc == 0) and the
-  # reference simply omits the row. Trim the trailing contiguous block of NA
-  # point estimates from effects and placebos so the reported horizon count
-  # matches did_multiplegt_dyn. Only TRAILING NAs are dropped (a single clamp
-  # cutoff, as the reference does); any interior NA is preserved. An all-NA
-  # vector is left intact (handled downstream as a zero-effect result).
-  .last_estimable <- function(v) { w <- which(!is.na(v)); if (length(w)) max(w) else length(v) }
-  ke <- .last_estimable(e0)
-  if (ke < n_e) { e0 <- e0[seq_len(ke)]; e_mat <- e_mat[, seq_len(ke), drop = FALSE]; n_e <- ke }
-  if (n_p > 0L) {
-    # If EVERY placebo is unestimable (all NA point estimates), drop the entire
-    # block to match did_multiplegt_dyn (which returns NULL Placebos in that
-    # case). Otherwise trim only the trailing contiguous NA block, as for
-    # effects. This handles weighted trends_lin / short-panel cases where no
-    # group has the F_g - q - 1 pre-period any placebo needs.
-    kp <- if (all(is.na(p0))) 0L else .last_estimable(p0)
-    if (kp < n_p) { p0 <- p0[seq_len(kp)]; p_mat <- p_mat[, seq_len(kp), drop = FALSE]; n_p <- kp }
-  }
+  # The horizon counts are the reference's own l_XX / l_placebo_XX (see
+  # .clamp_horizons), so every row is reported, as the reference reports
+  # it: a horizon nobody reaches is an NA row with a message, not a
+  # missing row.
 
   ate_vec <- if (length(boot_iters) > 0L) {
     vapply(as.character(boot_iters),
@@ -182,12 +164,13 @@
   ate_ci_lo <- ate0 - z * ate_se
   ate_ci_hi <- ate0 + z * ate_se
 
-  # NB: paste0("Effect_", seq_len(0)) returns the length-1 string "Effect_"
-  # (zero-length recycling), which then mismatches a 0-row Effects matrix and
-  # crashes rownames<-. Guard for n_e == 0 exactly as the placebo path does.
-  # n_e == 0 arises e.g. with trends_lin on panels where no group has the
-  # required F_g-2 pre-period, so no event-study effect is estimable.
-  effect_names <- if (n_e > 0L) paste0("Effect_", seq_len(n_e)) else character(0)
+  # Row names as the reference writes them: padded to 12 characters
+  # ("Effect_1    ", "Av_tot_eff  "), so code written against
+  # DIDmultiplegtDYN's matrices indexes didgpu's the same way.
+  # NB: paste0("Effect_", seq_len(0)) is the length-1 "Effect_", hence
+  # the guards.
+  .pad12 <- function(x) sprintf("%-12s", x)
+  effect_names  <- if (n_e > 0L) paste0("Effect_",  seq_len(n_e)) else character(0)
   placebo_names <- if (n_p > 0L) paste0("Placebo_", seq_len(n_p)) else character(0)
 
   # Count columns come from cell b=0 (the point estimate). The reference
@@ -196,14 +179,9 @@
   #   Switchers   = unweighted switcher cells
   #   N.w         = weighted   contributing observations (sum of weights)
   #   Switchers.w = weighted   switcher cells (sum of switcher weights)
-  # The r/reference backends populate dedicated fields for each; older
-  # backends (cpu/cuda/fect_*) only run on UNWEIGHTED panels where N_gt is
-  # 0/1, so the weighted and unweighted columns coincide -- we fall back to
-  # the unweighted field (and to n_inc for the switcher count, which equals
-  # the unweighted switcher count there). This keeps unweighted output
-  # bit-identical to the pre-weight-fix behavior.
-  # Slice each count vector to the (possibly trimmed) horizon count seq_len(n_e)
-  # / seq_len(n_p); cell fields still carry the pre-trim length.
+  # The r/reference backends populate dedicated fields for each; the
+  # kernel backends only run on UNWEIGHTED panels where N_gt is 0/1, so
+  # the weighted and unweighted columns coincide there.
   c0 <- cells[["0"]]
   n_eff_e    <- (c0$n_eff_effects %||% rep(NA_integer_, n_e))[seq_len(n_e)]              # N
   n_eff_p    <- (c0$n_eff_placebos %||% rep(NA_integer_, n_p))[seq_len(n_p)]
@@ -213,30 +191,35 @@
   n_eff_w_p  <- (c0$n_eff_w_placebos %||% n_eff_p)[seq_len(n_p)]
   n_sw_w_e   <- (c0$n_sw_w_effects %||% n_sw_unw_e)[seq_len(n_e)]                        # Switchers.w
   n_sw_w_p   <- (c0$n_sw_w_placebos %||% n_sw_unw_p)[seq_len(n_p)]
+  # The point estimate's own per-event-time observation counts, which
+  # count a row once across switching directions (see .dcdh_ate_extras).
+  if (length(c0$n_eff_union) == n_e && n_e > 0L) {
+    n_eff_e   <- c0$n_eff_union
+    n_eff_w_e <- c0$n_eff_w_union
+  }
 
-  # Effects matrix, shape (n_e x 8) matching DIDmultiplegtDYN.
-  Effects <- cbind(
-    Estimate = e0, SE = e_se, LB.CI = e_ci_lo, UB.CI = e_ci_hi,
-    N = n_eff_e, Switchers = n_sw_unw_e,
-    N.w = n_eff_w_e, Switchers.w = n_sw_w_e
-  )
-  rownames(Effects) <- effect_names
+  cols8 <- c("Estimate", "SE", "LB CI", "UB CI",
+             "N", "Switchers", "N.w", "Switchers.w")
+  .mat8 <- function(est, se, lo, hi, n, sw, nw, sww, rn) {
+    m <- matrix(c(est, se, lo, hi, n, sw, nw, sww), ncol = 8L,
+                nrow = length(est), dimnames = list(.pad12(rn), cols8))
+    if (!length(est)) rownames(m) <- NULL
+    m
+  }
+  Effects  <- .mat8(e0, e_se, e_ci_lo, e_ci_hi,
+                    n_eff_e, n_sw_unw_e, n_eff_w_e, n_sw_w_e, effect_names)
+  Placebos <- .mat8(p0, p_se, p_ci_lo, p_ci_hi,
+                    n_eff_p, n_sw_unw_p, n_eff_w_p, n_sw_w_p, placebo_names)
 
-  Placebos <- cbind(
-    Estimate = p0, SE = p_se, LB.CI = p_ci_lo, UB.CI = p_ci_hi,
-    N = n_eff_p, Switchers = n_sw_unw_p,
-    N.w = n_eff_w_p, Switchers.w = n_sw_w_p
-  )
-  if (n_p > 0L) rownames(Placebos) <- placebo_names
-
-  ate_n   <- if (length(n_sw_unw_e) > 0L) sum(n_sw_unw_e, na.rm = TRUE) else NA_integer_
-  ate_n_w <- if (length(n_sw_w_e)   > 0L) sum(n_sw_w_e,   na.rm = TRUE) else NA_integer_
-  ATE <- matrix(c(ate0, ate_se, ate_ci_lo, ate_ci_hi,
-                  NA_integer_, ate_n, NA_integer_, ate_n_w),
-                nrow = 1L,
-                dimnames = list("ATE",
-                                c("Estimate", "SE", "LB.CI", "UB.CI",
-                                  "N", "Switchers", "N.w", "Switchers.w")))
+  # The ATE row (did_multiplegt_main.R:1494-1531): Switchers columns sum
+  # the per-event-time switchers, N columns count the observations used
+  # by any event-time. Under trends_lin the reference leaves it all NA.
+  tl <- isTRUE(args$trends_lin)
+  ate_sw   <- if (tl || !n_e) NA_real_ else sum(n_sw_unw_e, na.rm = TRUE)
+  ate_sw_w <- if (tl || !n_e) NA_real_ else sum(n_sw_w_e,   na.rm = TRUE)
+  ATE <- .mat8(ate0, ate_se, ate_ci_lo, ate_ci_hi,
+               c0$ate_N %||% NA_real_, ate_sw,
+               c0$ate_N_w %||% NA_real_, ate_sw_w, "Av_tot_eff")
 
   # Coefficient vector and its covariance, effects then placebos.
   #
@@ -245,14 +228,20 @@
   # the way DIDmultiplegtDYN builds its joint tests. That one matrix then
   # feeds vcov(), fit$results$p_jointeffects / p_jointplacebo, and
   # didgpu_joint_placebo(), so the three can never disagree with each
-  # other or with the reported SE column. (They did: once the SEs became
-  # analytic, vcov() was still the bootstrap covariance, so its diagonal
-  # stopped matching SE^2 and the windowed placebo test stopped
-  # reproducing the headline one.) The bootstrap covariance is the
+  # other or with the reported SE column. The bootstrap covariance is the
   # fallback when no influence vectors exist -- controls, continuous,
   # trends_lin.
+  #
+  # This is deliberately NOT the reference's coef$vcov. That matrix
+  # (did_multiplegt_main.R:2259-2296) wraps each influence column in
+  # ifelse(is.null(col), NA, col), which returns only the column's FIRST
+  # element, so its off-diagonal terms are built from one group's value
+  # recycled over all groups: they change when the groups are relabelled
+  # and the matrix is not positive semi-definite. Its joint tests use the
+  # full columns and agree with this one.
   b <- c(e0, p0)
-  names(b) <- c(effect_names, placebo_names)
+  names(b) <- .pad12(c(effect_names, placebo_names))
+  vnames <- c(effect_names, placebo_names)
   G_se <- cell0$se_G %||% NA_real_
   cog  <- cell0$se_cluster_of_group
   U_e <- .se_scale_u(cell0$u_mat_effects,  cell0$u_scale_effects)
@@ -272,47 +261,214 @@
       stats::cov(full, use = "pairwise.complete.obs")
     } else matrix(NA_real_, nrow = length(b), ncol = length(b))
   }
-  dimnames(V) <- list(names(b), names(b))
+  dimnames(V) <- list(vnames, vnames)
 
-  # Joint nullity tests, from V when it is analytic.
-  ie <- seq_len(n_e); ip <- n_e + seq_len(n_p)
-  if (have_an && all(is.finite(V))) {
-    p_joint_e <- .se_chisq_p(e0, V[ie, ie, drop = FALSE])
-    p_joint_p <- if (n_p > 0L) .se_chisq_p(p0, V[ip, ip, drop = FALSE]) else NA_real_
-  } else {
-    p_joint_e <- .joint_pvalue(e0, e_mat)
-    p_joint_p <- if (n_p > 0L) .joint_pvalue(p0, p_mat) else NA_real_
+  # ---- what the reference says while estimating, in its order ----
+  # (horizon counts, unestimable rows, then the two joint tests)
+  ref_notes <- c0$ref_notes
+  notes <- lapply(c0$horizon_notes %||% character(0),
+                  function(s) list(type = "message", text = s))
+  .say <- function(type, text) {
+    notes[[length(notes) + 1L]] <<- list(type = type, text = text)
   }
-  # backend = "reference" carries DIDmultiplegtDYN's own analytic joint
-  # tests (it has no influence vectors to rebuild them from); use those.
-  pj_ref_e <- cell0$p_joint_effects_ref %||% NA_real_
-  pj_ref_p <- cell0$p_joint_placebo_ref %||% NA_real_
-  if (!have_an && is.finite(pj_ref_e)) p_joint_e <- pj_ref_e
-  if (!have_an && n_p > 0L && is.finite(pj_ref_p)) p_joint_p <- pj_ref_p
+  .zero <- function(x) is.na(x) | x == 0
+  for (i in seq_len(n_e)) {
+    if (.zero(n_sw_w_e[i]) || .zero(n_eff_w_e[i])) {
+      .say("message", paste0("Effect_", i, " cannot be estimated. There is ",
+                             "no switcher or no control for this effect."))
+    }
+  }
+  for (i in seq_len(n_p)) {
+    if (.zero(n_sw_w_p[i]) || .zero(n_eff_w_p[i])) {
+      .say("message", paste0("Placebo_", i, " cannot be estimated. There is ",
+                             "no switcher or no control for this placebo."))
+    }
+  }
+
+  # Joint nullity tests (did_multiplegt_main.R:1714-1806, 1810-1904): run
+  # only with two or more horizons, all of them estimated; NA when the
+  # covariance is not invertible, and a caveat when it is close to it.
+  # The reference raises both as warnings inside suppressWarnings(), so
+  # they reach the user only through results$vcov_warnings and the
+  # "Warnings" block of print(); they are recorded here the same way.
+  vcov_warnings <- character(0)
+  nrm <- isTRUE(args$normalized)
+  .joint <- function(est, Vb, sw, scale, what, boot) {
+    l <- length(est)
+    ok_n <- sum(!.zero(sw)) == l
+    ok_d <- !nrm || (!is.null(scale) && length(scale) == l &&
+                       all(is.finite(scale) & scale != 0))
+    if (!(ok_n && ok_d)) {
+      .say("message", sprintf(paste0("Some %s could not be estimated. ",
+        "Therefore, the test of joint nullity of the %s could not be ",
+        "computed."), what, what))
+      return(NA_real_)
+    }
+    if (!have_an) return(.joint_pvalue(est, boot))
+    ev <- eigen(Vb, only.values = TRUE)$values
+    ev <- Re(ev[abs(Im(ev)) < 1e-10])
+    ev <- ev[ev > 1e-10]
+    one <- if (what == "effects") "effect" else "placebo"
+    if (length(ev) < l) {
+      w <- sprintf(paste0("The F-test that all %s are equal to zero is not ",
+        "computed because the variance of %s is not invertible. This can for ",
+        "instance happen if you cluster standard errors and you have more %s ",
+        "estimators than clusters."), what, what, one)
+      vcov_warnings <<- c(vcov_warnings, w)
+      return(NA_real_)
+    }
+    if (max(ev) / min(ev) >= 1000) {
+      w <- sprintf(paste0("The F-test that all %s are equal to zero may not ",
+        "be reliable, because the variance of the %s is close to not being ",
+        "invertible (the ratio of its largest and smallest eigenvalues is ",
+        "larger than 1000). This can for instance happen when you compute ",
+        "many %s estimators, or when your %s are very strongly correlated."),
+        what, what, one, what)
+      vcov_warnings <<- c(vcov_warnings, w)
+    }
+    chi2 <- as.numeric(t(est) %*% MASS::ginv(Vb) %*% est)
+    1 - stats::pchisq(chi2, df = l)
+  }
+  ie <- seq_len(n_e); ip <- n_e + seq_len(n_p)
+  p_joint_e <- if (n_e > 1L) {
+    .joint(e0, V[ie, ie, drop = FALSE], n_sw_w_e, cell0$u_scale_effects,
+           "effects", e_mat)
+  } else NULL
+  p_joint_p <- if (n_p > 1L) {
+    .joint(p0, V[ip, ip, drop = FALSE], n_sw_w_p, cell0$u_scale_placebos,
+           "placebos", p_mat)
+  } else NULL
+
+  # Test that the effects in [lb, ub] are equal (did_multiplegt_main.R:
+  # 2125-2253): a chi-square on their deviations from their mean.
+  p_equal <- NULL
+  if (isTRUE(args$effects_equal) && n_e > 1L) {
+    lb <- args$effects_equal_lb %||% 1L
+    ub <- args$effects_equal_ub %||% n_e
+    if (ub > n_e) {
+      .say("message", sprintf("Upper bound %d exceeds number of effects %d. Using %d as upper bound.",
+                              as.integer(ub), as.integer(n_e), as.integer(n_e)))
+      ub <- n_e
+    }
+    whole <- lb == 1L && ub == n_e
+    rng <- lb:ub; L <- length(rng)
+    p_equal <- NA_real_
+    if (sum(!.zero(n_sw_w_e[rng])) == L) {
+      Dm <- cbind(diag(L - 1L), 0) - matrix(1 / L, L - 1L, L)
+      te <- Dm %*% e0[rng]
+      tv <- Dm %*% V[rng, rng, drop = FALSE] %*% t(Dm)
+      tv <- (tv + t(tv)) / 2
+      ev <- eigen(tv, only.values = TRUE)$values
+      ev <- Re(ev[abs(Im(ev)) < 1e-10]); ev <- ev[ev > 1e-10]
+      if (!all(is.finite(tv))) {
+        p_equal <- NA_real_
+      } else if (length(ev) < L - 1L) {
+        vcov_warnings <- c(vcov_warnings, if (whole)
+          "The F-test that all effects are equal is not computed because the variance of effects is not invertible. This may be due to perfect multicollinearity among the effects. Consider reducing the number of effects estimated."
+          else sprintf("The F-test that effects %d to %d are equal is not computed because the variance of effects is not invertible. This may be due to perfect multicollinearity among the effects.", as.integer(lb), as.integer(ub)))
+      } else {
+        if (max(ev) / min(ev) >= 1000) {
+          vcov_warnings <- c(vcov_warnings, if (whole)
+            "The F-test that all effects are equal may not be reliable, because the variance of the effects is close to not being invertible (the ratio of its largest and smallest eigenvalues is larger than 1000). This may be due to strong multicollinearity among the effects. Consider reducing the number of effects estimated."
+            else sprintf("The F-test that effects %d to %d are equal may not be reliable, because the variance of the effects is close to not being invertible (the ratio of its largest and smallest eigenvalues is larger than 1000).", as.integer(lb), as.integer(ub)))
+        }
+        chi2 <- as.numeric(t(te) %*% MASS::ginv(tv) %*% te)
+        p_equal <- 1 - stats::pchisq(chi2, df = L - 1L)
+      }
+    } else {
+      .say("message", if (whole)
+        "Some effects could not be estimated. Therefore, the test of equality of effects could not be computed."
+        else sprintf("Some effects in range %d to %d could not be estimated. Therefore, the test of equality of effects could not be computed.", as.integer(lb), as.integer(ub)))
+    }
+  }
+
+  # backend = "reference" hands back DIDmultiplegtDYN's own tests and its
+  # own words; nothing is recomputed or re-said for it.
+  if (!is.null(ref_notes)) {
+    notes <- ref_notes
+    vcov_warnings <- c0$vcov_warnings_ref %||% character(0)
+    if (n_e > 1L) p_joint_e <- c0$p_joint_effects_ref %||% NA_real_
+    if (n_p > 1L) p_joint_p <- c0$p_joint_placebo_ref %||% NA_real_
+    if (!is.null(p_equal)) p_equal <- c0$p_equality_ref %||% NA_real_
+  }
 
   # predict_het: carry the iter-0 cell's block (a data.frame) through
   # into results$predict_het. If absent, omit the field.
   het_block <- cells[["0"]]$predict_het
 
+  # $results in DIDmultiplegtDYN's order and with its presence rules
+  # (did_multiplegt_main.R:2316-2365): no Placebos block without
+  # placebos, a joint test only where the reference reports one.
   results_list <- list(
-    N_Effects      = as.integer(n_e),
-    N_Placebos     = as.integer(n_p),
-    Effects        = Effects,
-    ATE            = ATE,
-    Placebos       = Placebos,
-    p_jointeffects = p_joint_e,
-    p_jointplacebo = p_joint_p,
-    n_boot         = length(boot_iters),
-    n_boot_dropped = n_boot_dropped
+    N_Effects         = as.numeric(n_e),
+    N_Placebos        = as.numeric(n_p),
+    Effects           = Effects,
+    ATE               = ATE,
+    delta_D_avg_total = c0$delta_D_avg_total %||% NA_real_,
+    max_pl            = c0$max_pl %||% NA_real_,
+    max_pl_gap        = c0$max_pl_gap %||% NA_real_
   )
+  if (!is.null(p_joint_e)) results_list$p_jointeffects <- p_joint_e
+  if (!is.null(p_equal)) results_list$p_equality_effects <- p_equal
+  if (n_p > 0L) {
+    results_list$Placebos <- Placebos
+    if ((args$placebo %||% 0L) > 1L && n_p > 1L) {
+      results_list$p_jointplacebo <- p_joint_p
+    }
+  }
   if (!is.null(het_block)) results_list$predict_het <- het_block
+  if (length(vcov_warnings)) results_list$vcov_warnings <- vcov_warnings
+  results_list$n_boot         <- length(boot_iters)
+  results_list$n_boot_dropped <- n_boot_dropped
 
-  list(
+  out <- list(
     coef = list(b = b, vcov = V),
     results = results_list,
     args = c(args, list(panel_hash = panel_hash)),
     cells_used = length(cells)
   )
+  # normalized_weights, formatted as the reference returns it.
+  if (!is.null(c0$norm_weights_ref)) out$normalized_weights <- c0$norm_weights_ref
+  if (!is.null(c0$norm_weights)) {
+    W <- c0$norm_weights
+    tot <- matrix(1, 1, ncol(W)) %*% ifelse(is.na(W), 0, W)
+    W <- rbind(W, tot)
+    dimnames(W) <- list(c(paste0("k=", seq_len(ncol(W)) - 1L), "Total"),
+                        paste0("\u2113", "=", seq_len(ncol(W))))
+    W[, ] <- sprintf("%s", format(round(W[, ], 3), big.mark = ",",
+                                  scientific = FALSE, trim = TRUE))
+    out$normalized_weights <- list(norm_weight_mat = noquote(W))
+  }
+  # DIDmultiplegtDYN 2.4.0 also exposes the per-effect switcher counts
+  # at the top level, as Stata's e(N_switchers_effect_k).
+  for (k in seq_len(n_e)) {
+    out[[paste0("N_switchers_effect_", k)]] <- as.numeric(Effects[k, "Switchers"])
+  }
+  # avg_time_periods (did_multiplegt_dyn.R:492-508 in 2.4.0).
+  if (!is.null(c0$avg_cumul)) {
+    av <- c0$avg_cumul
+    out$avg_time_periods <- av
+    out$avg_cumul <- av$avg_cumul
+    for (k in seq_along(av$nswitch)) out[[paste0("N_switch_avg_", k)]] <- av$nswitch[k]
+    if (is.null(ref_notes)) {
+      notes[[length(notes) + 1L]] <- list(type = "message", text = sprintf(
+        "Average number of time periods over which a treatment's effect is accumulated = %s",
+        format(av$avg_cumul, nsmall = 4)))
+    }
+  }
+  attr(out, "didgpu_notes") <- notes
+  out
+}
+
+
+# Say the notes .aggregate_to_result collected, as DIDmultiplegtDYN says
+# them: messages as messages, warnings as warnings.
+.emit_notes <- function(notes) {
+  for (n in notes %||% list()) {
+    if (identical(n$type, "warning")) warning(n$text, call. = FALSE)
+    else message(n$text)
+  }
+  invisible(NULL)
 }
 
 
@@ -357,83 +513,243 @@
 }
 
 
-# -------- pretty-print helpers --------
+# -------- printing, as DIDmultiplegtDYN prints --------
+#
+# print() and summary() reproduce print.did_multiplegt_dyn and mat_print
+# from DIDmultiplegtDYN 2.4.0 (R/print.R), line for line, so a didgpu
+# result reads exactly as the same model does under the reference.
+# DIDmultiplegtDYN is MIT-licensed, Copyright (c) 2024 Diego Ciccia,
+# Felix Knau, Melitine Malezieux, Doulo Sow, Clement de Chaisemartin.
+# Two lines are left out: the closing acknowledgement of the European
+# Union grant that funded DIDmultiplegtDYN, which did not fund didgpu.
 
-.sig_stars <- function(p) {
-  if (is.na(p)) return("")
-  if (p < 0.001) "***" else
-  if (p < 0.01)  "**"  else
-  if (p < 0.05)  "*"   else
-  if (p < 0.1)   "."   else ""
+.dcdh_mat_print <- function(mat) {
+  if (inherits(mat, "matrix")) {
+    dis <- matrix(data = 0, nrow = nrow(mat), ncol = ncol(mat))
+    dis[, 1:4] <- sprintf("%s", format(round(mat[, 1:4], 5), big.mark = ",",
+                                       scientific = FALSE, trim = TRUE))
+    dis[, 5:ncol(dis)] <- sprintf("%s", format(round(mat[, 5:ncol(dis)], 0),
+                                               big.mark = ",",
+                                               scientific = FALSE, trim = TRUE))
+    rownames(dis) <- rownames(mat)
+    colnames(dis) <- colnames(mat)
+    print(noquote(dis[, , drop = FALSE]))
+  } else {
+    dis <- vector(length = length(mat))
+    dis[1:4] <- sprintf("%s", format(round(mat[1:4], 5), big.mark = ",",
+                                     scientific = FALSE, trim = TRUE))
+    dis[5:length(mat)] <- sprintf("%s", format(round(mat[5:length(mat)], 0),
+                                               big.mark = ",",
+                                               scientific = FALSE, trim = TRUE))
+    names(dis) <- names(mat)
+    print(noquote(dis[, drop = FALSE]))
+  }
 }
-
-.print_coef_block <- function(m) {
-  est <- as.numeric(m[, "Estimate"])
-  se  <- as.numeric(m[, "SE"])
-  lo  <- as.numeric(m[, "LB.CI"])
-  hi  <- as.numeric(m[, "UB.CI"])
-  z   <- est / se
-  p   <- 2 * stats::pnorm(-abs(z))
-  stars <- vapply(p, .sig_stars, character(1))
-
-  df <- data.frame(
-    Estimate  = sprintf("%9.4f", est),
-    SE        = ifelse(is.na(se), "      NA", sprintf("%8.4f", se)),
-    z         = ifelse(is.na(z),  "     NA", sprintf("%7.2f", z)),
-    p         = ifelse(is.na(p),  "     NA", sprintf("%7.4f", p)),
-    `      CI` = ifelse(is.na(lo) | is.na(hi), "    [NA, NA]",
-                        sprintf("[%6.3f, %6.3f]", lo, hi)),
-    sig       = stars,
-    row.names = rownames(m),
-    check.names = FALSE,
-    stringsAsFactors = FALSE
-  )
-  print(df, right = FALSE)
-}
-
-
-# -------- S3 methods --------
 
 #' Print method for didgpu_result
+#'
+#' Prints the estimation tables exactly as
+#' `DIDmultiplegtDYN::did_multiplegt_dyn()` prints its own: the event-study
+#' effects and their joint test, the average total effect, and the
+#' placebos and their joint test.
 #'
 #' @param x A `didgpu_result` object.
 #' @param ... Unused (for S3 method compatibility).
 #' @return The input invisibly.
 #' @export
 print.didgpu_result <- function(x, ...) {
-  cat("didgpu result\n")
-  cat(sprintf("  backend         : %s\n", x$args$backend %||% "n/a"))
-  cat(sprintf("  effects         : %d   placebos: %d\n",
-              x$results$N_Effects, x$results$N_Placebos))
-  cat(sprintf("  bootstrap reps  : %d (used %d cells)\n",
-              x$args$bootstrap_reps, x$cells_used))
-  if (!is.null(x$checkpoint_dir) && !is.na(x$checkpoint_dir)) {
-    cat(sprintf("  checkpoint_dir  : %s\n", x$checkpoint_dir))
+  cat("\n")
+  by_levels <- x$by_levels %||% "_no_by"
+  for (b in seq_along(by_levels)) {
+    if (by_levels[b] == "_no_by") {
+      ref <- x
+    } else {
+      ref <- x[[paste0("by_level_", b)]]
+      section <- if (!is.null(x$args[["by"]])) {
+        paste(" By", x$args$by, "=", by_levels[b], "###")
+      } else {
+        paste0(" By treatment path: (", by_levels[b], ") ", "###")
+      }
+      cat(noquote(strrep("#", 70 - nchar(section) - 1))); cat(section)
+      cat("\n"); cat("\n")
+    }
+    .print_level(ref, x)
   }
-  cat("\nEffects:\n")
-  .print_coef_block(x$results$Effects)
-  if (x$results$N_Placebos > 0L) {
-    cat("\nPlacebos:\n")
-    .print_coef_block(x$results$Placebos)
-  }
-  if (!is.null(x$results$ATE) && !is.na(x$results$ATE[1, "Estimate"])) {
-    cat("\nATE (average total effect, per unit of treatment):\n")
-    .print_coef_block(x$results$ATE)
-  }
-  cat("\n---\n")
-  cat(sprintf("Joint test of effects:  chi2 p = %.4g %s\n",
-              x$results$p_jointeffects,
-              .sig_stars(x$results$p_jointeffects)))
-  if (x$results$N_Placebos > 0L) {
-    cat(sprintf("Joint test of placebos: chi2 p = %.4g %s\n",
-                x$results$p_jointplacebo,
-                .sig_stars(x$results$p_jointplacebo)))
-  }
-  cat("Signif: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1\n")
+  cat("\n")
   invisible(x)
 }
 
+# One level's tables (the body of the reference's per-level loop).
+.print_level <- function(ref, x) {
+  ncol_show <- 6 + ((!is.null(x$args$weight)) * 2)
+  rule <- function(n = 70) { cat(noquote(strrep("-", n))); cat("\n") }
+  boot <- (x$args$bootstrap_reps %||% 0L) > 0L
+
+  rule()
+  cat(strrep(" ", 7)); cat("Estimation of treatment effects: Event-study effects"); cat("\n")
+  rule()
+  .dcdh_mat_print(ref$results$Effects[, 1:ncol_show])
+  cat("\n")
+  if (!is.null(ref$results$p_jointeffects)) {
+    if (is.na(ref$results$p_jointeffects)) {
+      cat("Test of joint nullity of the effects : p-value = not computed (see warnings)")
+    } else {
+      cat(sprintf("Test of joint nullity of the effects : p-value = %.4f",
+                  ref$results$p_jointeffects))
+    }
+    cat("\n")
+  }
+  if (!is.null(ref$results$p_equality_effects)) {
+    if (is.na(ref$results$p_equality_effects)) {
+      cat("Test of equality of the effects : p-value = not computed (see warnings)")
+    } else {
+      cat(sprintf("Test of equality of the effects : p-value = %.4f",
+                  ref$results$p_equality_effects))
+    }
+    cat("\n"); cat("\n")
+  }
+
+  if (isTRUE(x$args$trends_lin)) {
+    rule()
+    cat(strrep(" ", 4)); cat("When the trends_lin is specified no average effects are reported"); cat("\n")
+    rule()
+  } else {
+    rule()
+    cat(strrep(" ", 4)); cat("Average cumulative (total) effect per treatment unit"); cat("\n")
+    rule()
+    .dcdh_mat_print(ref$results$ATE[, 1:ncol_show])
+    cat(sprintf("Average number of time periods over which a treatment effect is accumulated: %.4f",
+                ref$results$delta_D_avg_total))
+    cat("\n")
+  }
+  cat("\n")
+
+  if (ref$results$N_Placebos != 0) {
+    rule()
+    cat(strrep(" ", 4)); cat(" Testing the parallel trends and no anticipation assumptions"); cat("\n")
+    rule()
+    .dcdh_mat_print(ref$results$Placebos[, 1:ncol_show])
+    if (!boot) {
+      cat("\n")
+      if (!is.null(ref$results$p_jointplacebo) && is.na(ref$results$p_jointplacebo)) {
+        cat("Test of joint nullity of the placebos : p-value = not computed (see warnings)")
+      } else if (!is.null(ref$results$p_jointplacebo)) {
+        cat(sprintf("Test of joint nullity of the placebos : p-value = %.4f",
+                    ref$results$p_jointplacebo))
+      }
+      cat("\n")
+    }
+    cat("\n")
+  }
+
+  if (!is.null(ref$design)) {
+    if (ref$design$design_path == "console") {
+      cat("\n")
+      rule()
+      cat(strrep(" ", 4)); cat(sprintf("Detection of treatment paths - %.0f periods after first switch", ref$design$design_const[1])); cat("\n")
+      rule()
+      print(ref$design$design_mat); cat("\n")
+      cat(sprintf("Treatment paths detected in at least %.2f%% of the %.0f switching groups for which %.0f effects could be estimated",
+                  ref$design$design_const[2], ref$design$design_const[3], ref$design$design_const[1]))
+      cat(sprintf(" (Total %% = %.2f%%)", ref$design$design_const[4])); cat("\n"); cat("\n")
+      cat("Design interpretation (first row):"); cat("\n")
+      n_groups <- ref$design$design_mat[1, 1]
+      d_start <- ref$design$design_mat[1, 3]
+      d_vec <- "("
+      for (i in 1:ref$design$design_const[1]) {
+        d_vec <- paste0(d_vec, ref$design$design_mat[1, 3 + i], ",")
+      }
+      d_vec <- paste0(substr(d_vec, 1, nchar(d_vec) - 1), ")")
+      cat(sprintf("%s groups started with treatment %s and experienced treatment path %s", n_groups, d_start, d_vec))
+      cat("\n")
+    } else {
+      cat(sprintf("Design exported to %s", ref$design$design_path)); cat("\n")
+    }
+  }
+
+  if (!is.null(ref$date_first_switch)) {
+    dfs <- ref$date_first_switch
+    if (dfs$dfs_opt != "by_baseline_treat") {
+      if (dfs$dfs_path == "console") {
+        cat("\n")
+        rule(40)
+        cat(strrep(" ", 7)); cat("Switching dates"); cat("\n")
+        rule(40)
+        cat("By any status quo treatment"); cat("\n")
+        print(dfs$dfs_mat)
+        cat("\n")
+      } else {
+        cat(sprintf("Switching dates exported to %s", dfs$dfs_path)); cat("\n")
+      }
+    } else {
+      if (dfs$dfs_path == "console") {
+        cat("\n")
+        rule(40)
+        cat(strrep(" ", 7)); cat("Switching dates"); cat("\n")
+        rule(40)
+        for (l in 1:dfs$levels_baseline_treat) {
+          cat(sprintf("Status quo treatment = %s", dfs[[paste0("level", l)]])); cat("\n")
+          print(dfs[[paste0("dfs_mat", l)]])
+          cat("\n")
+        }
+      }
+      if (dfs$dfs_path != "console") {
+        cat(sprintf("Switching dates exported to %s", dfs$dfs_path)); cat("\n")
+      }
+    }
+  }
+
+  if (!is.null(ref$normalized_weights)) {
+    cat("\n")
+    rule(60)
+    cat(strrep(" ", 13)); cat("Weights on treatment lags"); cat("\n")
+    rule(60)
+    print(ref$normalized_weights$norm_weight_mat)
+    cat("\n")
+  }
+
+  if (!is.null(ref$results$predict_het)) {
+    cat("\n")
+    rule(60)
+    cat(strrep(" ", 13)); cat("Predicting effect heterogeneity"); cat("\n")
+    rule(60)
+    ph <- ref$results$predict_het
+    .het_block <- function(tab, label) {
+      for (l in levels(factor(tab$effect))) {
+        het_tab <- subset(tab, tab$effect == l)
+        het_mat <- as.matrix(het_tab[, c(3, 4, 6, 7, 8)])
+        rownames(het_mat) <- het_tab$covariate
+        colnames(het_mat) <- c("Estimate", "SE", "LB CI", "UB CI", "N")
+        cat(sprintf("%s %s:\n", label, l))
+        .dcdh_mat_print(het_mat)
+        cat(sprintf("Test of joint nullity of the estimates : p-value = %.4f\n",
+                    mean(het_tab$pF)))
+        cat("\n")
+      }
+    }
+    .het_block(subset(ph, ph$effect > 0), "Effect")
+    pl <- subset(ph, ph$effect < 0)
+    if (nrow(pl) > 0L) {
+      pl$effect <- -pl$effect
+      .het_block(pl, "Placebo")
+    }
+  }
+
+  if (!is.null(ref$results$vcov_warnings)) {
+    cat("\n")
+    rule()
+    cat(strrep(" ", 4)); cat("Warnings"); cat("\n")
+    rule()
+    for (w in ref$results$vcov_warnings) {
+      cat(paste0("- ", w)); cat("\n")
+    }
+  }
+  invisible(NULL)
+}
+
 #' Summary method for didgpu_result
+#'
+#' The same display as [print.didgpu_result()], as in DIDmultiplegtDYN.
 #'
 #' @param object A `didgpu_result` object.
 #' @param ... Unused (for S3 method compatibility).
@@ -463,7 +779,7 @@ coef.didgpu_result <- function(object, which = "all", ...) {
     e <- object$results$Effects
     if (!is.null(e) && nrow(e) > 0L) {
       v <- as.numeric(e[, "Estimate"])
-      names(v) <- rownames(e)
+      names(v) <- trimws(rownames(e))
       pieces$effects <- v
     }
   }
@@ -471,7 +787,7 @@ coef.didgpu_result <- function(object, which = "all", ...) {
     p <- object$results$Placebos
     if (!is.null(p) && nrow(p) > 0L) {
       v <- as.numeric(p[, "Estimate"])
-      names(v) <- rownames(p)
+      names(v) <- trimws(rownames(p))
       pieces$placebos <- v
     }
   }
@@ -520,7 +836,7 @@ confint.didgpu_result <- function(object, parm = NULL, level = NULL, ...) {
     cn <- colnames(m)
     lo <- grep("^LB", cn)[1L]; hi <- grep("^UB", cn)[1L]
     out <- cbind(as.numeric(m[, lo]), as.numeric(m[, hi]))
-    rownames(out) <- rownames(m)
+    rownames(out) <- trimws(rownames(m))
     out
   }
   pieces <- list()
@@ -669,4 +985,37 @@ vcov.didgpu_result <- function(object, ...) {
                   dimnames = list(nm, nm)))
   }
   V
+}
+
+
+# The event-study graph DIDmultiplegtDYN draws (did_multiplegt_dyn_graph,
+# R/did_multiplegt_dyn_graph.R in 2.4.0): estimates against time relative
+# to the last period before the switch, the ATE row pinned at (0, 0),
+# red CI bars except at t = 0. Built only when ggplot2 and cowplot are
+# installed, as they are wherever DIDmultiplegtDYN is.
+.dcdh_graph <- function(results, ggplot_args = NULL) {
+  if (!requireNamespace("ggplot2", quietly = TRUE) ||
+      !requireNamespace("cowplot", quietly = TRUE)) return(NULL)
+  grmat <- rbind(cbind(results$Effects, seq_len(nrow(results$Effects))),
+                 cbind(results$ATE, 0))
+  if (!is.null(results$Placebos)) {
+    grmat <- rbind(grmat, cbind(results$Placebos, -seq_len(nrow(results$Placebos))))
+  }
+  colnames(grmat)[ncol(grmat)] <- "Time"
+  grmat[nrow(results$Effects) + 1, c(1, 3, 4)] <- 0
+  grmat <- data.frame(grmat[, c(1, 3, 4, 9)])
+  keep <- grmat$Estimate != 0
+  p <- ggplot2::ggplot(grmat, ggplot2::aes(x = Time, y = Estimate, group = 1)) +
+    ggplot2::geom_line(colour = "blue") +
+    ggplot2::geom_errorbar(data = function(x) x[keep, , drop = FALSE],
+                           ggplot2::aes(ymin = LB.CI, ymax = UB.CI),
+                           position = ggplot2::position_dodge(0.05),
+                           width = 0.2, colour = "red") +
+    ggplot2::geom_point(colour = "blue") +
+    ggplot2::ggtitle("DID, from last period before treatment changes (t=0) to t") +
+    ggplot2::xlab("Relative time to last period before treatment changes (t=0)") +
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5)) +
+    cowplot::theme_minimal_grid()
+  for (layer in ggplot_args) p <- p + layer
+  p
 }

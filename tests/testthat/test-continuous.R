@@ -64,12 +64,14 @@ test_that("continuous = 2 (quadratic) matches reference bit-for-bit", {
             8 * .Machine$double.eps)
 })
 
-test_that("continuous returns NA on a panel without the flag (degenerate cohorts)", {
+test_that("a continuous treatment without the flag stops as the reference does", {
   # Without the continuous= flag, a continuous-D panel has each unit in
-  # its own d_sq cohort, leaving no controls. didgpu returns NA cleanly.
+  # its own d_sq cohort, leaving no controls, and DIDmultiplegtDYN stops
+  # with its Design Restriction 1 error. didgpu used to return NA rows.
   p <- build_continuous_panel(seed = 11L)
-  us <- didgpu(p, "Y", "unit", "period", "D",
-                effects = 1L, bootstrap_reps = 0L,
-                backend = "r", verbose = FALSE)
-  expect_true(all(is.na(us$results$Effects[, "Estimate"])))
+  expect_error(
+    didgpu(p, "Y", "unit", "period", "D",
+           effects = 1L, bootstrap_reps = 0L,
+           backend = "r", verbose = FALSE, graph_off = TRUE),
+    "No treatment effect can be estimated", fixed = TRUE)
 })
