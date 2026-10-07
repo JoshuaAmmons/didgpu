@@ -102,7 +102,7 @@
         if (j == 1) rown <- c(rown, paste0("TreatPath", i))
         desmat[i, j] <- as.numeric(df[i, j])
       }
-      if (j > 2) coln <- c(coln, paste0("ℓ", "=", j - 2 - 1))
+      if (j > 2) coln <- c(coln, paste0("\u2113", "=", j - 2 - 1))
     }
     colnames(desmat) <- coln
     rownames(desmat) <- rown

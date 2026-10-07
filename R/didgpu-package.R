@@ -39,7 +39,7 @@
 # Extend as more columns are introduced.
 utils::globalVariables(c(
   # data.table NSE generics
-  ".SD", ".N", ".I", "..keep", "..mycontrols_XX",
+  ".SD", ".N", ".I", ".GRP", "..keep", "..mycontrols_XX",
   # high-level columns used in simulators / utilities
   "G", "T_", "D", "Y", "F_g", "k", "b", "cell_id",
   "unit", "period", "k_evt", "tau_k",
