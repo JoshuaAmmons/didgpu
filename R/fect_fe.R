@@ -203,10 +203,21 @@
               isTRUE(tryCatch(didgpu_has_cuda_support(),
                                error = function(e) FALSE)) &&
               .fect_cuda_svd_worthwhile(nrow(mats$Y), ncol(mats$Y))
-  fit <- if (use_cuda) {
-    cuda_res <- didgpu_cuda_fect_fe_r(mats$Y, mats$M,
-                                        tol = args$tol %||% 1e-5,
-                                        max_iter = args$max_iter %||% 500L)
+  # A kernel that fails on the device (e.g. out of memory on a shared
+  # GPU) falls back to the CPU fit, which computes the same thing.
+  cuda_res <- if (use_cuda) tryCatch(
+    didgpu_cuda_fect_fe_r(mats$Y, mats$M,
+                          tol = args$tol %||% 1e-5,
+                          max_iter = args$max_iter %||% 500L),
+    error = function(e) {
+      if (!grepl("CUDA fect_fe kernel failed", conditionMessage(e), fixed = TRUE)) stop(e)
+      if (iter_seed == 0L) {
+        message("[didgpu] ", conditionMessage(e), .cuda_error_hint(conditionMessage(e)),
+                "; computing this fit on the CPU instead.")
+      }
+      NULL
+    }) else NULL
+  fit <- if (!is.null(cuda_res)) {
     list(alpha = cuda_res$alpha,
          xi = cuda_res$xi,
          iter = cuda_res$iter,

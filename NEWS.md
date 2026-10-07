@@ -112,6 +112,11 @@ reference backend now use 4 replications.
 - **`trends_lin` placebos were wrong** (by up to 0.28 on test panels):
   the reference forces both `same_switchers` and `same_switchers_pl` on
   each `trends_lin` placebo, and didgpu applied only the first.
+- **A CUDA kernel that failed on the device failed the fit.** Out of
+  memory on a shared GPU ("CUDA DID kernel failed with code 2") now
+  computes that fit on the CPU kernel, which gives the same numbers, and
+  says so; the same for `didgpu_fect()`'s CUDA demeaning. Other errors
+  still stop the fit.
 - **Clustered standard errors dropped a group whose first period was
   missing.** A group's cluster was read from its first row, which for a
   late entrant is a balancing fill-in with no cluster, so the group fell

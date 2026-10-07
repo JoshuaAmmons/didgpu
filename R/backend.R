@@ -612,9 +612,23 @@ didgpu_backend_info <- function() {
     .dcdh_stop_if_none(h, iter_seed)
     # Run the per-event-time CUDA kernel. We mimic .compute_effects's
     # direction loop here so the result shape stays consistent.
-    ce <- .compute_effects_cuda(prepped, h$l_eff, switchers = sw,
-                                 want_se = (iter_seed == 0L),
-                                 cluster_col = args$cluster)
+    # A kernel that fails on the device -- typically out of memory when
+    # other jobs share the GPU -- is not a reason to fail the fit: the
+    # CPU kernel computes the same quantities, so use it for this call.
+    ce <- tryCatch(
+      .compute_effects_cuda(prepped, h$l_eff, switchers = sw,
+                            want_se = (iter_seed == 0L),
+                            cluster_col = args$cluster),
+      error = function(e) {
+        if (!grepl("CUDA DID kernel failed", conditionMessage(e), fixed = TRUE)) stop(e)
+        if (iter_seed == 0L) {
+          message("[didgpu] ", conditionMessage(e), .cuda_error_hint(conditionMessage(e)),
+                  "; computing this fit on the CPU backend instead.")
+        }
+        .compute_effects_cpp(prepped, h$l_eff, switchers = sw,
+                             want_se = (iter_seed == 0L),
+                             cluster_col = args$cluster)
+      })
     cp <- .compute_placebos(prepped, h$l_pl, switchers = sw,
                             want_se = (iter_seed == 0L),
                             cluster_col = args$cluster)  # placebos still r-side
@@ -782,3 +796,14 @@ didgpu_backend_info <- function() {
 }
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
+
+
+# Name the common CUDA error codes in a fallback message.
+.cuda_error_hint <- function(msg) {
+  code <- suppressWarnings(as.integer(sub(".*code ([0-9]+).*", "\\1", msg)))
+  if (is.na(code)) return("")
+  switch(as.character(code),
+         "2" = " (cudaErrorMemoryAllocation: the GPU is out of memory)",
+         "100" = " (cudaErrorNoDevice: no CUDA device)",
+         "")
+}

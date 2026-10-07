@@ -323,7 +323,9 @@
         "invertible (the ratio of its largest and smallest eigenvalues is ",
         "larger than 1000). This can for instance happen when you compute ",
         "many %s estimators, or when your %s are very strongly correlated."),
-        what, what, one, what)
+        # The reference's wording: "many effects estimators", but "many
+        # placebo estimators".
+        what, what, if (what == "effects") "effects" else "placebo", what)
       vcov_warnings <<- c(vcov_warnings, w)
     }
     chi2 <- as.numeric(t(est) %*% MASS::ginv(Vb) %*% est)
