@@ -521,7 +521,17 @@ didgpu <- function(
                                   length(boot_todo), n_workers))
     cl <- parallel::makeCluster(n_workers)
     on.exit(parallel::stopCluster(cl), add = TRUE)
-    parallel::clusterEvalQ(cl, suppressMessages(library(didgpu)))
+    # Workers load didgpu from the library this session loaded it from,
+    # not whatever copy their default library path finds first. The
+    # loader must not be a closure over didgpu's namespace: unserializing
+    # one on a worker would load the namespace from the default path
+    # before the loader runs.
+    load_here <- function(lib) {
+      suppressMessages(library("didgpu", lib.loc = lib, character.only = TRUE))
+      NULL
+    }
+    environment(load_here) <- globalenv()
+    parallel::clusterCall(cl, load_here, dirname(find.package("didgpu")))
     parallel::clusterExport(cl, c("df", "args", "seed"),
                              envir = environment())
     # We don't need clusterSetRNGStream — each iter sets its own seed
