@@ -1,0 +1,260 @@
+# Choosing an estimator
+
+didgpu ships with six estimator families. They address closely related but
+substantively different problems, and the right choice depends on three practical
+questions:
+
+1. How is treatment coded? Binary and absorbing (once treated, always treated),
+   binary and non-absorbing (treatment can turn on and off), multivalued
+   (discrete dose levels), or continuous (dose measured on a real scale)?
+2. What identifying assumption are you willing to make? Parallel trends on levels,
+   parallel trends after conditioning on covariates, factor-model
+   counterfactuals, or smoothness in the dose-response function?
+3. What panel structure do you have? Staggered adoption across units, a single
+   treatment date for everyone, or an unbalanced panel?
+
+This chapter walks through those questions in order and helps you land on the
+estimator that fits your application. If you already know what you want, the
+reference table at the end gives the function names, references, and the
+corresponding chapter for each estimator.
+
+## The six estimators
+
+**`didgpu()`** is the heterogeneity-robust dynamic DiD estimator of de
+Chaisemartin and D'Haultfoeuille (2024). It handles binary, multivalued, or
+continuous treatment, with or without absorbing adoption, under staggered timing.
+It returns event-study effects at each post-treatment horizon, placebo estimates
+for the pre-treatment period, and a switcher-weighted average treatment effect
+per unit of treatment. Standard errors are analytic (influence-function based) by
+default, matching `DIDmultiplegtDYN` to machine precision. This is the workhorse
+estimator used in the Quickstart chapter.
+
+**`didgpu_cs()`** is the Callaway and Sant'Anna (2021) estimator. It targets
+`ATT(g, t)`, the average treatment effect on the treated for each adoption cohort
+`g` at each calendar period `t`, under staggered adoption. It takes a
+`control_group` of either `"never"`-treated or `"notyet"`-treated units and an
+`est_method` of `"OR"` (outcome regression), `"IPW"` (inverse propensity
+weighting), or `"DR"` (doubly robust, the default). The estimator can be
+aggregated into event-study, calendar-time, cohort, or overall ATT estimates.
+Standard errors are analytic, matching `did::att_gt(..., bstrap = FALSE)` to
+machine precision. One important point is that `att_gt` defaults to a multiplier
+bootstrap with uniform confidence bands (`bstrap = TRUE`, `cband = TRUE`);
+didgpu's analytic path produces pointwise intervals only.
+
+**`didgpu_fect()`** implements the counterfactual-prediction estimators of Liu,
+Wang, and Xu (2024) and Athey et al. (2021). Rather than differencing treated
+observations against control units, it fits a model on the untreated observations
+and then uses that model to impute how each treated observation would have evolved
+without treatment. There are three methods: `"fe"` (two-way fixed effects),
+`"ife"` (interactive fixed effects with latent factors), and `"mc"` (matrix
+completion). Like `didgpu_did_static()`, it allows treatment to switch on and
+off. The right choice depends on how strong you expect unobserved time-varying
+confounding to be. Standard errors come from a cluster bootstrap with 100
+replications by default; the reference `fect` package defaults to 200.
+
+**`didgpu_did_static()`** is the instantaneous DID_M estimator of de
+Chaisemartin and D'Haultfoeuille (2020). It handles non-absorbing binary
+treatment and targets the instantaneous effect of switching. DID_M assumes no
+dynamic effects: past treatment does not affect current outcomes. If lagged
+effects are plausible, use `didgpu()`, which also handles non-absorbing
+treatment. Standard errors come from a cluster bootstrap with 100 replications by
+default.
+
+**`didgpu_cs_continuous()`** is the continuous-treatment dose-response estimator
+of Callaway, Goodman-Bacon, and Sant'Anna (2024). It estimates both the
+dose-specific average treatment effect on the treated `ATT(d)` and the causal
+response `ACRT(d) = ATT'(d)` as functions of the dose, using a never-treated
+(zero-dose) comparison group. The implementation covers the canonical
+continuous-DiD design with a single treated cohort versus never-treated; staggered
+timing is not currently supported. Identification of `ATT(d)` relies on parallel
+trends; interpreting `ACRT(d)` causally requires a stronger "strong parallel
+trends" assumption. Standard errors come from a multiplier bootstrap with 200
+replications by default.
+
+**`didgpu_did_continuous()`** is didgpu's implementation of a
+continuous-treatment DiD setting in which no units keep their dose unchanged
+between periods. Identification runs through quasi-stayers, units whose dose
+change is close to zero. The function returns `effect(d)` (the effect of a dose
+change `d` measured against quasi-stayers) and `ACR(d)` (the average causal
+response at change `d`) across a grid of dose-change values. Parametric
+(polynomial) and nonparametric (local-linear) estimators are available; the
+nonparametric path is flagged experimental in the help. Standard errors come
+from a multiplier bootstrap with 200 replications by default. The function cites
+de Chaisemartin and D'Haultfoeuille (2024); the natural reference R package for
+this setting is `DIDHAD`.
+
+A note on standard errors across the estimator family. Since version 0.1.2,
+`didgpu()` and `didgpu_cs()` use analytic standard errors computed from each
+estimator's influence functions, matching their reference packages to machine
+precision. The other four estimators still rely on bootstrap resampling. In
+practice, this means `bootstrap_reps` defaults differ by estimator: zero for
+`didgpu()` and `didgpu_cs()`, 100 for `didgpu_fect()` and `didgpu_did_static()`,
+and 200 for both continuous-treatment estimators.
+
+## A decision guide
+
+A practical way to choose an estimator is to work through four questions in
+order. Each one narrows the menu and points toward the design that best matches
+your application.
+
+**Question 1: Is your treatment continuous?**
+
+If the treatment is a real-valued dose (for example, concentration, tax rate,
+dollar amount, or hours), you need one of the two continuous-treatment
+estimators. The choice between them depends on whether you have a clean
+zero-dose comparison group.
+
+- If you have a group of units that always has zero dose and can serve as a
+  never-treated comparison, use **`didgpu_cs_continuous()`**. It estimates the
+  full dose-response curve `ATT(d)` and the causal response `ACRT(d)` across the
+  observed dose range.
+- If no units keep their dose unchanged between periods (a HAD-style setting),
+  use **`didgpu_did_continuous()`**, which identifies effects off quasi-stayers
+  (units with the smallest dose changes) and reports `effect(d)` and `ACR(d)`
+  across a grid of dose-change values.
+
+As a rule of thumb, if you want the full dose-response curve, a zero-dose
+comparison group is usually important. If you only need the effect of a dose
+change against units that barely moved, quasi-stayer identification is often
+sufficient.
+
+If the treatment is not continuous, move on to Question 2.
+
+**Question 2: Can the treatment turn off once it is on?**
+
+If treatment is strictly absorbing (once a unit is treated, it stays treated),
+skip to Question 3.
+
+If treatment can switch off (for example, a policy is adopted and then repealed,
+a subsidy ends, or a certification lapses), you have three main options:
+
+- If you believe past treatment does not affect current outcomes (no dynamic
+effects), use **`didgpu_did_static()`**. It targets the instantaneous effect of
+switching and is the most direct estimator for this setting, but it makes the
+strongest assumption.
+- If lagged treatment effects are plausible, use **`didgpu()`**, which handles
+non-absorbing treatment and allows dynamics.
+- If you suspect strong unobserved time-varying confounding, use
+**`didgpu_fect()`** with `method = "ife"` or `"mc"`. These estimators impute
+counterfactuals from a factor model rather than relying on parallel trends in
+levels.
+
+**Question 3: Is your treatment staggered across units?**
+
+If every treated unit adopts in the same period (or there is only one treated
+unit), classical two-period DiD is usually enough and you do not need didgpu.
+Any standard regression package can handle that case.
+
+If units adopt at different periods, you have two main routes:
+
+- **`didgpu()`** is the dCDH dynamic estimator. It gives you an event-study
+  profile with analytic standard errors that match `DIDmultiplegtDYN` and is the
+  fastest default workflow in didgpu.
+- **`didgpu_cs()`** is the Callaway-Sant'Anna estimator. It gives you a grid of
+  `ATT(g, t)` estimates with multiple aggregation options (event-study, group,
+  calendar, or overall) and matches `did::att_gt` to machine precision under the
+  relevant settings. Choose it when you want an explicit cohort-by-period
+  decomposition.
+
+If you expect strong unobserved time-varying confounding under either approach,
+consider **`didgpu_fect()`** as a robustness check.
+
+**Question 4: Which identifying assumption is credible in your setting?**
+
+The estimators above all require some version of parallel trends to identify a
+causal effect, but they differ in what they allow.
+
+- `didgpu()` and `didgpu_cs()` assume parallel trends in levels, conditional on
+  covariates if you include them. This is the most common assumption in applied
+  DiD.
+- `didgpu_fect()` with `method = "ife"` or `"mc"` relaxes this requirement: a
+  violation of parallel trends can be absorbed by a small number of latent
+  factors.
+- `didgpu_did_static()` adds the stronger assumption that there are no dynamic
+  effects.
+- The two continuous estimators assume parallel trends in first differences.
+  `didgpu_cs_continuous()` assumes parallel trends between dose levels and the
+  zero-dose comparison group. `didgpu_did_continuous()` assumes parallel trends
+  between units with different dose changes, with identification running through
+  units whose dose change is close to zero. The causal-response quantities
+  (`ACRT(d)` and `ACR(d)`) require stronger parallel-trends assumptions than
+  their level counterparts.
+
+Pick the weakest identifying assumption that is credible in your application. If
+parallel trends is clearly implausible and cannot be captured by a small number
+of latent factors, no estimator in didgpu will rescue that design; a different
+research design is needed.
+
+## Reference table
+
+| Function | Reference | Treatment type | Panel structure | Control group | SE default |
+|---|---|---|---|---|---|
+| `didgpu()` | de Chaisemartin and D'Haultfoeuille (2024) | Binary, multivalued, or continuous; absorbing or non-absorbing | Any | Not-yet-switchers with same baseline treatment | Analytic (bootstrap off) |
+| `didgpu_cs()` | Callaway and Sant'Anna (2021) | Binary, absorbing | Staggered adoption | Never-treated or not-yet-treated | Analytic (bootstrap off) |
+| `didgpu_fect()` | Liu, Wang, and Xu (2024); Athey et al. (2021) | Binary, absorbing or non-absorbing | Any | Untreated observations within units | Bootstrap, 100 reps |
+| `didgpu_did_static()` | de Chaisemartin and D'Haultfoeuille (2020) | Binary, non-absorbing | Any | Stayers at same baseline treatment | Bootstrap, 100 reps |
+| `didgpu_cs_continuous()` | Callaway, Goodman-Bacon, and Sant'Anna (2024) | Continuous | Single treated cohort versus never-treated | Never-treated (zero dose) | Bootstrap, 200 reps |
+| `didgpu_did_continuous()` | de Chaisemartin and D'Haultfoeuille (2024) | Continuous | HAD-style: no units with unchanged dose between periods | Quasi-stayers (smallest dose changes) | Bootstrap, 200 reps |
+
+## When to prefer didgpu over the reference R packages
+
+didgpu is a reimplementation of six published estimator families, with two
+practical advantages over the reference packages: GPU acceleration when it is
+available, and per-cell checkpointing for long-running fits. The reference
+packages (`DIDmultiplegtDYN`, `did`, `fect`, `DIDmultiplegt`, `DIDHAD`, and
+`contdid`) remain the authoritative implementations of their respective methods.
+
+didgpu's point estimates match each reference package under matched settings, and
+its analytic standard errors match `DIDmultiplegtDYN` and `did` to machine
+precision. Bootstrap standard errors agree up to simulation noise, since
+bit-for-bit agreement would require identical resampling draws.
+
+Reach for didgpu when:
+
+- You have a large panel and the cluster bootstrap is the bottleneck for an
+  estimator that defaults to bootstrapping (`didgpu_fect()`, `didgpu_did_static()`,
+  or either continuous estimator). Published benchmarks on an RTX 4000 Ada laptop
+  GPU report the CS cluster bootstrap running 100 to 200 times faster than the
+  pure-R path for panels with 40 to 200 units and 8 to 12 periods; see
+  `BENCHMARKS.md` in the package repository for the benchmark specifications.
+- You expect a long-running fit that might be interrupted partway through (for
+  example, by a crash, out-of-memory conditions on a cluster, or an operating
+  system restart). didgpu writes one small file per bootstrap replicate as it
+  runs, so a relaunch can resume from where it left off instead of restarting
+  from scratch.
+- You want to compare multiple estimators on the same panel through one consistent
+  interface. The reference packages use different conventions for column names,
+  argument ordering, and output structure; didgpu's estimators share a common
+  interface inspired by `DIDmultiplegtDYN`.
+
+Reach for the reference packages when:
+
+- You want the authoritative numerical reference, especially in a publication.
+  If you are the first to report an estimate on a given dataset, the reference
+  package often carries more weight with reviewers who are already familiar with
+  it.
+- You need features that didgpu does not expose. The reference packages often
+  provide ancillary helpers, such as specialized plotting or aggregation tools,
+  beyond the core estimator itself.
+- You are already deep in a `did` or `fect` workflow and the marginal benefit of
+  didgpu's speed does not justify learning a new interface.
+
+For most applied workflows, the sensible path is to start with didgpu for speed
+and consistency, confirm the headline numbers against the reference package once
+at the end, and report the reference-package numbers in the paper (or cite both).
+
+## Where to go next
+
+Once you have picked an estimator, the per-estimator chapters cover
+the arguments, options, and worked examples:
+
+- [Dynamic DiD](03-dynamic-did.qmd) for `didgpu()`
+- [Callaway-Sant'Anna](04-callaway-santanna.qmd) for `didgpu_cs()`
+- [FEct, IFEct, and MC](05-fect-ifect-mc.qmd) for `didgpu_fect()`
+- [Static DID_M](06-static-did.qmd) for `didgpu_did_static()`
+- [Continuous treatment](07-continuous-treatment.qmd) for both continuous estimators
+
+For numerical comparisons against each reference package, see the
+parity tests in the package's `tests/testthat/` directory. A
+dedicated verification chapter with side-by-side comparisons is in
+the next documentation batch.

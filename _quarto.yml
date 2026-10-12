@@ -26,6 +26,7 @@ book:
       chapters:
         - chapters/01-installation.qmd
         - chapters/02-quickstart.qmd
+        - chapters/02b-choosing-estimator.qmd
     - part: "Estimators"
       chapters:
         - chapters/03-dynamic-did.qmd

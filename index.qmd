@@ -4,71 +4,126 @@ title: "Welcome"
 
 # Welcome to didgpu {.unnumbered}
 
-**didgpu** is a single R package that gives you five published
-heterogeneity-robust difference-in-differences estimator families,
-each with:
+Modern difference-in-differences work is rarely a single estimator and a
+single model. It is a workflow: choose an identification strategy, estimate a
+panel with treatment timing that may be staggered or heterogeneous, check for
+pre-trends, run bootstraps, compare sensitivity analyses, and often revisit
+trade-offs when the data become large enough to make the naive approach feel
+impossible.
 
-- ⚡ a **CUDA backend** that drops checkpointed bootstrap times from hours to
-  minutes on a single GPU;
-- 💾 **per-cell checkpointing to disk**, so a 12-hour cluster bootstrap that
-  crashes at hour 11 resumes from cell 10,994 instead of starting over;
-- 🎯 **bit-for-bit numerical equivalence** with the reference R packages
-  (`DIDmultiplegtDYN`, `did`, `fect`, ...) verified by a continuous
-  randomized differential-test suite of tens of thousands of panels.
+That is where `didgpu` comes in.
 
-You can use any of the estimators from a single, consistent interface, mix
-GPU and CPU backends per call, and resume any long-running fit after a
-crash, an OOM, or a reboot.
+`didgpu` is a GPU-capable R package for applied DiD research that brings six
+published estimator families under one consistent interface. It is built for
+researchers who want the credibility of the modern DiD literature without the
+pain of stitching together multiple packages, each with its own output
+conventions, startup costs, and idiosyncratic bootstrap behavior.
 
-## The five estimator families
+The package is designed around three principles:
+
+- Credibility: the estimators are implemented against the reference
+  literature and cross-checked against the established R packages that define
+  the benchmark for applied work.
+- Speed: when inference is the bottleneck, the optional CUDA backend can
+  reduce the cost of cluster-bootstrap workloads on supported hardware.
+- Reliability: long-running bootstrap fits can be checkpointed and resumed,
+  avoiding the all-too-common loss of an entire overnight run.
+
+A GPU is not required. Every estimator has a pure-R and Rcpp fallback, and
+`didgpu` is designed to run cleanly in both CPU-only and CUDA-enabled
+settings. The package is also built to behave appropriately in CRAN-style
+validation environments, where GPU support is not assumed.
+
+## Why didgpu exists
+
+If you have used modern DiD methods in practice, you already know the
+frustration: the method is compelling, but the implementation story is often
+fragmented. Some estimators live in one package, some in another, some are
+only available as research code, and many demand custom workflows for
+bootstrap inference, sensitivity checks, and repeated runs.
+
+`didgpu` consolidates the main modern DiD families into a single package with
+one interface, one set of conventions, and one place to compare results on the
+same panel.
+
+That matters because the applied research question is often not “which one is
+best in the abstract?” but “which estimator is best suited to this design,
+and can I estimate it at scale without rewriting my workflow?”
+
+## The six estimator families
 
 | Family | Function | Reference |
 |---|---|---|
-| Dynamic, heterogeneity-robust DiD | `didgpu()` | de Chaisemartin & D'Haultfoeuille (2024) |
-| Callaway-Sant'Anna staggered DiD | `didgpu_cs()` | Callaway & Sant'Anna (2021) |
-| Fixed-effects counterfactual (FEct/IFEct/MC) | `didgpu_fect()` | Liu, Wang & Xu (2024); Athey et al. (2021) |
-| Instantaneous DID_M (non-absorbing binary) | `didgpu_did_static()` | de Chaisemartin & D'Haultfoeuille (2020) |
-| Continuous treatment, no stayers | `didgpu_did_continuous()` | de Chaisemartin & D'Haultfoeuille (2024) |
+| Dynamic, heterogeneity-robust DiD | `didgpu()` | de Chaisemartin and D'Haultfoeuille (2024) |
+| Callaway-Sant'Anna staggered DiD | `didgpu_cs()` | Callaway and Sant'Anna (2021) |
+| Fixed-effects counterfactual (FEct, IFEct, MC) | `didgpu_fect()` | Liu, Wang, and Xu (2024); Athey et al. (2021) |
+| Instantaneous DID_M (non-absorbing binary) | `didgpu_did_static()` | de Chaisemartin and D'Haultfoeuille (2020) |
+| Continuous treatment dose-response | `didgpu_cs_continuous()` | Callaway, Goodman-Bacon, and Sant'Anna (2024) |
+| Continuous treatment, no stayers | `didgpu_did_continuous()` | de Chaisemartin and D'Haultfoeuille (2024) |
 
-Each one has a chapter in this book.
+This is not merely a package of aliases. Each estimator is implemented as a
+first-class workflow, with its own identification logic, diagnostic tools, and
+inference machinery. The goal is not to force one estimator into one shape,
+but to make the comparison across settings easier, faster, and more
+transparent.
 
-## Why "GPU"?
+The [Choosing an estimator](chapters/02b-choosing-estimator.qmd) chapter walks
+through the decision process for a given application.
 
-The CUDA backend isn't a gimmick — it is the difference between a
-bootstrap-CI workflow that's iterated overnight and one you can re-run
-in the time it takes to refill a coffee mug. On a single RTX-class card
-the typical speedup is **10×–100×** for the cluster bootstrap and
-**5×–30×** for the per-cell DID kernel, depending on panel size.
+## What makes it practical
 
-**You do not need a GPU to use didgpu.** All five estimators have pure-R
-and Rcpp fallbacks; the GPU backend is optional and detected at install
-time. CRAN's build farm does not have a GPU and the package still
-installs and runs correctly there.
+### Speed where it matters
 
-## Why "checkpointed"?
+Cluster bootstrap inference is usually the dominant computational cost in
+modern DiD workflows. For large panels, the pure-R implementation is already
+credible and flexible, but the optional CUDA backend brings a substantial
+reduction in the time needed for repeated inference.
 
-Long bootstrap runs *will* die at some point — OOM, power outage,
-Windows update reboot, network blip on a slurm node. didgpu writes one
-small RDS file per bootstrap replicate. If the run dies, you re-launch
-exactly the same command and it picks up from where it stopped. No code
-changes, no `tryCatch` plumbing, no babysitting.
+In benchmarked settings, the GPU path has been observed to achieve:
+
+- roughly 10x to 100x speedups for cluster-bootstrap workloads
+- roughly 5x to 30x speedups for the per-cell DID kernel
+
+Performance depends on panel size, number of covariates, and the number of
+bootstrap replicates. See `BENCHMARKS.md` for the hardware and panel
+configurations behind these numbers.
+
+### Resilience for long runs
+
+Long cluster bootstraps fail for reasons that are all too familiar: out-of-memory
+errors, machine restarts, interrupted jobs, or a process killed by a scheduler.
+Instead of forcing a complete restart, `didgpu` can checkpoint every completed
+bootstrap replicate to disk and resume from the last completed state.
+
+This is more than a convenience feature. It is a practical reliability layer for
+applied work where an overnight job should not become a lost day.
+
+### Numerical credibility
+
+`didgpu` is designed around numerical parity with the reference packages in the
+DiD ecosystem. Under matched settings, point estimates align to machine
+precision with packages such as `DIDmultiplegtDYN`, `did`, and related
+implementations. Analytic standard errors agree closely, and bootstrap
+standard errors match up to simulation noise.
+
+This is important because performance is not the only bar. A faster estimator is
+not useful if it drifts materially from the benchmark software researchers use
+for validation.
 
 ## How to read this book
 
-- **Part I (Getting Started)** — install the package, run your first
-  estimator. Start here if you've never used didgpu.
-- **Part II (Estimators)** — one chapter per estimator family. Each
-  chapter shows the math behind it, the function signature, common
-  options, and an end-to-end worked example.
-- **Part III (Advanced)** — GPU setup, sensitivity analysis,
-  reproducibility/checkpointing, bootstrap variants. Reach for these
-  once you're comfortable with at least one estimator.
-- **Part IV (Reference)** — methodology notes (the math), FAQ, and the
-  changelog.
+- **Part I (Getting Started).** Install the package, run your first
+  estimator, and work through the decision guide for which estimator fits
+  your application.
+- **Part II (Estimators).** One chapter per estimator family, covering the
+  function signature, identifying assumptions, options, and a worked example.
+- **Part III (Advanced).** GPU setup, checkpointing, reproducibility,
+  sensitivity analysis, and bootstrap variants.
+- **Part IV (Reference).** Methodology notes, FAQ, and changelog.
 
 ## Cite
 
-If didgpu played a role in published work, please cite both this
+If `didgpu` played a role in your published work, please cite both the
 package and the relevant method papers:
 
 ```{r citation, eval=FALSE}
@@ -76,23 +131,22 @@ citation("didgpu")
 ```
 
 ::: {.callout-tip}
-The package print method always reminds you which method paper goes
-with the estimator you just ran. There is a one-line `citation()` for
-each estimator family.
+The package print method prints the citation for the method paper
+corresponding to the estimator you ran. Each estimator family has a
+one-line `citation()` entry.
 :::
 
 ## Status
 
-didgpu is actively maintained. Source and issue tracker:
+`didgpu` is actively maintained and available from the project repository:
 <https://github.com/JoshuaAmmons/didgpu>.
 
-The package's numerical correctness against the reference R packages is
-re-tested on every push via a large randomized differential testing
-suite. The current status badge:
+Numerical correctness is re-tested on every push with a randomized
+comparative-testing suite. The current status badge:
 
 ```
-✅ Last full sweep: ~17,000 informative comparisons, 0 failures
-✅ Main 1285-case battery (all backends, all flags): clean
-✅ Bit-for-bit equivalence with DIDmultiplegtDYN 2.3.x across the
-   weighted x flag matrix
+Last full sweep: ~17,000 informative comparisons, 0 failures
+Main 1285-case battery (all backends, all flags): clean
+Bit-for-bit equivalence with DIDmultiplegtDYN 2.3.x across the
+weighted-by-flag matrix
 ```

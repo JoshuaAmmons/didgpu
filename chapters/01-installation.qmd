@@ -1,115 +1,199 @@
----
-title: "Installation"
----
-
 # Installation
 
-didgpu is on CRAN and on r-universe. Pick whichever lane you prefer.
+didgpu installs from CRAN in one line. Most users will not need to do anything
+beyond that. If you want the latest development commit, or if you have an NVIDIA
+GPU and want the CUDA-accelerated backend, keep reading.
+
+## Which install path to use
+
+| Situation | Install path |
+| --------- | ------------ |
+| You want to use the package | `install.packages("didgpu")` (CRAN) |
+| You want features not yet on CRAN | r-universe (below) |
+| You have an NVIDIA GPU and plan to run large cluster bootstraps | Source install with CUDA (below) |
+
+The CPU backend powers all the estimators in this book and passes all tests. The
+GPU backend is a performance optimization for one particular estimator: large
+cluster bootstraps, where it can be 100-200x faster than the pure-R path. For
+point estimates and smaller panels, the two are usually within a few percent of
+each other. Install CUDA only if you are going to benefit from it.
+
+## Prerequisites
+
+Before installing didgpu, make sure you have:
+
+- R 4.1 or newer. Check that you have it by running `R --version` in a terminal
+  or `R.version.string` in R. If you do not have it, download it from
+  <https://cran.r-project.org>.
+- A working C++ compiler for the Rcpp backend.
+- macOS: install the command line tools with `xcode-select --install` in
+  Terminal.
+- Linux: `build-essential` on Debian/Ubuntu or the Development Tools group on
+  Fedora/RHEL.
+- Windows: install Rtools45 from <https://cran.r-project.org/bin/windows/Rtools/>.
+  You need Rtools only when installing from source.
+- Optional for the GPU backend: NVIDIA CUDA Toolkit 12.0 or newer with cuBLAS
+  and cuSOLVER.
+- Optional for the GPU backend: a CUDA-capable GPU with `sm_75` or higher
+  compute capability (see below).
+
+The CUDA Toolkit can be downloaded from
+<https://developer.nvidia.com/cuda-downloads>.
 
 ## From CRAN (recommended)
 
-```{r install-cran, eval=FALSE}
+```r
 install.packages("didgpu")
 ```
 
-This gets you the pure-R and Rcpp backends. They are sufficient for
-every estimator in this book; the chapters that follow do not require
-GPU.
+This installs the pure-R and Rcpp backends, which power all the estimators in
+this book. This is all you need to run didgpu.
 
-## From r-universe (newest)
+## From r-universe (development version)
 
-If you want the latest commit on `main` before it lands on CRAN:
+If you want the latest commit on `main` before it is released on CRAN:
 
-```{r install-runiverse, eval=FALSE}
+```r
 install.packages(
   "didgpu",
   repos = c("https://joshuaammons.r-universe.dev", "https://cloud.r-project.org")
 )
 ```
 
-## From source (with GPU support)
+r-universe offers binary packages for macOS, Windows, and Linux, so you get the
+latest features without having to build from source.
 
-If you have an NVIDIA GPU and the CUDA Toolkit installed, install from
-source to compile the GPU kernels:
+## From source with GPU support
 
-```{r install-source, eval=FALSE}
-# (1) Set CUDA_HOME or CUDA_PATH to point at your CUDA install:
-Sys.setenv(CUDA_HOME = "/usr/local/cuda")             # Linux
-# or
-Sys.setenv(CUDA_PATH = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2")  # Windows
+If you have an NVIDIA GPU and the CUDA Toolkit installed, the source install
+compiles the CUDA kernels.
 
-# (2) Then install from source:
-install.packages("didgpu", type = "source")           # CRAN source
-# -- or --
-remotes::install_github("JoshuaAmmons/didgpu")        # GitHub head
+What to expect on a Mac without CUDA. When I installed didgpu on my M1
+MacBook, the configure script printed `CUDA toolkit not found. Building CPU-only.` right in the middle of the compiler output, and I thought the install had failed. It had not. On any Mac (and on any machine without an NVIDIA GPU), that message is the expected path: the package builds the CPU backends and skips the GPU one, and the install finishes cleanly a few seconds later with `* DONE (didgpu)`. If you see the CUDA-not-found line and no `ERROR` after it, you are fine.
+
+Step 1. Tell R where to find your CUDA installation:
+
+```r
+# Linux
+Sys.setenv(CUDA_HOME = "/usr/local/cuda")
+
+# Windows
+Sys.setenv(CUDA_PATH = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2")
 ```
 
-didgpu's configure script will print a one-line confirmation at install
-time telling you whether it found CUDA:
+Step 2. Install from source:
 
+```r
+# From CRAN source
+install.packages("didgpu", type = "source")
+
+# Or from GitHub head
+remotes::install_github("JoshuaAmmons/didgpu")
 ```
-*** didgpu configure ***
-  CUDA toolkit detected: /usr/local/cuda
-  -> Building WITH GPU support.
-     backends available after install: 'r', 'cpu', 'cuda'
+
+didgpu's configure script emits a one-line status message at install time,
+telling you whether CUDA was found:
+
+```text
+didgpu configure
+CUDA toolkit detected: /usr/local/cuda
+-> Building WITH GPU support.
+backends available after install: 'r', 'cpu', 'cuda'
 ```
 
-If CUDA is not found, the install still succeeds — only the `r` and
-`cpu` backends are compiled and `backend = "cuda"` returns an
-informative error at runtime. There is no CRAN-style ERROR or WARNING
-during install in that case.
+If CUDA is not found, the installation proceeds, but only the `r` and `cpu`
+backends are built. There is no error, warning, or message. If
+`backend = "cuda"` is called later, it will return an informative error.
 
-::: {.callout-note}
-## "Did the GPU build actually work?"
+## Verify your install
 
-After install, the fastest way to check is:
+No matter how you installed didgpu, verify that it works:
 
-```{r check-cuda, eval=FALSE}
+```r
 library(didgpu)
+packageVersion("didgpu")
+#> [1] '0.1.2'
+```
+
+If these two lines run without errors, the pure-R and Rcpp backends are
+installed.
+
+To check whether the GPU backend is available:
+
+```r
 didgpu_has_cuda_support()
 #> [1] TRUE
 ```
 
-If you see `TRUE`, you can pass `backend = "cuda"` to any of the
-estimator functions in this book. If you see `FALSE`, didgpu still
-works in pure-R / Rcpp; only the GPU acceleration is unavailable.
-:::
+A `TRUE` value means that you can pass `backend = "cuda"` to any estimator in
+didgpu. If you get `FALSE`, it means that either your system does not have CUDA
+installed or didgpu was not built with CUDA support.
 
 ## Supported GPUs
 
-didgpu compiles for compute capabilities **sm_75** through **sm_120**,
-which covers:
+didgpu supports GPUs with CUDA compute capabilities from `sm_75` to `sm_120`:
 
 | Architecture | Compute capability | Example cards |
-|---|---|---|
-| Turing | sm_75 | RTX 20-series, T4, GTX 16-series |
-| Ampere (data center) | sm_80 | A100 |
-| Ampere (desktop) | sm_86 | RTX 30-series |
-| Ada Lovelace | sm_89 | RTX 40-series, RTX 4000 Ada |
-| Hopper | sm_90 | H100 |
-| Blackwell | sm_120 | RTX PRO Blackwell, RTX 50-series |
+| ------------ | ----------------- | ------------- |
+| Turing | `sm_75` | RTX 20-series, T4, GTX 16-series |
+| Ampere (data center) | `sm_80` | A100 |
+| Ampere (desktop) | `sm_86` | RTX 30-series |
+| Ada Lovelace | `sm_89` | RTX 40-series, RTX 4000 |
+| Hopper | `sm_90` | H100 |
+| Blackwell | `sm_120` | RTX PRO Blackwell, RTX 50-series |
 
-There is also a `compute_120` PTX target so newer Blackwell-and-after
-cards JIT-compile from PTX cleanly.
+A `compute_120` PTX target is included so that newer Blackwell-and-beyond cards
+can JIT-compile the PTX directly.
 
 ## System requirements
 
-* R ≥ 4.1
-* On Linux/macOS: GNU make (already on most systems)
-* On Windows: [Rtools45](https://cran.r-project.org/bin/windows/Rtools/)
-  (only when building from source)
-* **Optional** for GPU: NVIDIA CUDA Toolkit ≥ 12.0 with cuBLAS, cuSOLVER,
-  cuRAND
+- R ≥ 4.1
+- On Linux and macOS: GNU make (already present on most systems)
+- Windows: Rtools45, only when building from source
+- Optional for GPU: NVIDIA CUDA Toolkit ≥ 12.0 with cuBLAS, cuSOLVER, cuRAND
 
-CUDA is *optional*. The package builds, installs, and passes its full
-test suite without it.
+## Dependencies
 
-## What didgpu installs alongside
+didgpu has a small set of suggested and imported packages: `data.table`,
+`Rcpp`, `RcppEigen`, `MASS`, `sandwich`, and `jsonlite`.
 
-didgpu depends on a small, stable set of packages — `data.table`,
-`Rcpp`/`RcppEigen`, `MASS`, `sandwich`, `jsonlite`. It deliberately does
-**not** import `polars` or any of the reference packages it benchmarks
-against; those are in `Suggests` and only loaded when you ask for the
-`backend = "reference"` parity mode (used for testing).
+The reference packages that didgpu benchmarks against are listed in Suggests, not
+Imports: `did`, `DIDmultiplegtDYN`, `DIDmultiplegt`, `fect`, `HonestDiD`, and
+`DRDID`. They are only loaded when `backend = "reference"` is used (for
+bit-for-bit reproducibility in testing). If you want to run benchmarks, install
+the suggested packages:
 
-Go to the next chapter to fit your first model.
+```r
+install.packages(c("did", "DIDmultiplegtDYN", "fect", "HonestDiD"))
+```
+## Common install failures
+
+- macOS: `xcrun: error: invalid active developer path`. Xcode command line tools
+  are missing. Install them by running `xcode-select --install` in Terminal and
+  try again.
+- macOS: `ld: unsupported tapi file type`. You have newer Command Line Tools
+  installed than R was built with. Upgrade R to the latest version from
+  https://cran.r-project.org/bin/macosx/.
+- macOS: architecture mismatch. If you have an M1, M2, M3, or M4, the arm64
+  version of R is recommended. Check by running `Sys.info()[["machine"]]` in
+  R. If it returns `"x86_64"`, it means you have the wrong version of R
+  installed. Uninstall and reinstall the arm64 version.
+- Windows: `make: command not found` or Rtools errors. Rtools is not installed or
+  not on your PATH. Download and install Rtools45 from
+  https://cran.r-project.org/bin/windows/Rtools/.
+- Any OS: `configure: error: CUDA toolkit not found` when you intended to build
+  with CUDA support. The configure script could not find `nvcc`. Set
+  `CUDA_HOME` on Linux/macOS or `CUDA_PATH` on Windows to the root directory of
+  the CUDA installation and try again.
+
+## Reporting an install problem
+
+If you have an installation problem that is not listed above, please file an issue at https://github.com/JoshuaAmmons/didgpu/issues with the following information:
+
+- The output of `sessionInfo()` in R
+- The output of `Sys.getenv(c("CUDA_HOME", "CUDA_PATH"))`
+- The log file from the installation, particularly the lines printed after `install.packages(...)` failed. The lines starting with `didgpu: configure:` are especially useful if you are trying to install the GPU backend.
+
+## Next step
+
+Now that you have installed didgpu, proceed to the [Quick start](02-quickstart.qmd) to fit your first model.
