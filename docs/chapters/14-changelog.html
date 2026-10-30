@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.10.19">
+<meta name="generator" content="quarto-1.10.20">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -42,14 +42,14 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-00b49ed09541ff213a6fdaa504b9df85.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-d23cdb75c50f63ab8f522ede76951a6a.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-00b49ed09541ff213a6fdaa504b9df85.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-037217e6c28d56c71b2632f2f9eb880c.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-26686b57f204b6f573f201fd657d32b1.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-037217e6c28d56c71b2632f2f9eb880c.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-47f0e91ac97aa71346b22896bf7e5fb1.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-5917569cdc2ff7b71ee3dfe88fba2903.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="../site_libs/bootstrap/bootstrap-47f0e91ac97aa71346b22896bf7e5fb1.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-00d368c6e1366a14cff04419aaf4fc7a.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-844e1678674bb9e9f4d702db5900df4b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-00d368c6e1366a14cff04419aaf4fc7a.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -597,6 +597,8 @@ CPU-only build  Status: OK</code></pre>
 <ul>
 <li><strong>Analytic standard errors with <code>controls</code>, <code>continuous</code> and <code>trends_lin</code>.</strong> These were NA unless a bootstrap was run. With controls, the influence function now carries the reference’s correction for the estimated control coefficients (<code>part2_switch</code>, for effects and placebos); under <code>trends_lin</code> the event-time variance terms are summed as the estimates are. Both match the reference to ~1e-16, as do the joint tests.</li>
 <li><strong><code>trends_lin</code> placebos were wrong</strong> (by up to 0.28 on test panels): the reference forces both <code>same_switchers</code> and <code>same_switchers_pl</code> on each <code>trends_lin</code> placebo, and didgpu applied only the first.</li>
+<li><strong><code>continuous</code> on a long panel crashed</strong> with “object ‘diff_y_k_XX’ not found”. It adds one period-by-baseline control per period (331 on a 332-week panel); with their differences and residuals the working table ran out of data.table’s preallocated column slots, and from then on <code>:=</code> inside a function added columns to a copy the caller never saw. didgpu now reserves the slots it needs. A very wide input data frame (1,000+ columns) hit the same failure on any backend.</li>
+<li><strong>A control that never varies was accepted silently.</strong> A control constant within every group (its first difference is 0) or moving only with the period made didgpu return the no-control estimate; the reference’s control regression (<code>fixest::feols</code>) stops, and didgpu now stops with the same error. A degenerate control alongside a varying one runs, as in the reference.</li>
 <li><strong>A CUDA kernel that failed on the device failed the fit.</strong> Out of memory on a shared GPU (“CUDA DID kernel failed with code 2”) now computes that fit on the CPU kernel, which gives the same numbers, and says so; the same for <code>didgpu_fect()</code>’s CUDA demeaning. Other errors still stop the fit.</li>
 <li><strong>Clustered standard errors dropped a group whose first period was missing.</strong> A group’s cluster was read from its first row, which for a late entrant is a balancing fill-in with no cluster, so the group fell out of the clustered variance (0.117 vs the reference’s 0.178 on a test panel). It is now the group’s first non-missing cluster.</li>
 <li><strong>A missing control dropped too little.</strong> The reference removes every row with a missing control before anything else; didgpu kept the row’s outcome, which moved estimates (0.328 vs 0.373 on a test panel).</li>
