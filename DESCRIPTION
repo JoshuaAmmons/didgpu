@@ -44,6 +44,7 @@ Suggests:
     DRDID,
     eventstudyr,
     fect,
+    fixest,
     ggplot2,
     HonestDiD,
     openxlsx,
