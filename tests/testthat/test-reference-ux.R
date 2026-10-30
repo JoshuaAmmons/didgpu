@@ -120,7 +120,7 @@ test_that("the remaining reference options give the reference's numbers", {
     if (!is.null(a$r$results$predict_het)) {
       expect_equal(as.matrix(g$r$results$predict_het[, 3:9]),
                    as.matrix(a$r$results$predict_het[, 3:9]), tolerance = 1e-10,
-                   check.attributes = FALSE)
+                   ignore_attr = TRUE)
     }
     expect_identical(.print_gpu(g$r), .print_ref(a$r), label = lab)
   }
@@ -205,5 +205,49 @@ test_that("reset and avg_time_periods match DIDmultiplegtDYN 2.4.0", {
     expect_equal(g$r$avg_cumul, a$r$avg_cumul, tolerance = 1e-12, label = lab)
     expect_true(all(setdiff(names(a$r), "args") %in% names(g$r)), label = lab)
     expect_identical(.print_gpu(g$r), .print_ref(a$r), label = lab)
+  }
+})
+
+test_that("a control that never varies stops as the reference does", {
+  # The reference's control regression (fixest::feols) refuses a control
+  # whose first difference is always 0 or only moves with the period;
+  # didgpu used to return the no-control estimate instead.
+  df <- .ux_panel()
+  df$x_const <- rep(stats::rnorm(length(unique(df$g))), each = length(unique(df$t)))
+  df$x_time <- df$t * 0.3
+  for (ctl in list("x_const", "x_time", c("x_const", "x1"))) {
+    a <- .ref(df, effects = 3, placebo = 1, controls = ctl)
+    for (b in c("r", "cpu")) {
+      g <- .gpu(df, effects = 3, placebo = 1, controls = ctl, backend = b)
+      expect_identical(g$out, a$out, label = paste(b, paste(ctl, collapse = "+")))
+      if (!is.null(a$r)) {
+        expect_equal(unname(g$r$results$Effects[, 1:2]), unname(a$r$results$Effects[, 1:2]),
+                     tolerance = 1e-10)
+      }
+    }
+  }
+})
+
+test_that("fits survive data.table running out of preallocated column slots", {
+  # With few spare column slots, `:=` inside a function silently adds
+  # the column to a copy, and the next step failed with "object
+  # 'diff_y_k_XX' not found" -- `continuous` on a 332-week panel (331
+  # period-by-baseline controls) got there with the default 1024 slots.
+  # A tiny allocation reproduces it on a small panel.
+  old <- options(datatable.alloccol = 4L); on.exit(options(old), add = TRUE)
+  set.seed(4); G <- 60; T <- 9
+  F <- sample(c(3:7, 99), G, replace = TRUE)
+  base <- round(stats::runif(G, 0, 3), 2); jump <- stats::runif(G, .5, 1.5)
+  df <- data.frame(g = rep(seq_len(G), each = T), t = rep(seq_len(T), G))
+  df$d <- base[df$g] + ifelse(df$t >= F[df$g], jump[df$g], 0)
+  df$y <- stats::rnorm(nrow(df)) + 0.4 * df$d
+  a <- .ref(df, effects = 3, placebo = 1, continuous = 1)
+  g <- .gpu(df, effects = 3, placebo = 1, continuous = 1L)
+  expect_false(any(grepl("^E:", g$out)))
+  expect_equal(unname(g$r$results$Effects[, 1:2]), unname(a$r$results$Effects[, 1:2]),
+               tolerance = 1e-10)
+  for (b in c("r", "cpu")) {
+    g2 <- .gpu(.ux_panel(), effects = 3, placebo = 1, backend = b)
+    expect_false(any(grepl("^E:", g2$out)), label = b)
   }
 })

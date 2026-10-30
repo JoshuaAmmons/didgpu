@@ -516,6 +516,10 @@
                                                    type = "lag"),
     by = group_XX]
 
+  # Every backend adds scratch columns to this table by reference; make
+  # sure there are free column slots for them however wide the user's
+  # data is (see the note in .backend_r_impl).
+  data.table::setalloccol(d, 1024L)
   d
 }
 
@@ -2149,15 +2153,31 @@
     # block — the polynomial baseline becomes additional regressors.
     auto_ctrl <- attr(prepped, "didgpu_auto_controls")
     eff_controls <- unique(c(args$controls, auto_ctrl))
+    # Everything below adds columns to `prepped` by reference: the control
+    # step about four per control, each event time its scratch columns.
+    # Once data.table runs out of pre-allocated column slots, `:=` inside
+    # a function adds the column to a copy the caller never sees, and the
+    # next step fails with "object 'diff_y_k_XX' not found". `continuous`
+    # on a long panel gets there: one period-by-baseline control per
+    # period (331 on a 332-week panel). Reserve the room first.
+    data.table::setalloccol(prepped, 4L * length(eff_controls) + 1024L)
     prefit <- if (length(eff_controls) > 0L) {
       .prefit_controls(prepped, eff_controls)
     } else NULL
+    data.table::setalloccol(prepped, 1024L)
     if (!is.null(prefit) && iter_seed == 0L) {
       prefit$se <- .controls_se_prep(prepped, prefit)
     }
-    pre_notes <- if (!is.null(prefit) && iter_seed == 0L) {
+    pre <- if (!is.null(prefit) && iter_seed == 0L) {
       .controls_na_notes(prepped, eff_controls)
-    } else character(0)
+    } else list(notes = character(0), error = NULL)
+    # The reference stops on a degenerate control regression, after the
+    # notes it has already printed.
+    if (!is.null(pre$error)) {
+      for (n in pre$notes) message(n)
+      stop(pre$error, call. = FALSE)
+    }
+    pre_notes <- pre$notes
     # Auto-clamp to the feasible horizons, matching the reference.
     sw   <- args$switchers %||% ""
     ons  <- isTRUE(args$only_never_switchers)

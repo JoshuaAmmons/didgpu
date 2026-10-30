@@ -112,6 +112,19 @@ reference backend now use 4 replications.
 - **`trends_lin` placebos were wrong** (by up to 0.28 on test panels):
   the reference forces both `same_switchers` and `same_switchers_pl` on
   each `trends_lin` placebo, and didgpu applied only the first.
+- **`continuous` on a long panel crashed** with "object 'diff_y_k_XX'
+  not found". It adds one period-by-baseline control per period (331 on
+  a 332-week panel); with their differences and residuals the working
+  table ran out of data.table's preallocated column slots, and from
+  then on `:=` inside a function added columns to a copy the caller
+  never saw. didgpu now reserves the slots it needs. A very wide input
+  data frame (1,000+ columns) hit the same failure on any backend.
+- **A control that never varies was accepted silently.** A control
+  constant within every group (its first difference is 0) or moving only
+  with the period made didgpu return the no-control estimate; the
+  reference's control regression (`fixest::feols`) stops, and didgpu now
+  stops with the same error. A degenerate control alongside a varying
+  one runs, as in the reference.
 - **A CUDA kernel that failed on the device failed the fit.** Out of
   memory on a shared GPU ("CUDA DID kernel failed with code 2") now
   computes that fit on the CPU kernel, which gives the same numbers, and

@@ -197,11 +197,12 @@
 #' @noRd
 .controls_na_notes <- function(prepped, controls) {
   K <- length(controls)
-  if (K == 0L) return(character(0))
+  none <- list(notes = character(0), error = NULL)
+  if (K == 0L) return(none)
   d <- prepped
   dx_cols <- paste0("diff_X_", seq_len(K), "_XX")
   if (!all(c(dx_cols, "fd_X_all_non_missing_XX", "ever_change_d_XX") %in% names(d))) {
-    return(character(0))
+    return(none)
   }
   fmt <- function(n) format(n, big.mark = ",", scientific = FALSE, trim = TRUE)
   notes <- character(0)
@@ -220,15 +221,71 @@
     # The balancing fill-in rows have no weight in the reference.
     wts <- if ("no_wt_XX" %in% names(d)) d$no_wt_XX[reg] else logical(sum(reg))
     n <- sum(lhs | rhs | wts)
-    if (n == 0L) next
-    parts <- c(if (any(lhs)) paste0("LHS: ", fmt(sum(lhs))),
-               if (any(rhs)) paste0("RHS: ", fmt(sum(rhs))),
-               if (any(wts)) paste0("Weights: ", fmt(sum(wts))))
-    notes <- c(notes, sprintf("NOTE: %s observation%s removed because of NA values (%s).",
-                              fmt(n), if (n == 1L) "" else "s",
-                              paste(parts, collapse = ", ")))
+    if (n > 0L) {
+      parts <- c(if (any(lhs)) paste0("LHS: ", fmt(sum(lhs))),
+                 if (any(rhs)) paste0("RHS: ", fmt(sum(rhs))),
+                 if (any(wts)) paste0("Weights: ", fmt(sum(wts))))
+      notes <- c(notes, sprintf("NOTE: %s observation%s removed because of NA values (%s).",
+                                fmt(n), if (n == 1L) "" else "s",
+                                paste(parts, collapse = ", ")))
+    }
+    # fixest refuses the regression when no control varies beyond the
+    # period effects -- e.g. a control constant within every group, whose
+    # first difference is 0 -- and so does the reference (main.R:554).
+    err <- .controls_feols_error(d, reg, !(lhs | rhs | wts), dx_cols, n > 0L)
+    if (!is.null(err)) return(list(notes = notes, error = err))
   }
-  notes
+  list(notes = notes, error = NULL)
+}
+
+# The error fixest::feols raises on the reference's control regression
+# for one baseline level, or NULL when it runs. A cheap check finds the
+# degenerate case -- every control either 0 throughout (with rows lost to
+# NAs) or collinear with the period effects; only then is feols itself
+# called, in the reference's own words (`feols(form, data = data_reg,
+# weights = data_reg$weight_XX)`), so the message is fixest's verbatim.
+.controls_feols_error <- function(d, reg, keep, dx_cols, had_na) {
+  ok <- which(reg)[keep]
+  if (!length(ok)) return(NULL)
+  X <- as.matrix(d[ok, dx_cols, with = FALSE])
+  w <- d$N_gt_XX[ok]; tt <- d$time_XX[ok]
+  all_zero <- all(X == 0)
+  dm <- apply(X, 2L, function(v) v - stats::ave(v * w, tt, FUN = sum) /
+                                      stats::ave(w, tt, FUN = sum))
+  if (is.null(dim(dm))) dm <- matrix(dm, ncol = ncol(X))
+  ss <- colSums(w * X^2); ss_dm <- colSums(w * dm^2)
+  collinear <- ss_dm <= 1e-10 * pmax(ss, .Machine$double.xmin)
+  if (!(all_zero && had_na) && !all(collinear)) return(NULL)
+  names_ref <- paste0("diff_X", seq_along(dx_cols), "_XX")
+  if (requireNamespace("fixest", quietly = TRUE)) {
+    data_reg <- data.frame(diff_y_XX = d$diff_y_XX[reg],
+                           stats::setNames(as.data.frame(d[reg, dx_cols, with = FALSE]), names_ref),
+                           time_FE_XX = d$time_XX[reg],
+                           weight_XX = if ("no_wt_XX" %in% names(d))
+                                         ifelse(d$no_wt_XX[reg], NA_real_, d$N_gt_XX[reg])
+                                       else d$N_gt_XX[reg])
+    form <- stats::as.formula(paste("diff_y_XX ~", paste(names_ref, collapse = " + "),
+                                    "- 1 | time_FE_XX"))
+    env <- list2env(list(feols = fixest::feols, form = form, data_reg = data_reg))
+    msg <- tryCatch({
+      suppressMessages(eval(quote(feols(form, data = data_reg, weights = data_reg$weight_XX)), env))
+      NULL
+    }, error = function(e) conditionMessage(e))
+    return(msg)
+  }
+  head <- "in feols(form, data = data_reg, weights = data_reg$w...: \n"
+  if (all_zero && had_na) {
+    return(paste0(head, "After removing NAs, not a single explanatory variable is different from 0."))
+  }
+  q <- sprintf("'%s'", names_ref)
+  if (length(q) == 1L) {
+    paste0(head, "The only variable, ", q, ", is collinear with the fixed effects.\n",
+           "Without doubt, your model is misspecified.")
+  } else {
+    paste0(head, "All variables, ", paste(utils::head(q, -1L), collapse = ", "), " and ",
+           utils::tail(q, 1L), ", are collinear with the fixed effects.\n",
+           "Without doubt, your model is misspecified.")
+  }
 }
 
 
